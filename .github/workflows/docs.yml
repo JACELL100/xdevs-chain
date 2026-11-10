@@ -1,17 +1,12 @@
 name: docs
 
 # Builds the VitePress docs site and landing page (apps/docs) on every PR and push to main
-# that touches it. `vitepress build` fails on dead internal links, so this is also the link
-# check.
+# that touches it (`vitepress build` fails on dead internal links, so this is also the link
+# check), and deploys main to Cloudflare Pages: project `xdevs-chain-docs`, served at
+# https://xdevschain.xdevs.in.
 #
-# Deploying to GitHub Pages is optional and manual only (Actions -> docs -> Run workflow,
-# tick "deploy"). The recommended host is Cloudflare Pages (see apps/docs/README.md),
-# because the xdevs.in zone already lives on Cloudflare. Before the first Pages deploy:
-#   1. Settings -> Pages -> Source: "GitHub Actions".
-#   2. DNS first: create `CNAME xdevschain -> jacell100.github.io` in Cloudflare (DNS only),
-#      otherwise the custom domain xdevschain.xdevs.in cannot be verified or get HTTPS.
-#   3. Settings -> Pages -> Custom domain: xdevschain.xdevs.in (Actions-based deploys ignore
-#      a CNAME file, so the site does not ship one).
+# Needs the repository secret CLOUDFLARE_API_TOKEN (Pages: Edit) and the repository
+# variable CLOUDFLARE_ACCOUNT_ID.
 
 on:
   push:
@@ -20,11 +15,6 @@ on:
   pull_request:
     paths: ["apps/docs/**", ".github/workflows/docs.yml"]
   workflow_dispatch:
-    inputs:
-      deploy:
-        description: "Deploy the built site to GitHub Pages (needs the DNS setup above)"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -49,26 +39,31 @@ jobs:
           cache-dependency-path: apps/docs/package-lock.json
       - run: npm ci
       - run: npm run docs:build
-      - name: Upload Pages artifact
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy
-        uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
+          name: docs-site
           path: apps/docs/.vitepress/dist
+          retention-days: 7
 
   deploy:
-    # Manual only: never deploys from PRs or pushes.
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy && github.ref == 'refs/heads/main'
+    # Only main is published; PRs just build.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
+    timeout-minutes: 10
     environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      name: docs
+      url: https://xdevschain.xdevs.in
     concurrency:
-      group: pages
+      group: docs-deploy
       cancel-in-progress: false
     steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs-site
+          path: dist
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=xdevs-chain-docs --branch=main --commit-dirty=true
