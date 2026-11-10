@@ -103,6 +103,7 @@ contract Governance is IGovernance, ReentrancyGuardTransient {
         if (staking_ == address(0)) revert InvalidParam("staking");
         initialized = true;
         staking = staking_;
+        // slither-disable-next-line missing-zero-check (SA-L03: guardian 0 = pausing disabled)
         guardian = guardian_;
         _setParams(p);
         emit Initialized(staking_, guardian_);
@@ -164,6 +165,7 @@ contract Governance is IGovernance, ReentrancyGuardTransient {
         if (support > uint8(VoteType.Abstain)) revert InvalidVoteType();
         if (hasVoted[id][msg.sender]) revert AlreadyVoted();
         Proposal storage p = _proposals[id];
+        // aderyn-fp-next-line(reentrancy-state-change) SA-A04: STATICCALL to the Staking predeploy
         weight = IVotesSource(staking).getPastVotes(msg.sender, p.snapshotBlock);
         if (weight == 0) revert NoVotingPower();
         hasVoted[id][msg.sender] = true;
@@ -247,6 +249,7 @@ contract Governance is IGovernance, ReentrancyGuardTransient {
     /// @inheritdoc IGovernance
     function setGuardian(address newGuardian) external onlySelf {
         emit GuardianUpdated(guardian, newGuardian);
+        // slither-disable-next-line missing-zero-check (SA-L03: guardian 0 = pausing disabled)
         guardian = newGuardian;
     }
 

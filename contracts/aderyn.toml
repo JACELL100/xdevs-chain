@@ -1,0 +1,20 @@
+# Aderyn configuration (static analysis, plan §18.3). Triage of every finding: docs/security/static-analysis.md.
+# Run from this directory with `aderyn` (Linux / macOS builds only) or see .github/workflows/static-analysis.yml.
+# False positives are marked in the source with `// aderyn-fp-next-line(<detector>) SA-xx: reason`.
+version = 1
+root = "."
+src = "src/"
+
+[detectors]
+# Style / gas-only detectors, excluded after review (see the doc, section "Aderyn exclusions"):
+exclude = [
+  "push-zero-opcode",            # the chain runs revm Osaka; PUSH0 is supported (and all code is compiled for osaka)
+  "unspecific-solidity-pragma",  # solc is pinned to 0.8.38 in foundry.toml; ^0.8.x pragmas keep the code reusable
+  "literal-instead-of-constant", # bounds in parameter checks read better inline
+  "large-numeric-literal",       # curve constants / bounds
+  "costly-loop",                 # bounded loops (<= 16 / 32 / 64 / 256 / 2,000 items), all reviewed
+  "require-revert-in-loop",      # validation loops must revert atomically
+  "internal-function-used-once", # readability
+  "modifier-used-only-once",     # readability
+  "unused-public-function",      # public on purpose (called by tests / off-chain)
+]

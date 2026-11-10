@@ -28,8 +28,11 @@ import {Call, SignerType} from "../libraries/AccountTypes.sol";
 ///      here in `_requireOwner` and in the dispatcher); only guardians and permissionless recovery execution work.
 abstract contract AccountCore is IAccountEvents {
     /// @dev Guardian vote kinds (tags of the vote ids, see `_voteId`).
+    // slither-disable-next-line unused-state (SA-I07: used by the core, not by the factory)
     uint8 internal constant VOTE_FREEZE = 0;
+    // slither-disable-next-line unused-state (SA-I07: used by the core, not by the factory)
     uint8 internal constant VOTE_UNFREEZE = 1;
+    // slither-disable-next-line unused-state (SA-I07: used by the core, not by the factory)
     uint8 internal constant VOTE_CANCEL = 2;
 
     /// @dev Routes a self-call through the vault dispatcher (instant or queued).
@@ -150,6 +153,7 @@ abstract contract AccountCore is IAccountEvents {
 
     /// @dev Body runs only when self-authorized; otherwise an owner call is routed through the vault dispatcher,
     ///      which executes it instantly (vault disabled) or queues it (vault enabled).
+    // slither-disable-next-line incorrect-modifier (SA-L02: routes through the vault instead of running)
     modifier delayedSelf() {
         if (_isSelfAuthorized()) {
             _;

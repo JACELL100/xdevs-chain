@@ -120,6 +120,7 @@ contract XdevsSmartAccount is
                 return SIG_VALIDATION_FAILED;
             }
             address key = address(bytes20(sig[1:21]));
+            // slither-disable-next-line unused-return (SA-F11: error code checked; errArg unused)
             (address rec, ECDSA.RecoverError err,) = ECDSA.tryRecoverCalldata(userOpHash, sig[21:]);
             if (err != ECDSA.RecoverError.NoError || rec != key) return SIG_VALIDATION_FAILED;
             Call[] memory calls = abi.decode(userOp.callData[4:], (Call[]));
@@ -184,6 +185,7 @@ contract XdevsSmartAccount is
         _delegateToExtension();
     }
 
+    // slither-disable-next-line dead-code (SA-I05: required override of an abstract hook)
     function _routeSelfCall(bytes memory data) internal override {
         Call[] memory calls = new Call[](1);
         calls[0] = Call(address(this), 0, data);
@@ -242,6 +244,7 @@ contract XdevsSmartAccount is
             return IERC1271.isValidSignature.selector;
         }
         if (signature.length == 65) {
+            // slither-disable-next-line unused-return (SA-F11: error code checked; errArg unused)
             (address rec, ECDSA.RecoverError err,) = ECDSA.tryRecoverCalldata(hash, signature);
             if (err == ECDSA.RecoverError.NoError && rec == address(this) && _eoaKeyActive()) {
                 return IERC1271.isValidSignature.selector;
@@ -297,6 +300,7 @@ contract XdevsSmartAccount is
             let ok := delegatecall(gas(), ext, 0, calldatasize(), 0, 0)
             returndatacopy(0, 0, returndatasize())
             if iszero(ok) { revert(0, returndatasize()) }
+            // aderyn-fp-next-line(yul-return) SA-A06: intended proxy-style forwarding
             return(0, returndatasize())
         }
     }

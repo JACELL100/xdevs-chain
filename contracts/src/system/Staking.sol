@@ -372,6 +372,7 @@ contract Staking is IStaking, ReentrancyGuardTransient {
     }
 
     /// @inheritdoc IStaking
+    // aderyn-fp-next-line(eth-send-unchecked-address) SA-F03: pull payment to msg.sender
     function withdrawUnbonded() external nonReentrant {
         UnbondingEntry[] storage entries = _unbonding[msg.sender];
         uint256 total;
@@ -440,6 +441,7 @@ contract Staking is IStaking, ReentrancyGuardTransient {
         if (bn <= lastParticipationBlock) revert AlreadyCalledThisBlock();
         lastParticipationBlock = bn;
 
+        // slither-disable-next-line incorrect-equality (SA-F07: block-number bookkeeping, not a balance)
         bool usePrev = bn - 1 == lastSetChangeBlock;
         address[] storage ops = usePrev ? _prevOperators : _activeOperators;
         uint256[] storage powers = usePrev ? _prevPowers : _activePowers;
@@ -577,6 +579,7 @@ contract Staking is IStaking, ReentrancyGuardTransient {
     /// @inheritdoc IStaking
     /// @dev The set whose commit is recorded by {recordParticipation} in the CURRENT block.
     function signingSet() external view returns (address[] memory operators, uint256[] memory powers) {
+        // slither-disable-next-line incorrect-equality (SA-F07: block-number bookkeeping, not a balance)
         if (block.number != 0 && block.number - 1 == lastSetChangeBlock) {
             return (_prevOperators, _prevPowers);
         }
@@ -703,6 +706,7 @@ contract Staking is IStaking, ReentrancyGuardTransient {
         d.rewardDebt = _debtFor(d.shares, v.accRewardPerShare);
         v.totalShares = vShares + shares;
         v.totalStake += amount;
+        // slither-disable-next-line costly-loop (SA-I04: looped only by the one-time genesis initialize)
         totalBonded += amount;
         _addVotes(delegator, amount);
         emit Delegated(delegator, validator, amount);
@@ -904,6 +908,7 @@ contract Staking is IStaking, ReentrancyGuardTransient {
     /// @dev Keeps the set that was in force at the START of this block, once per block.
     function _snapshotPrevSet() internal {
         uint64 bn = uint64(block.number);
+        // slither-disable-next-line incorrect-equality (SA-F07: block-number bookkeeping, not a balance)
         if (lastSetChangeBlock == bn) return;
         _prevOperators = _activeOperators;
         _prevPowers = _activePowers;
@@ -925,12 +930,14 @@ contract Staking is IStaking, ReentrancyGuardTransient {
         return Math.mulDiv(_delegations[operator][operator].shares, v.totalStake, vShares);
     }
 
+    // slither-disable-next-line unused-return (SA-F12: Checkpoints.push old/new values not needed)
     function _addVotes(address account, uint256 amount) internal {
         uint48 key = SafeCast.toUint48(block.number);
         _votes[account].push(key, SafeCast.toUint208(_votes[account].latest() + amount));
         _totalVotes.push(key, SafeCast.toUint208(_totalVotes.latest() + amount));
     }
 
+    // slither-disable-next-line unused-return (SA-F12: Checkpoints.push old/new values not needed)
     function _subVotes(address account, uint256 amount) internal {
         if (amount == 0) return;
         uint48 key = SafeCast.toUint48(block.number);
@@ -963,6 +970,7 @@ contract Staking is IStaking, ReentrancyGuardTransient {
     }
 
     function _send(address to, uint256 amount) internal {
+        // slither-disable-next-line arbitrary-send-eth (SA-F03: pull payment to msg.sender, CEI + nonReentrant)
         (bool ok,) = payable(to).call{value: amount}("");
         if (!ok) revert TransferFailed();
     }

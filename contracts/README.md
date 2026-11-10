@@ -19,4 +19,4 @@ FOUNDRY_PROFILE=system forge test     # one area only: system | accounts | perip
 forge coverage
 ```
 
-Each area has unit, fuzz and invariant tests. Static analysis (Slither, Aderyn) and external audits are still to do before any mainnet use.
+Each area has unit, fuzz and invariant tests. Static analysis (Slither, Aderyn) is clean, with every finding triaged in [docs/security/static-analysis.md](../docs/security/static-analysis.md) (`slither .` and `aderyn` run from this directory; CI: `.github/workflows/static-analysis.yml`). An external audit is still to do before any mainnet use.

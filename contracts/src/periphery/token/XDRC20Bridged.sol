@@ -28,8 +28,10 @@ contract XDRC20Bridged is XDRC20 {
         uint64 defaultDuration,
         uint64 maxDuration
     ) XDRC20(name_, symbol_, address(0), 0, defaultDuration, maxDuration) {
+        // slither-disable-next-line missing-zero-check (SA-L04: deployed only by the factory, which checks)
         bridge = bridge_;
         originChainId = originChainId_;
+        // slither-disable-next-line missing-zero-check (SA-L04: deployed only by the factory, which checks)
         originToken = originToken_;
         _decimals = decimals_;
     }

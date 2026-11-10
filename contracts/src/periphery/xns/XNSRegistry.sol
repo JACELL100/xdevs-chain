@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.24;
 
-import {Predeploys} from "../../common/Predeploys.sol";
 import {GenesisInitializable} from "../common/GenesisInitializable.sol";
 import {XNSLabel} from "./XNSLabel.sol";
 import {
@@ -352,10 +351,12 @@ contract XNSRegistry is
     }
 
     /// @notice Extend a name that is registered or in its grace period. Anyone may pay for it.
+    // aderyn-fp-next-line(eth-send-unchecked-address) SA-F04: fee to the governance-set treasury
     function renew(string calldata label, uint256 duration) external payable returns (uint256 expires) {
         bytes32 lh = keccak256(bytes(label));
         bytes32 node_ = keccak256(abi.encodePacked(TLD_NODE, lh));
         uint256 oldExpiry = _expiries[node_];
+        // slither-disable-next-line incorrect-equality (SA-F08: 0 = never registered sentinel)
         if (oldExpiry == 0 || block.timestamp >= oldExpiry + GRACE_PERIOD) revert NameNotRenewable(node_);
         if (duration < MIN_REGISTRATION_DURATION) revert InvalidDuration(duration);
         expires = oldExpiry + duration;
@@ -373,6 +374,7 @@ contract XNSRegistry is
 
     function _payTreasury(uint256 fee) private {
         if (fee != 0) {
+            // slither-disable-next-line arbitrary-send-eth (SA-F04: fee to the governance-set treasury)
             (bool ok,) = treasury.call{value: fee}("");
             if (!ok) revert FeeTransferFailed();
         }

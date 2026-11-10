@@ -70,9 +70,12 @@ interface IXNSRegistrar {
     event NameRenewed(string label, bytes32 indexed labelhash, uint256 expires, uint256 fee);
     event ReverseClaimed(address indexed addr, bytes32 indexed node);
     event FeeChanged(uint256 feePerYear);
+    // slither-disable-next-line unindexed-event-address (SA-I08: frozen event ABI)
     event TreasuryChanged(address treasury);
+    // slither-disable-next-line unindexed-event-address (SA-I08: frozen event ABI)
     event GovernanceChanged(address governance);
     event ReservedChanged(bytes32 indexed labelhash, string label, bool reserved);
+    // slither-disable-next-line unindexed-event-address (SA-I08: frozen event ABI)
     event Initialized(address governance, address treasury, uint256 feePerYear);
 
     function register(string calldata label, address owner, uint256 duration)

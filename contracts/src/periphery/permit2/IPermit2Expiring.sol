@@ -81,7 +81,6 @@ interface IPermit2Expiring {
     error InvalidNonce();
     error StaleEpoch(uint48 signedEpoch, uint48 currentEpoch);
     error ExcessiveInvalidation();
-    error LengthMismatch();
 
     function DOMAIN_SEPARATOR() external view returns (bytes32);
 

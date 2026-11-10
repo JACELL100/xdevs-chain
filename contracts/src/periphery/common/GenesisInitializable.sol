@@ -40,6 +40,7 @@ abstract contract GenesisInitializable {
     }
 
     /// @notice True once `initialize` has run.
+    // aderyn-fp-next-line(unprotected-initializer) SA-A05: view getter, not an initializer
     function initialized() public view returns (bool) {
         return _initialized;
     }

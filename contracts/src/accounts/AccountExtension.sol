@@ -20,6 +20,7 @@ import {
     SessionKeyConfig
 } from "./libraries/AccountTypes.sol";
 
+// slither-disable-next-line missing-inheritance (SA-I06: helper interface for the self-call only)
 interface IAccountExecuteSelf {
     function execute(address target, uint256 value, bytes calldata data) external returns (uint256);
 }
@@ -44,6 +45,7 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
     /// @dev Delayed self-calls are routed through the core's `execute(self, 0, data)` (owner authority = self), so the
     ///      vault dispatcher queues them (enabled) or runs them instantly (disabled).
     function _routeSelfCall(bytes memory data) internal override {
+        // slither-disable-next-line reentrancy-no-eth,reentrancy-benign,reentrancy-events,unused-return (SA-F05, SA-F13)
         IAccountExecuteSelf(address(this)).execute(address(this), 0, data);
     }
 
@@ -68,6 +70,7 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
         _initialize(params);
     }
 
+    // aderyn-fp-next-line(unprotected-initializer) SA-A05: view helper, not an initializer
     function initHash(InitParams calldata params) public view returns (bytes32) {
         return
             keccak256(abi.encode(INIT_TYPEHASH, block.chainid, address(this), keccak256(abi.encode(params))));
@@ -275,6 +278,7 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
     /// @notice Native value already spent instantly today (UTC day).
     function spentToday() external view returns (uint128) {
         AccountStorage.Vault storage $ = AccountStorage.vault();
+        // slither-disable-next-line incorrect-equality (SA-F09: UTC day index, not a balance)
         return $.day == _today() ? $.spentToday : 0;
     }
 
@@ -626,8 +630,11 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
     // ============================================================================================================
 
     /// @notice Upgrades a factory (ERC-1967 proxy) account. Not available to EIP-7702 accounts (they re-delegate).
+    /// @dev The delegation check matters: a 7702 EOA may carry a non-zero ERC-1967 slot left by a previous delegate,
+    ///      and `upgradeToAndCall`'s DELEGATECALL could then rewrite any account storage (e.g. the XIP-0001 lock word
+    ///      that `disableEoaLock` refuses to clear while the EOA key is revoked). Static-analysis finding SA-01.
     function upgradeToAndCall(address newImplementation, bytes calldata data) external delayedSelf {
-        if (ERC1967Utils.getImplementation() == address(0)) revert NotProxy();
+        if (_isDelegatedEoa() || ERC1967Utils.getImplementation() == address(0)) revert NotProxy();
         if (newImplementation.code.length == 0) revert InvalidImplementation();
         ERC1967Utils.upgradeToAndCall(newImplementation, data);
     }

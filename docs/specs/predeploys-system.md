@@ -414,6 +414,7 @@ the settlement check above; the suite passes on 28 seeds and at 256 runs × dept
    (anyone-can-cancel rule not implemented), guardian cannot cancel queued proposals (by design, §25.1).
 10. **FeeConfig** stores base-fee change denominator/elasticity, which §33.1 calls fork parameters — the node decides
     whether to honour them.
-11. Static analysis (Slither/Aderyn, §18.3) has **not** been run on this machine; `forge lint` notes (mostly
-    `block-timestamp`, `unsafe-typecast` on `uint64(block.number)`, `arbitrary-send-eth` on pull payments) were
-    reviewed and are intentional.
+11. Static analysis (Slither 0.11.6 + Aderyn 0.6.8, §18.3) is clean with every finding triaged in
+    [`docs/security/static-analysis.md`](../security/static-analysis.md) (no real issue in `src/system`; system
+    contract bytecode unchanged by the review). `forge lint` notes (mostly `block-timestamp`, `unsafe-typecast` on
+    `uint64(block.number)`, `arbitrary-send-eth` on pull payments) were reviewed and are intentional.

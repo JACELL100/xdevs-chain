@@ -38,6 +38,7 @@ import {AccountConstants} from "../libraries/AccountConstants.sol";
 ///      EntryPoint actually deducts — and refunds the rest. Hence `entryPoint.balanceOf(this) >= totalSponsorBalance`
 ///      always; the (small) surplus can be swept to the Treasury by anyone.
 ///      This paymaster must be staked in the EntryPoint (it reads sponsor-keyed storage during validation).
+// aderyn-fp-next-line(contract-locks-ether) SA-A02: msg.value forwarded to the EntryPoint
 contract XdevsPaymaster is IPaymaster {
     using UserOperationLib for PackedUserOperation;
     using UserOperationLib for bytes;
@@ -106,6 +107,7 @@ contract XdevsPaymaster is IPaymaster {
         PaymasterStorage storage $ = _s();
         $.sponsors[sponsor].balance += uint128(msg.value);
         $.totalSponsorBalance += msg.value;
+        // slither-disable-next-line reentrancy-events (SA-L05: trusted EntryPoint, state final before)
         entryPoint().depositTo{value: msg.value}(address(this));
         emit Deposited(sponsor, msg.sender, msg.value);
     }
@@ -117,6 +119,7 @@ contract XdevsPaymaster is IPaymaster {
         if (amount > sp.balance) revert InsufficientBalance();
         sp.balance -= uint128(amount);
         $.totalSponsorBalance -= amount;
+        // slither-disable-next-line reentrancy-events (SA-L05: trusted EntryPoint, state final before)
         entryPoint().withdrawTo(to, amount);
         emit Withdrawn(msg.sender, to, amount);
     }
@@ -219,6 +222,7 @@ contract XdevsPaymaster is IPaymaster {
     ) private pure returns (uint256) {
         if (data.length != 32) revert InvalidPaymasterData();
         bytes calldata sig = paymasterAndData.getPaymasterSignature();
+        // slither-disable-next-line unused-return (SA-F11: error code checked; errArg unused)
         (address rec, ECDSA.RecoverError err,) =
             ECDSA.tryRecoverCalldata(MessageHashUtils.toEthSignedMessageHash(userOpHash), sig);
         bool sigFailed = err != ECDSA.RecoverError.NoError || rec != signer;
@@ -274,7 +278,9 @@ contract XdevsPaymaster is IPaymaster {
     /// @notice Sends the surplus to the Treasury. Permissionless; can never touch sponsor balances.
     function sweepSurplus() external {
         uint256 amount = surplus();
+        // slither-disable-next-line incorrect-equality (SA-F10: nothing-to-sweep early exit)
         if (amount == 0) return;
+        // slither-disable-next-line reentrancy-events (SA-L05: trusted EntryPoint, state final before)
         entryPoint().withdrawTo(payable(Predeploys.TREASURY), amount);
         emit SurplusSwept(amount);
     }

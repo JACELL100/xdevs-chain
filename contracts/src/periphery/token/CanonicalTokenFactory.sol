@@ -31,6 +31,7 @@ contract CanonicalTokenFactory {
         string symbol,
         uint8 decimals
     );
+    // slither-disable-next-line unindexed-event-address (SA-I08: frozen event ABI)
     event GovernanceChanged(address governance);
 
     error NotGovernance(address caller);

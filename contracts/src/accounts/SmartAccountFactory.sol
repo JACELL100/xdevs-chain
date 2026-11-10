@@ -86,6 +86,7 @@ contract SmartAccountFactory is AccountExtension {
     }
 
     function _bytecode(bytes memory initData) private pure returns (bytes memory) {
+        // aderyn-fp-next-line(abi-encode-packed-hash-collision) SA-A01: init code = creationCode || abi.encode(..)
         return abi.encodePacked(
             type(ERC1967Proxy).creationCode, abi.encode(Predeploys.SMART_ACCOUNT_IMPL, initData)
         );

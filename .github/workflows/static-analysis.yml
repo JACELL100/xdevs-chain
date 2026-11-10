@@ -1,0 +1,87 @@
+name: static-analysis
+
+# Slither + Aderyn on the Solidity contracts (plan §18.3 / §25.2).
+# Triage of every finding and the suppression policy: docs/security/static-analysis.md.
+
+on:
+  pull_request:
+    paths:
+      - "contracts/**"
+      - ".github/workflows/static-analysis.yml"
+  push:
+    branches: [main]
+    paths:
+      - "contracts/**"
+      - ".github/workflows/static-analysis.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: static-analysis-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  slither:
+    name: slither
+    runs-on: ubuntu-latest
+    # TODO: pin action versions to commit SHAs once the repo is set up.
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      # Config: contracts/slither.config.json (lib/, test/, script/ filtered; style-only detectors excluded).
+      # Reviewed false positives carry `// slither-disable-next-line <detector> (SA-xx: reason)` in the source.
+      # Any new finding of any severity fails the job.
+      - uses: crytic/slither-action@v0.4.2
+        with:
+          target: contracts
+          slither-version: "0.11.6"
+          slither-config: contracts/slither.config.json
+          fail-on: low
+
+  aderyn:
+    name: aderyn
+    runs-on: ubuntu-latest
+    env:
+      ADERYN_VERSION: "0.6.8"
+      ADERYN_SHA256: "ffd6ca658962e211a3ac821c646f69c8e14bf1b1001cbfe091bcd4535a691e46"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - name: Install Aderyn (pinned release, checksum-verified)
+        run: |
+          set -euo pipefail
+          f=aderyn-x86_64-unknown-linux-gnu.tar.xz
+          curl -fsSL -o "$RUNNER_TEMP/$f" \
+            "https://github.com/Cyfrin/aderyn/releases/download/aderyn-v${ADERYN_VERSION}/$f"
+          echo "${ADERYN_SHA256}  $RUNNER_TEMP/$f" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/aderyn-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
+      # Config: contracts/aderyn.toml. Reviewed false positives carry `// aderyn-fp-next-line(<detector>)`.
+      - name: Run Aderyn
+        working-directory: contracts
+        run: |
+          aderyn -o aderyn-report.json
+          aderyn -o aderyn-report.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aderyn-report
+          path: |
+            contracts/aderyn-report.json
+            contracts/aderyn-report.md
+      # Low findings are documented and accepted (see the doc); any High finding fails the job.
+      - name: Fail on High findings
+        working-directory: contracts
+        run: |
+          high=$(jq '.issue_count.high' aderyn-report.json)
+          low=$(jq '.issue_count.low' aderyn-report.json)
+          echo "Aderyn: high=$high low=$low (low categories accepted: docs/security/static-analysis.md)"
+          if [ "$high" != "0" ]; then
+            jq -r '.high_issues.issues[] | "::error::\(.detector_name): \(.title) (\(.instances | length) instance(s))"' \
+              aderyn-report.json
+            exit 1
+          fi

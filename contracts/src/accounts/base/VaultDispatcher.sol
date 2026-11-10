@@ -198,12 +198,14 @@ abstract contract VaultDispatcher is AccountCore, IGuardianVault {
         uint256 nativeSpent;
         if (nativeTotal != 0) {
             if (nativeTotal > $.policy.nativeThreshold) return false;
+            // slither-disable-next-line incorrect-equality (SA-F09: UTC day index, not a balance)
             nativeSpent = ($.day == today ? $.spentToday : 0) + nativeTotal;
             if (nativeSpent > $.policy.dailyLimit) return false;
         }
         for (uint256 j; j < nTokens; ++j) {
             AccountStorage.TokenLimitState storage t = $.tokenLimits[tokens[j]];
             if (amounts[j] > t.perTx) return false;
+            // slither-disable-next-line incorrect-equality (SA-F09: UTC day index, not a balance)
             if ((t.day == today ? t.spent : 0) + amounts[j] > t.daily) return false;
         }
         // All checks passed: record. Values fit in uint128 because they are bounded by uint128 limits.
@@ -213,6 +215,7 @@ abstract contract VaultDispatcher is AccountCore, IGuardianVault {
         }
         for (uint256 j; j < nTokens; ++j) {
             AccountStorage.TokenLimitState storage t = $.tokenLimits[tokens[j]];
+            // slither-disable-next-line incorrect-equality (SA-F09: UTC day index, not a balance)
             t.spent = uint128((t.day == today ? t.spent : 0) + amounts[j]);
             t.day = today;
         }

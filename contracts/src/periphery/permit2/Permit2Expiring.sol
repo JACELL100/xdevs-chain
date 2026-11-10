@@ -186,6 +186,7 @@ contract Permit2Expiring is IPermit2Expiring {
                 a.amount = m.amount - amount;
             }
         }
+        // slither-disable-next-line arbitrary-send-erc20 (SA-F01: `from` authorised by its allowance to msg.sender)
         IERC20(token).safeTransferFrom(from, to, amount);
     }
 

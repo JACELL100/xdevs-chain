@@ -36,6 +36,7 @@ contract WXDS {
         emit Deposit(msg.sender, msg.value);
     }
 
+    // aderyn-fp-next-line(eth-send-unchecked-address) SA-A03: pays msg.sender its own balance (CEI)
     function withdraw(uint256 wad) external {
         uint256 bal = balanceOf[msg.sender];
         if (bal < wad) revert InsufficientBalance();

@@ -25,6 +25,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 ///      with the Guardian Vault enabled, whitelist this paymaster or the approval is queued), postOp refunds the
 ///      unused part. The operator's tXDS deposit and collected tokens belong to the operator; the contract never
 ///      holds user funds beyond the in-flight prefund.
+// aderyn-fp-next-line(contract-locks-ether) SA-A02: msg.value forwarded to the EntryPoint
 contract StablecoinPaymaster is IPaymaster, Ownable2Step {
     using SafeERC20 for IERC20;
     using UserOperationLib for PackedUserOperation;
@@ -127,6 +128,7 @@ contract StablecoinPaymaster is IPaymaster, Ownable2Step {
         if (rate > maxRate) revert RateAboveLimit(rate, maxRate);
 
         uint256 prefund = quote(maxCost, rate);
+        // slither-disable-next-line arbitrary-send-erc20 (SA-F02: sender signed this op and approved)
         IERC20(token).safeTransferFrom(userOp.sender, address(this), prefund);
         context = abi.encode(userOp.sender, token, prefund, rate, userOp.unpackPostOpGasLimit());
         validationData = 0;

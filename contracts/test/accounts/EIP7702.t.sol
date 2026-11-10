@@ -120,6 +120,20 @@ contract EIP7702Test is AccountTestBase {
         acct.upgradeToAndCall(address(counter), "");
     }
 
+    /// @dev SA-01 regression: garbage in the ERC-1967 implementation slot (left by a previous delegate) must not make
+    ///      `upgradeToAndCall` usable on a 7702 account — its DELEGATECALL could rewrite any account storage, e.g. the
+    ///      XIP-0001 lock word, bypassing `disableEoaLock`'s checks.
+    function test_upgrade_notAvailableFor7702_evenWithStaleErc1967Slot() public {
+        bytes32 implSlot = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+        vm.store(eoa, implSlot, bytes32(uint256(uint160(address(counter)))));
+        vm.prank(eoa, eoa);
+        acct.initialize(_params(_one(_ecdsaSigner(eoa)), false)); // vault off: delayed functions apply at once
+        vm.prank(eoa, eoa);
+        vm.expectRevert(IAccountEvents.NotProxy.selector);
+        acct.upgradeToAndCall(address(counter), "");
+        assertEq(vm.load(eoa, implSlot), bytes32(uint256(uint160(address(counter)))));
+    }
+
     function test_userOp_with7702InitCodeMarker() public {
         address to = makeAddr("to");
         PackedUserOperation memory op = _userOp(eoa, _execData(to, 1 ether, ""));

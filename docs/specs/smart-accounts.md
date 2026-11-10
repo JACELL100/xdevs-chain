@@ -167,7 +167,8 @@ vault delay 24 h once enabled. `createAccountWithConfig(InitParams, salt)` sets 
    `initHash(params) = keccak256(abi.encode(INIT_TYPEHASH, chainId, account, keccak256(abi.encode(params))))`
    (usable through ERC-4337 `initCode = 0x7702…` + init call data).
 3. Uninitialized, the account already works with the EOA key as implicit signer (direct self-calls, UserOps, 1271).
-4. `upgradeToAndCall` is not available to 7702 accounts (they re-delegate instead — impossible while the EOA lock is on).
+4. `upgradeToAndCall` is not available to 7702 accounts (reverts `NotProxy`, also when a previous delegate left a
+   non-zero ERC-1967 slot — static-analysis fix SA-01); they re-delegate instead — impossible while the EOA lock is on.
 5. Recommended: `enableEoaLock()` (instant) once the vault is on — see §8.2 / XIP-0001.
 
 ### 6.3 ERC-4337 v0.9
