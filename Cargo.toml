@@ -70,7 +70,7 @@ p256 = { version = "0.13.2", features = ["ecdsa"] }
 ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
 # Web3 Secret Storage v3 keystores (pure Rust, RustCrypto digest-0.10 / cipher-0.4
 # family so hmac / sha2 are shared with the rest of the graph).
-scrypt = { version = "0.11.0", default-features = false }
+scrypt = { version = "0.12.0", default-features = false }
 pbkdf2 = { version = "0.12.2", default-features = false, features = ["hmac"] }
 hmac = "0.12.1"
 sha2 = "0.10.9"
