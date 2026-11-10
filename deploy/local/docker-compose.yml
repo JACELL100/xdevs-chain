@@ -1,0 +1,25 @@
+# Local networks (plan §33.7).
+# Phase 1 (works once Node::run lands): single dev node
+#   docker compose -f deploy/local/docker-compose.yml up -d dev
+# Phase 2 sketch (needs consensus + p2p, and ./cfg/valN.toml): 4 validators
+#   docker compose -f deploy/local/docker-compose.yml --profile validators up -d
+# NOTE: the RPC must listen on 0.0.0.0 inside the container for the port mapping to work.
+services:
+  dev:
+    build: { context: ../.., dockerfile: deploy/local/Dockerfile }
+    image: xdevs:dev
+    command: ["node", "--dev", "--data-dir", "/var/lib/xdevs"]
+    volumes: ["dev:/var/lib/xdevs"]
+    ports: ["127.0.0.1:8545:8545"]
+
+  val1: &val
+    image: xdevs:dev
+    profiles: [validators]
+    command: ["node", "--config", "/cfg/val1.toml"]
+    volumes: ["./cfg:/cfg:ro", "val1:/var/lib/xdevs"]
+    ports: ["127.0.0.1:18545:8545"]
+  val2: { <<: *val, command: ["node", "--config", "/cfg/val2.toml"], volumes: ["./cfg:/cfg:ro", "val2:/var/lib/xdevs"], ports: [] }
+  val3: { <<: *val, command: ["node", "--config", "/cfg/val3.toml"], volumes: ["./cfg:/cfg:ro", "val3:/var/lib/xdevs"], ports: [] }
+  val4: { <<: *val, command: ["node", "--config", "/cfg/val4.toml"], volumes: ["./cfg:/cfg:ro", "val4:/var/lib/xdevs"], ports: [] }
+
+volumes: { dev: {}, val1: {}, val2: {}, val3: {}, val4: {} }
