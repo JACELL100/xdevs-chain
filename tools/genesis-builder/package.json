@@ -1,0 +1,15 @@
+{
+  "name": "@xdevs/genesis-builder",
+  "version": "1.0.0",
+  "private": true,
+  "description": "xDEVS Chain genesis predeploy builder (plan §21.2). No dependencies: Node >= 22.18 runs the TypeScript directly; needs Foundry (forge, cast, anvil).",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "build:testnet": "node genesis-builder.ts build --config configs/testnet.json --out ../../deploy/configs/testnet-genesis.template.json --alloc-out ../../deploy/configs/predeploys-alloc.json",
+    "build:dev": "node genesis-builder.ts build --config configs/dev.json --out ../../deploy/configs/dev-genesis-with-predeploys.json",
+    "verify": "bash verify.sh ../../deploy/configs/testnet-genesis.template.json",
+    "verify:dev": "bash verify.sh ../../deploy/configs/dev-genesis-with-predeploys.json",
+    "verify-canonical": "node genesis-builder.ts verify-canonical"
+  }
+}

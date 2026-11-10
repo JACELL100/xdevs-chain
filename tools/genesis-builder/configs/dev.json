@@ -1,0 +1,57 @@
+{
+  "_comment": "Local dev chain (chain id 7117) = deploy/configs/dev-genesis.json + every predeploy. Staking needs >= 1 validator: one dev validator (operator = Anvil account #0, PUBLIC placeholder key) is registered, but validators[] is not emitted (emitValidators=false), so the node still runs as a single-node dev chain. validatorDefaults are used by `build --validators-from <xdevs-cli testnet init genesis>`: the i-th validator's operator is the i-th Anvil dev account.",
+  "genesis": {
+    "config": {
+      "chainId": 7117,
+      "name": "xdevs-dev",
+      "hardfork": "xdevs-v1",
+      "xip0001Block": 0,
+      "blockTimeMs": 2000,
+      "baseFee": {
+        "initial": "1000000000",
+        "minimum": "100000000",
+        "elasticity": 2,
+        "maxChangeDenominator": 8,
+        "burnBps": 8000
+      },
+      "treasury": "0x0000000000000000000000000000000000001002",
+      "systemAddress": "0xfffffffffffffffffffffffffffffffffffffffe"
+    },
+    "timestamp": "0x0",
+    "gasLimit": "0x1c9c380",
+    "extraData": "0x7844455653"
+  },
+  "allocations": [
+    { "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", "amount": "10000" },
+    { "address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "amount": "10000" },
+    { "address": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", "amount": "10000" },
+    { "address": "0x90F79bf6EB2c4f870365E785982E1f101E93b906", "amount": "10000" },
+    { "address": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65", "amount": "10000" },
+    { "address": "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc", "amount": "10000" },
+    { "address": "0x976EA74026E726554dB657fA54763abd0C3a0aa9", "amount": "10000" },
+    { "address": "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955", "amount": "10000" },
+    { "address": "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f", "amount": "10000" },
+    { "address": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720", "amount": "10000" },
+    { "name": "treasury", "address": "0x0000000000000000000000000000000000001002", "amount": "200000000" }
+  ],
+  "emitValidators": false,
+  "validators": [
+    { "name": "dev", "operator": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", "consensusKey": "ed25519:0xd3ce4d58f3a1bc9c0bb63fadefd8f4b4a496e922bbe5c5fd2b72818efc3b55b6", "stake": "10000", "commissionBps": 1000 }
+  ],
+  "validatorDefaults": {
+    "stake": "10000",
+    "commissionBps": 1000,
+    "operators": [
+      "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+      "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65",
+      "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
+      "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
+      "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955",
+      "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f",
+      "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720"
+    ]
+  }
+}

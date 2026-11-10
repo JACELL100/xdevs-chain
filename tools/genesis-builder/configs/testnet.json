@@ -1,0 +1,42 @@
+{
+  "_comment": "xDEVS testnet genesis inputs (plan §20.2 / §21). Every address and key marked PLACEHOLDER must be replaced before launch. Amounts are in whole tXDS. Parameter groups staking / governance / fee / xns are optional overrides of the reference values in contracts/script/system/SystemGenesis.s.sol and contracts/script/periphery/DeployPeriphery.s.sol; fee defaults to the genesis gasLimit / baseFee below.",
+  "genesis": {
+    "config": {
+      "chainId": 717171,
+      "name": "xdevs-testnet-1",
+      "hardfork": "xdevs-v1",
+      "xip0001Block": 0,
+      "blockTimeMs": 2000,
+      "epochLength": 3600,
+      "baseFee": {
+        "initial": "1000000000",
+        "minimum": "100000000",
+        "elasticity": 2,
+        "maxChangeDenominator": 8,
+        "burnBps": 8000
+      },
+      "treasury": "0x0000000000000000000000000000000000001002",
+      "systemAddress": "0xfffffffffffffffffffffffffffffffffffffffe"
+    },
+    "timestamp": "0x0",
+    "gasLimit": "0x1c9c380",
+    "extraData": "0x7844455653"
+  },
+  "totalSupply": "1000000000",
+  "allocations": [
+    { "name": "faucet & community reserve (30%) PLACEHOLDER", "address": "0x000000000000000000000000000000000000fa01", "amount": "300000000" },
+    { "name": "ecosystem grants (25%) PLACEHOLDER", "address": "0x000000000000000000000000000000000000fa02", "amount": "250000000" },
+    { "name": "treasury (20%)", "address": "0x0000000000000000000000000000000000001002", "amount": "200000000" },
+    { "name": "core development (15%) PLACEHOLDER", "address": "0x000000000000000000000000000000000000fa03", "amount": "150000000" },
+    { "name": "reserve (5%) PLACEHOLDER", "address": "0x000000000000000000000000000000000000fa04", "amount": "50000000" }
+  ],
+  "validators": [
+    { "name": "val1", "operator": "0x0000000000000000000000000000000000a11ce1", "consensusKey": "ed25519:0xa11d959ef3d3639333c6b53ba8813e0fa97ef632bd51f6a3634e3bd63b02e779", "stake": "12500000", "commissionBps": 1000, "p2p": "/dns4/val1.example.invalid/tcp/30333/p2p/PLACEHOLDER" },
+    { "name": "val2", "operator": "0x0000000000000000000000000000000000a11ce2", "consensusKey": "ed25519:0x52feae3dc3373fae9b79936a98881edc73e6e812e0f7c6db10559287f75609f8", "stake": "12500000", "commissionBps": 1000, "p2p": "/dns4/val2.example.invalid/tcp/30333/p2p/PLACEHOLDER" },
+    { "name": "val3", "operator": "0x0000000000000000000000000000000000a11ce3", "consensusKey": "ed25519:0xf39a2515741be43c4f55ce1c841d59ddce01240a5649781a15a5ee3db541420e", "stake": "12500000", "commissionBps": 1000, "p2p": "/dns4/val3.example.invalid/tcp/30333/p2p/PLACEHOLDER" },
+    { "name": "val4", "operator": "0x0000000000000000000000000000000000a11ce4", "consensusKey": "ed25519:0xada58962c6872060c31010b961055c0a53af8311997af3a5beaadd19fa416c9c", "stake": "12500000", "commissionBps": 1000, "p2p": "/dns4/val4.example.invalid/tcp/30333/p2p/PLACEHOLDER" }
+  ],
+  "governance": {
+    "guardian": "0x0000000000000000000000000000000000000000"
+  }
+}
