@@ -8,6 +8,49 @@ The native coin is **XDS** (testnet: **tXDS**, 18 decimals; the smallest unit is
 
 > **Status: Phase 1 working, public testnet not live yet.** A single-node dev chain runs locally and works with MetaMask and Foundry. The system and user-safety contracts, the TypeScript SDK and the faucet are built and tested. Multi-node BFT consensus (Phase 2) and the public devnet (Phase 3) are next. Testnet tokens have no value.
 
+## Why xDEVS Chain?
+
+Most blockchains compete on speed and fees. Meanwhile the things that actually cost ordinary users money (lost seed phrases, phishing and address poisoning, forgotten unlimited token approvals, front-running bots, hacked bridges) are left for wallets and apps to fix, or not. xDEVS Chain makes **user protection part of the chain itself**, while staying fully compatible with Ethereum tools.
+
+### How it compares
+
+| Problem users face | Ethereum | Solana | xDEVS Chain |
+|---|---|---|---|
+| **Lost seed phrase = lost funds** | Smart wallets exist as optional add-ons (ERC-4337) | Wallet-level only | Smart accounts are a built-in system contract: **passkey login (Face ID / fingerprint), no seed phrase**, social recovery by guardians |
+| **Stolen key drains the wallet instantly** | Nothing at protocol level | Nothing at protocol level | **Guardian Vault**: large transfers, approvals and unknown contract calls wait out a cancel window, and switching protection off is delayed too. An opt-in protocol rule (XIP-0001) extends this to existing MetaMask addresses |
+| **Forgotten unlimited approvals get drained years later** | ERC-20 approvals are unlimited and permanent by default | Token delegations persist until revoked | **Approvals expire**: the XDRC-20 standard and a Permit2-style contract that requires an expiry on every allowance, plus one-click "revoke all" |
+| **Address poisoning and look-alike names** | Wallet warnings only; ENS still allows ASCII look-alikes such as `paypa1` | Wallet warnings only | Native `.xdevs` names that **reject look-alikes** (`paypa1` can't be registered while `paypal` exists), plus planned RPC checks for first-time and look-alike recipients |
+| **Blind signing of unreadable transactions** | Third-party simulation services | Third-party simulation services | Planned built-in `xdevs_simulateTransaction` RPC that shows asset changes and plain-language warnings before you sign |
+| **Front-running / sandwich bots (MEV)** | Private relays and builder markets, which centralise | Validator-level, widely exploited | Planned **encrypted mempool**: transactions stay hidden until their order is final |
+| **Time until a payment is final** | About 13 minutes (2 epochs) | Seconds, with past full-network outages | Planned **BFT finality in about 1–2 seconds**, with no reorgs after commit |
+| **One hot app makes everyone pay more** | Single global fee market | Local fee markets | Planned **local fee markets**: a congested contract gets its own fee; everyone else keeps paying the normal fee |
+| **Bridge hacks** | Many bridges secured by small multisigs | Same | Policy: **light-client bridges only**, no multisig bridges |
+| **Developer compatibility** | The standard | Different VM and languages | **EVM-equivalent** (revm, Osaka rules): Solidity, MetaMask, Foundry, Hardhat and viem work unchanged |
+
+All protection features are **opt-in** and **never reverse a finalized transaction**: there is no admin key that can freeze or seize anyone's funds.
+
+### What's built today vs planned
+
+| Feature | Status |
+|---|---|
+| EVM-equivalent execution, MetaMask/Foundry-compatible JSON-RPC, local dev chain | ✅ Built and tested |
+| Smart accounts with passkeys, social recovery, session keys | ✅ Contracts built and tested |
+| Guardian Vault (time-locked transfers with a cancel window) | ✅ Contracts built and tested |
+| Expiring approvals (XDRC-20, Permit2Expiring), `.xdevs` names with look-alike protection | ✅ Contracts built and tested |
+| Staking, governance, treasury, gas sponsorship (paymasters) | ✅ Contracts built and tested |
+| Guardian freeze and protocol-level EOA lock (XIP-0001) | 🛠 In progress |
+| Multi-node BFT consensus with ~1–2 s finality, public testnet | 📋 Next (Phases 2–3) |
+| Transaction simulation and recipient-check RPCs, reference wallet | 📋 Planned (Phase 4) |
+| Encrypted mempool, parallel execution, local fee markets | 📋 Planned (Phase 5) |
+| Light-client bridges | 📋 Planned (Phase 7) |
+
+### Honest trade-offs
+
+- **Security grows with adoption.** A new chain has far less stake and fewer independent validators than Ethereum. Until many independent operators join, it is a testnet, not a decentralized network.
+- **Fast finality means a bounded validator set** (up to 100 on testnet), a deliberate choice of strong safety and speed over maximum decentralization.
+- **MEV can be reduced, not eliminated**, and the encrypted mempool is research-grade work that will ship only after external review.
+- **Protection is opt-in.** A user who turns nothing on gets ordinary Ethereum-style behaviour.
+
 ## What's in this repo
 
 ```
