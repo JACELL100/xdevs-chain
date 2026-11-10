@@ -20,7 +20,7 @@ report it.
 | `crates/rpc` | `xdevs-rpc` | rpc agent | complete (server, `convert`, `xdevs_getEoaLock`) |
 | `crates/node` | `xdevs-node` | node agent | complete (dev mode) |
 | `bin/xdevs` | `xdevs` | node agent | clap skeleton (`xdevs node --dev`) |
-| `bin/xdevs-cli` | `xdevs-cli` | crypto/cli agent | complete (`keygen`, `address`, `send`, `balance`) |
+| `bin/xdevs-cli` | `xdevs-cli` | crypto/cli agent | complete (`keygen` [`--consensus`, `--node-key`], `address`, `send`, `balance`, `testnet init`) |
 | `crates/consensus` | `xdevs-consensus` | WP1 (Phase 2) | day-0 skeleton (traits, types, config) |
 | `crates/network` | `xdevs-network` | WP3 (Phase 2) | day-0 skeleton (`NetworkHandle`, config) |
 | `crates/metrics` | `xdevs-metrics` | WP6 (Phase 2) | day-0 skeleton |
@@ -651,6 +651,36 @@ impl Genesis { fn validator_set(&self) -> Result<Vec<GenesisValidator>, GenesisE
 
 `validators` is not in the header, so the genesis hash does not change (tested). WP4 still
 owns the stored-set check (`Meta["validators"]`, research doc §6.9).
+
+## xdevs-cli additions (WP4)
+
+No new library items: `xdevs-cli` is a binary. New commands:
+
+```text
+xdevs-cli keygen --consensus --out FILE [--password P | --password-file F | --insecure-hex] [--light-kdf] [--force]
+    # Ed25519 consensus key: ConsensusKeystore JSON (keystore v3 around the seed), or the
+    # seed as 0x-hex with --insecure-hex (dev/testnet only, loud warning). Prints the
+    # `ed25519:0x…` public key (genesis consensusKey) and the validator address.
+xdevs-cli keygen --node-key --out FILE [--force]
+    # libp2p identity: NodeKey JSON, the format `[p2p] node_key_file` loads. Prints the peer id.
+xdevs-cli testnet init --validators N --out DIR [--full-nodes M] [--chain-id 7117]
+    [--block-time 2s] [--base-port 30300] [--host 127.0.0.1]
+    [--password P | --password-file F] [--light-kdf] [--force]
+```
+
+`testnet init` layout (absolute paths in every config; non-empty `DIR` refused unless
+`--force`, which replaces `genesis.json` and the `node<k>/` directories):
+
+```text
+DIR/genesis.json        Genesis::dev(chain_id) (10 Anvil accounts, treasury, xip0001Block 0),
+                        blockTimeMs, N validators { name: "node<k>", power: 1, p2p: "<addr>/p2p/<peer id>" }
+DIR/node<k>/consensus_key.hex | consensus_key.json   (validators only; .json with a password)
+DIR/node<k>/node_key.json                            (one identity for consensus p2p and tx gossip)
+DIR/node<k>/config.toml                              (NodeConfig + [metrics]; data_dir = node<k>/data)
+ports of node k: base + 10k + 0 (p2p), 1 (gossip), 2 (rpc http), 3 (metrics)
+[p2p] persistent_peers / [gossip] bootnodes: every other node, "/ip4/<host>/tcp/<port>/p2p/<peer id>"
+[validator] password_file = --password-file; with --password only: $XDEVS_KEY_PASSWORD at run time
+```
 
 ## xdevs-storage additions (WP4)
 

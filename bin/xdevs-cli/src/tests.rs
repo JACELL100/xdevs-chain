@@ -278,3 +278,149 @@ async fn rpc_errors_are_reported() {
     let err = rpc.chain_id().await.unwrap_err().to_string();
     assert!(err.contains("eth_chainId"), "{err}");
 }
+
+#[test]
+fn keygen_consensus_and_node_key_flags() {
+    let parse = |args: &[&str]| Cli::try_parse_from([&["xdevs-cli", "keygen"], args].concat());
+    assert!(parse(&["--consensus"]).is_err(), "--out is required");
+    assert!(parse(&["--node-key"]).is_err(), "--out is required");
+    assert!(parse(&["--consensus", "--node-key", "--out", "k"]).is_err());
+    assert!(
+        parse(&["--insecure-hex", "--out", "k"]).is_err(),
+        "needs --consensus"
+    );
+    assert!(parse(&[
+        "--consensus",
+        "--insecure-hex",
+        "--password",
+        "x",
+        "--out",
+        "k"
+    ])
+    .is_err());
+    assert!(parse(&["--node-key", "--password", "x", "--out", "k"]).is_err());
+    assert!(parse(&["--consensus", "--insecure-hex", "--out", "k"]).is_ok());
+    assert!(parse(&["--out", "k"]).is_ok());
+    assert!(parse(&[]).is_ok());
+}
+
+#[tokio::test]
+async fn keygen_consensus_keys_load_in_the_node() {
+    use xdevs_node::{consensus::load_consensus_key, ValidatorSection};
+    let dir = tempfile::tempdir().unwrap();
+    let pw_file = dir.path().join("pw");
+    std::fs::write(&pw_file, "secret\n").unwrap();
+
+    // Encrypted keystore (password from a file), then plain hex.
+    let ks = dir.path().join("keys").join("consensus.json");
+    let ks_s = ks.to_str().unwrap();
+    let pf = pw_file.to_str().unwrap();
+    let args = ["xdevs-cli", "keygen", "--consensus", "--light-kdf"];
+    let out = run(Cli::try_parse_from(
+        [&args[..], &["--password-file", pf, "--out", ks_s]].concat(),
+    )
+    .unwrap())
+    .await
+    .unwrap();
+    let public = out
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .last()
+        .unwrap();
+    let keystore = ConsensusKeystore::load(&ks).unwrap();
+    assert_eq!(keystore.public_key, public);
+    let seed = load_consensus_key(&ValidatorSection {
+        enabled: true,
+        key_file: Some(ks.clone()),
+        password_file: Some(pw_file.clone()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(format_ed25519_public_key(&seed.public_key()), public);
+    assert!(
+        out.contains(&xdevs_primitives::hex::encode_prefixed(validator_address(
+            &seed.public_key()
+        )))
+    );
+    // No silent overwrite.
+    let again = Cli::try_parse_from([&args[..], &["--password-file", pf, "--out", ks_s]].concat());
+    assert!(run(again.unwrap()).await.is_err());
+
+    let hex = dir.path().join("consensus.hex");
+    let out = run(Cli::try_parse_from([
+        "xdevs-cli",
+        "keygen",
+        "--consensus",
+        "--insecure-hex",
+        "--out",
+        hex.to_str().unwrap(),
+    ])
+    .unwrap())
+    .await
+    .unwrap();
+    let seed = load_consensus_key(&ValidatorSection {
+        enabled: true,
+        key_file: Some(hex),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(out.contains(&format_ed25519_public_key(&seed.public_key())));
+}
+
+#[tokio::test]
+async fn keygen_node_key_loads_in_the_node() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("node_key.json");
+    let p = path.to_str().unwrap();
+    let out = run(Cli::try_parse_from(["xdevs-cli", "keygen", "--node-key", "--out", p]).unwrap())
+        .await
+        .unwrap();
+    let key = NodeKey::load(&path).unwrap();
+    assert_eq!(out, format!("peer id: {}", key.peer_id()));
+    assert!(key.peer_id().starts_with("12D3KooW"));
+    // The node uses the same identity on every start (stable peer id).
+    let loaded = xdevs_node::consensus::load_node_key(Some(&path)).unwrap();
+    assert_eq!(&loaded, key.seed());
+    let again = Cli::try_parse_from(["xdevs-cli", "keygen", "--node-key", "--out", p]).unwrap();
+    assert!(run(again).await.is_err());
+    let forced =
+        Cli::try_parse_from(["xdevs-cli", "keygen", "--node-key", "--out", p, "--force"]).unwrap();
+    run(forced).await.unwrap();
+    assert_ne!(NodeKey::load(&path).unwrap().peer_id(), key.peer_id());
+}
+
+#[tokio::test]
+async fn testnet_init_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let out_dir = dir.path().join("net");
+    let o = out_dir.to_str().unwrap();
+    let base = [
+        "xdevs-cli",
+        "testnet",
+        "init",
+        "--validators",
+        "2",
+        "--out",
+        o,
+    ];
+    let out = run(Cli::try_parse_from([&base[..], &["--block-time", "1s"]].concat()).unwrap())
+        .await
+        .unwrap();
+    assert!(out.contains("http://127.0.0.1:30302"), "{out}");
+    assert!(out.contains("http://127.0.0.1:30312"), "{out}");
+    assert!(out.contains("12D3KooW"), "{out}");
+    assert!(
+        run(Cli::try_parse_from(base).unwrap()).await.is_err(),
+        "not empty"
+    );
+    run(Cli::try_parse_from([&base[..], &["--force"]].concat()).unwrap())
+        .await
+        .unwrap();
+    assert!(Cli::try_parse_from([&base[..], &["--block-time", "fast"]].concat()).is_err());
+    assert!(Cli::try_parse_from(
+        [&base[..], &["--password", "a", "--password-file", "b"]].concat()
+    )
+    .is_err());
+}

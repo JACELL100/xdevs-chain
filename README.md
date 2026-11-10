@@ -143,6 +143,26 @@ The dev genesis pre-funds the 10 well-known Anvil/Hardhat test accounts (mnemoni
 
 Current Phase 1 limits: state is readable for the last 10,000 blocks by default (older blocks return "historical state not available"), and WebSocket subscriptions (`eth_subscribe`) are not implemented yet. See [Phase 1 node status](#phase-1-node-status-what-the-rust-node-does-today).
 
+## Run a local 4-validator network
+
+```bash
+# Keys, one shared genesis.json and node0..node3/config.toml (dev keys, unencrypted)
+./target/debug/xdevs-cli testnet init --validators 4 --out ./testnet
+
+# One terminal per validator (RPC on 127.0.0.1:30302, :30312, :30322, :30332)
+./target/debug/xdevs run --config ./testnet/node0/config.toml
+./target/debug/xdevs run --config ./testnet/node1/config.toml
+./target/debug/xdevs run --config ./testnet/node2/config.toml
+./target/debug/xdevs run --config ./testnet/node3/config.toml
+
+cast block-number --rpc-url http://127.0.0.1:30332
+
+# Options: --chain-id 7117 --block-time 2s --base-port 30300 --host 127.0.0.1 --full-nodes 1
+#          --password-file pw.txt (encrypted consensus keys) --force (replace an existing testnet)
+# Single keys: xdevs-cli keygen --consensus --out consensus_key.json
+#              xdevs-cli keygen --node-key --out node_key.json
+```
+
 ## Add the local dev chain to MetaMask
 
 **Chain id 7117 is for local development only.** It is not a public network.

@@ -2,6 +2,9 @@
 //!
 //! ```text
 //! xdevs-cli keygen --out alice.json
+//! xdevs-cli keygen --consensus --out consensus_key.json      # Ed25519 validator key
+//! xdevs-cli keygen --node-key --out node_key.json            # libp2p identity
+//! xdevs-cli testnet init --validators 4 --out ./testnet      # local network
 //! xdevs-cli address --key alice.json
 //! xdevs-cli send --from alice.json --to 0xBob... --value 10 --rpc http://localhost:8545
 //! xdevs-cli balance 0xBob... --rpc http://localhost:8545
@@ -13,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 mod rpc;
+mod testnet;
 mod units;
 
 use std::{
@@ -26,7 +30,8 @@ use alloy_rpc_types_eth::TransactionRequest;
 use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use xdevs_crypto::{
-    keystore::ScryptParams, sign_tx_envelope, signer_from_hex, Keystore, PrivateKeySigner,
+    ed25519::format_ed25519_public_key, keystore::ScryptParams, sign_tx_envelope, signer_from_hex,
+    validator_address, ConsensusKeystore, Ed25519Seed, Keystore, NodeKey, PrivateKeySigner,
 };
 use xdevs_primitives::{Address, Encodable2718, TxKind, B256, U256};
 use zeroize::Zeroizing;
@@ -48,7 +53,7 @@ const TRANSFER_GAS: u64 = 21_000;
 #[command(
     name = "xdevs-cli",
     version,
-    about = "xDEVS Chain CLI: keys and transactions"
+    about = "xDEVS Chain CLI: keys, transactions and local testnets"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -68,11 +73,12 @@ struct PasswordArgs {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Generate a new secp256k1 account key.
+    /// Generate a new key: a secp256k1 account key (default), an Ed25519 validator
+    /// consensus key (`--consensus`) or a libp2p node identity (`--node-key`).
     Keygen {
         /// Write an encrypted keystore (Web3 Secret Storage v3) to this path.
-        /// Without it the private key is printed (dev only).
-        #[arg(long)]
+        /// Without it the private key is printed (dev only, account keys only).
+        #[arg(long, required_if_eq_any = [("consensus", "true"), ("node_key", "true")])]
         out: Option<PathBuf>,
         #[command(flatten)]
         password: PasswordArgs,
@@ -82,7 +88,23 @@ enum Command {
         /// Overwrite an existing file.
         #[arg(long)]
         force: bool,
+        /// Ed25519 validator consensus key (encrypted keystore v3 around the seed).
+        #[arg(long, conflicts_with = "node_key")]
+        consensus: bool,
+        /// libp2p node identity (`[p2p] node_key_file`; unencrypted, owner-only file).
+        #[arg(long, conflicts_with_all = ["password", "password_file", "light_kdf"])]
+        node_key: bool,
+        /// With --consensus: write the seed as plain hex, unencrypted (dev/testnet only).
+        #[arg(
+            long,
+            requires = "consensus",
+            conflicts_with_all = ["password", "password_file", "light_kdf"]
+        )]
+        insecure_hex: bool,
     },
+    /// Local multi-node networks.
+    #[command(subcommand)]
+    Testnet(TestnetCommand),
     /// Print the address of a keystore.
     Address {
         /// Keystore file.
@@ -140,6 +162,53 @@ enum Command {
         #[arg(long)]
         wei: bool,
     },
+}
+
+/// `testnet` subcommands.
+#[derive(Debug, Subcommand)]
+enum TestnetCommand {
+    /// Write keys, one shared genesis.json and a config.toml per node, ready for
+    /// `xdevs run --config DIR/nodeK/config.toml`.
+    Init(TestnetInitArgs),
+}
+
+/// `testnet init` arguments.
+#[derive(Debug, Args)]
+struct TestnetInitArgs {
+    /// Number of validators (equal voting power).
+    #[arg(long)]
+    validators: usize,
+    /// Output directory (must be empty unless --force).
+    #[arg(long)]
+    out: PathBuf,
+    /// Chain id.
+    #[arg(long, default_value_t = 7117)]
+    chain_id: u64,
+    /// Target block time, e.g. `2s`, `500ms`.
+    #[arg(long, default_value = "2s", value_parser = testnet::parse_block_time)]
+    block_time: Duration,
+    /// Node k uses ports base + 10k (p2p), +1 (gossip), +2 (rpc), +3 (metrics).
+    #[arg(long, default_value_t = 30300)]
+    base_port: u16,
+    /// Host / IP the nodes listen on and reach each other at.
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+    /// Extra full nodes (no consensus key).
+    #[arg(long, default_value_t = 0)]
+    full_nodes: usize,
+    /// Encrypt the consensus keys with this password (default: plain hex, dev only).
+    #[arg(long)]
+    password: Option<String>,
+    /// Encrypt the consensus keys with the password in this file (the configs point
+    /// `[validator] password_file` at it).
+    #[arg(long, conflicts_with = "password")]
+    password_file: Option<PathBuf>,
+    /// Cheap scrypt parameters for the encrypted keys.
+    #[arg(long)]
+    light_kdf: bool,
+    /// Replace the genesis and node directories of an existing testnet in --out.
+    #[arg(long)]
+    force: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +338,88 @@ fn cmd_keygen(
     Ok(signer.address().to_string())
 }
 
+/// Loud warning printed for unencrypted consensus keys.
+const INSECURE_KEY_WARNING: &str = "\
+WARNING: UNENCRYPTED consensus key(s) written. DEV / TESTNET ONLY:
+WARNING: anyone who reads these files can sign as the validator. Use --password or
+WARNING: --password-file for anything that holds value.";
+
+fn cmd_keygen_consensus(
+    out: &Path,
+    password: &PasswordArgs,
+    light_kdf: bool,
+    insecure_hex: bool,
+    force: bool,
+) -> anyhow::Result<String> {
+    if out.exists() && !force {
+        bail!(
+            "{} already exists (use --force to overwrite)",
+            out.display()
+        );
+    }
+    let seed = Ed25519Seed::generate();
+    if insecure_hex {
+        let hex = Zeroizing::new(xdevs_primitives::hex::encode_prefixed(seed.as_bytes()));
+        write_new_file(out, &hex, force)?;
+        eprintln!("{INSECURE_KEY_WARNING}");
+    } else {
+        let pw = get_password(password, true)?;
+        let params = if light_kdf {
+            ScryptParams::LIGHT
+        } else {
+            ScryptParams::STANDARD
+        };
+        let ks = ConsensusKeystore::encrypt(&seed, pw.as_bytes(), params)?;
+        write_new_file(out, &ks.to_json_string(), force)?;
+    }
+    eprintln!("consensus key written to {}", out.display());
+    let public = seed.public_key();
+    Ok(format!(
+        "public key:        {}\nvalidator address: {}",
+        format_ed25519_public_key(&public),
+        xdevs_primitives::hex::encode_prefixed(validator_address(&public))
+    ))
+}
+
+fn cmd_keygen_node_key(out: &Path, force: bool) -> anyhow::Result<String> {
+    let key = NodeKey::generate();
+    write_new_file(out, &key.to_json_string(), force)?;
+    eprintln!("node key written to {}", out.display());
+    Ok(format!("peer id: {}", key.peer_id()))
+}
+
+fn cmd_testnet_init(args: TestnetInitArgs) -> anyhow::Result<String> {
+    let password = match (&args.password, &args.password_file) {
+        (Some(p), _) => Some(Zeroizing::new(p.clone())),
+        (None, Some(_)) => Some(get_password(
+            &PasswordArgs {
+                password: None,
+                password_file: args.password_file.clone(),
+            },
+            false,
+        )?),
+        (None, None) => None,
+    };
+    let encrypted = password.is_some();
+    let t = testnet::init(&testnet::TestnetOptions {
+        validators: args.validators,
+        full_nodes: args.full_nodes,
+        out: args.out,
+        chain_id: args.chain_id,
+        block_time: args.block_time,
+        base_port: args.base_port,
+        host: args.host,
+        force: args.force,
+        password,
+        password_file: args.password_file,
+        light_kdf: args.light_kdf,
+    })?;
+    if !encrypted {
+        eprintln!("{INSECURE_KEY_WARNING}");
+    }
+    Ok(testnet::summary(&t))
+}
+
 fn cmd_address(key: &Path, password: &PasswordArgs) -> anyhow::Result<Address> {
     let ks = read_keystore(key)?;
     if let Some(addr) = ks.stored_address() {
@@ -385,7 +536,18 @@ async fn run(cli: Cli) -> anyhow::Result<String> {
             password,
             light_kdf,
             force,
-        } => cmd_keygen(out.as_deref(), &password, light_kdf, force),
+            consensus,
+            node_key,
+            insecure_hex,
+        } => match (consensus, node_key, out) {
+            (true, _, Some(out)) => {
+                cmd_keygen_consensus(&out, &password, light_kdf, insecure_hex, force)
+            }
+            (_, true, Some(out)) => cmd_keygen_node_key(&out, force),
+            (false, false, out) => cmd_keygen(out.as_deref(), &password, light_kdf, force),
+            _ => bail!("--out is required for consensus and node keys"),
+        },
+        Command::Testnet(TestnetCommand::Init(args)) => cmd_testnet_init(args),
         Command::Address { key, password } => Ok(cmd_address(&key, &password)?.to_string()),
         Command::Send {
             rpc,

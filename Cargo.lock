@@ -7621,7 +7621,11 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "toml",
  "xdevs-crypto",
+ "xdevs-genesis",
+ "xdevs-metrics",
+ "xdevs-node",
  "xdevs-primitives",
  "zeroize",
 ]
