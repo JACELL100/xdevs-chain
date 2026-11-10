@@ -13,10 +13,19 @@ xdevs-primitives.workspace = true
 # Malachite (pinned =0.8.2): only ever used inside `src/malachite/`.
 arc-malachitebft-app-channel.workspace = true
 arc-malachitebft-signing-ed25519.workspace = true
+# Malachite crates already in the graph (pulled by app-channel) whose types app-channel
+# does not re-export: signing errors / verification results and sync's ValueRequest /
+# ValueResponse. Same exact pin as the workspace's Malachite crates.
+arc-malachitebft-signing = "=0.8.2"
+arc-malachitebft-sync = "=0.8.2"
+# Malachite's codec trait uses `bytes::Bytes` (1.x, already in the lockfile).
+bytes = "1.12.1"
+redb.workspace = true
+tracing.workspace = true
 ed25519-consensus.workspace = true
 alloy-rlp.workspace = true
 async-trait.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time", "macros", "rt"] }
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
@@ -26,4 +35,5 @@ zeroize.workspace = true
 [dev-dependencies]
 ed25519-dalek.workspace = true
 toml.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

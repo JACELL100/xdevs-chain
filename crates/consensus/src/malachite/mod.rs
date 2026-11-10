@@ -1,20 +1,21 @@
 //! Malachite adapter (WP1, research doc §6.3–§6.8). **All** Malachite types live in this
 //! module and never appear in the crate's public API.
 //!
-//! Day-0 stub: it imports the pinned `arc-malachitebft-*` 0.8.2 crates (so the whole
-//! dependency graph, including Malachite's libp2p 0.56 network, is compiled and checked
-//! on every platform) and holds the pure config mappings. WP1 adds here:
-//! `context` (Malachite `Context` + types), `codec` (`XdevsCodec` for network / WAL /
-//! sync), `signer` (Ed25519 `Signer`/`Verifier` + `SignGuard`), `streaming` (proposal
-//! parts), `store` (`UndecidedBlocks`), and `engine` (the `AppMsg` loop).
+//! * [`context`] — the Malachite `Context` and its types (§6.4).
+//! * [`codec`] — `XdevsCodec` for network, WAL and sync (versioned alloy-rlp).
+//! * [`signer`] — Ed25519 `Signer` / `Verifier`; the signer checks the SignGuard first.
+//! * [`store`] — `consensus.redb`: SignGuard state and undecided blocks (§6.7).
+//! * [`streaming`] — proposal parts and their reassembly with per-peer budgets.
+//! * [`engine`] — config mapping, engine start / stop and the `AppMsg` loop (§6.3).
 
-// Re-exports used by the WP1 modules as they land.
-#[allow(unused_imports)]
-pub(crate) use arc_malachitebft_app_channel::{
-    app::types::core::{HeightParams, LinearTimeouts, Round, Timeout, VoteExtensionPolicy},
-    start_engine, AppMsg, Channels, NetworkMsg,
-};
-#[allow(unused_imports)]
+pub(crate) mod codec;
+pub(crate) mod context;
+pub(crate) mod engine;
+pub(crate) mod signer;
+pub(crate) mod store;
+pub(crate) mod streaming;
+
+pub(crate) use arc_malachitebft_app_channel::app::types::core::LinearTimeouts;
 pub(crate) use arc_malachitebft_signing_ed25519::{Ed25519, PrivateKey, PublicKey, Signature};
 
 use crate::config::ConsensusTimeouts;
@@ -22,7 +23,6 @@ use std::time::Duration;
 
 /// `[consensus]` → Malachite `LinearTimeouts` (§7). `rebroadcast` follows Malachite's
 /// default rule `propose + prevote + precommit`.
-#[allow(dead_code)] // used by the WP1 engine loop (HeightParams)
 pub(crate) fn linear_timeouts(t: &ConsensusTimeouts) -> LinearTimeouts {
     let ms = Duration::from_millis;
     let (propose, prevote, precommit) = (
@@ -51,6 +51,7 @@ pub(crate) fn private_key(seed: &[u8; 32]) -> PrivateKey {
 mod tests {
     use super::*;
     use crate::types::{ValidatorKey, VoteType};
+    use arc_malachitebft_app_channel::app::types::core::{Round, Timeout};
 
     #[test]
     fn timeouts_map_and_grow_linearly() {

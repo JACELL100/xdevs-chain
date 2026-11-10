@@ -82,11 +82,10 @@ impl MalachiteEngine {
 impl ConsensusEngine for MalachiteEngine {
     async fn run(
         self,
-        _app: Arc<dyn ConsensusApp>,
-        _shutdown: tokio::sync::watch::Receiver<bool>,
+        app: Arc<dyn ConsensusApp>,
+        shutdown: tokio::sync::watch::Receiver<bool>,
     ) -> anyhow::Result<()> {
-        // WP1: start_engine(...) and the AppMsg loop of research doc §6.3.
-        todo!("WP1: MalachiteEngine::run (research doc §6.3)")
+        crate::malachite::engine::run(self.config, self.keys, app, shutdown).await
     }
 }
 
