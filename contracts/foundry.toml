@@ -1,0 +1,57 @@
+# xDEVS Chain system & safety contracts.
+# Two parallel work areas use separate profiles so they compile independently:
+#   FOUNDRY_PROFILE=system forge test   -> src/system   + test/system
+#   FOUNDRY_PROFILE=accounts forge test -> src/accounts + test/accounts
+#   FOUNDRY_PROFILE=periphery forge test -> src/periphery + test/periphery
+#   forge test (default)                -> everything (used by CI)
+
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+cache_path = "cache"
+libs = ["lib"]
+remappings = [
+  "forge-std/=lib/forge-std/src/",
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+  "account-abstraction/=lib/account-abstraction/contracts/",
+]
+solc_version = "0.8.38"
+evm_version = "prague"
+optimizer = true
+optimizer_runs = 200
+bytecode_hash = "none"
+cbor_metadata = false
+
+[profile.default.fuzz]
+runs = 256
+
+[profile.default.invariant]
+runs = 64
+depth = 32
+fail_on_revert = false
+
+[profile.system]
+src = "src/system"
+test = "test/system"
+script = "script/system"
+out = "out/system"
+cache_path = "cache/system"
+
+[profile.accounts]
+src = "src/accounts"
+test = "test/accounts"
+script = "script/accounts"
+out = "out/accounts"
+cache_path = "cache/accounts"
+
+[profile.periphery]
+src = "src/periphery"
+test = "test/periphery"
+script = "script/periphery"
+out = "out/periphery"
+cache_path = "cache/periphery"
+
+[fmt]
+line_length = 110

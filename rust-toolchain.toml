@@ -1,0 +1,5 @@
+# xDEVS Chain is developed and tested on Rust stable (currently 1.99.x).
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
