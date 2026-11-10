@@ -30,7 +30,7 @@ jobs:
       XDEVS_BLOCK_TIME: 1s
       XDEVS_E2E_ARTIFACTS: ${{ github.workspace }}/e2e-artifacts
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v3
 
