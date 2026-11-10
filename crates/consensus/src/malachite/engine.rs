@@ -382,6 +382,12 @@ fn round_dec(v: u64) -> Round {
     }
 }
 
+/// Malachite `target_time` of a height: the block time, or none while catching up
+/// (see `Host::height_params`).
+fn target_time(t: &crate::config::ConsensusTimeouts, catching_up: bool) -> Option<Duration> {
+    (!catching_up).then(|| t.block_time())
+}
+
 fn to_m_validity(v: crate::Validity) -> MValidity {
     MValidity::from_bool(v.is_valid())
 }
@@ -439,11 +445,23 @@ impl Host {
         Ok(set)
     }
 
+    /// Parameters of `height`. The block time is Malachite's `target_time` (minimum
+    /// height duration) only while this node is at the tip. If it already holds a
+    /// proposal for `height + 1` (stored only after the streamer's signature verified;
+    /// a proposer builds on a committed parent), the network has decided `height` and
+    /// this node is catching up: it must finalize as soon as it decides, or a node that
+    /// decides from buffered live votes (instead of ValueSync) advances exactly at the
+    /// chain's pace and never closes its lag. Only the next height counts, so a stray
+    /// far-future stream cannot switch pacing off. Pacing only, never safety.
     async fn height_params(&mut self, height: u64) -> anyhow::Result<HeightParams<XdevsContext>> {
+        let catching_up = self.store.has_proposal_at(height.saturating_add(1))?;
+        if catching_up {
+            debug!(target: LOG, height, "catching up: no minimum height duration");
+        }
         Ok(HeightParams::new(
             self.validator_set(height).await?,
             linear_timeouts(&self.timeouts),
-            Some(self.timeouts.block_time()),
+            target_time(&self.timeouts, catching_up),
         ))
     }
 
@@ -1045,6 +1063,13 @@ mod tests {
         c.p2p.listen = "/ip4/127.0.0.1/tcp/1".into();
         c.timeouts.timeout_propose_ms = 0;
         assert!(node_config(&c).is_err());
+    }
+
+    #[test]
+    fn no_target_time_while_catching_up() {
+        let t = ConsensusTimeouts::fast_for_tests(400);
+        assert_eq!(target_time(&t, false), Some(Duration::from_millis(400)));
+        assert_eq!(target_time(&t, true), None);
     }
 
     #[test]

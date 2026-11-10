@@ -284,6 +284,19 @@ impl ConsensusStore {
         Ok(out)
     }
 
+    /// `true` if a proposal is stored for `height` (streams for future heights are
+    /// kept until their height starts; see `Host::height_params`).
+    pub fn has_proposal_at(&self, height: u64) -> anyhow::Result<bool> {
+        let tx = self.db.begin_read().map_err(err)?;
+        let t = tx.open_table(UNDECIDED_PROPOSALS).map_err(err)?;
+        let start = height.to_be_bytes();
+        let next = t.range(&start[..]..).map_err(err)?.next();
+        Ok(match next.transpose().map_err(err)? {
+            Some((k, _)) => k.value().starts_with(&start),
+            None => false,
+        })
+    }
+
     /// Drop every block and proposal at heights `<= height` (at `Finalized`).
     pub fn prune(&self, height: u64) -> anyhow::Result<()> {
         let upper = height.checked_add(1).map(u64::to_be_bytes);
@@ -392,12 +405,18 @@ mod tests {
         assert_eq!(at2.len(), 2);
         assert_eq!((at2[0].0, at2[1].0), (0, 2));
         assert_eq!(at2[0].1, b2.hash());
+        assert!(s.has_proposal_at(3).unwrap());
+        assert!(!s.has_proposal_at(4).unwrap());
         s.prune(2).unwrap();
+        assert!(!s.has_proposal_at(2).unwrap());
+        assert!(!s.has_proposal_at(0).unwrap());
+        assert!(s.has_proposal_at(3).unwrap());
         assert_eq!(s.get_block(2, b2.hash()).unwrap(), None);
         assert!(s.proposals_at_height(1).unwrap().is_empty());
         assert!(s.proposals_at_height(2).unwrap().is_empty());
         assert_eq!(s.proposals_at_height(3).unwrap().len(), 2);
         s.prune(u64::MAX).unwrap();
         assert!(s.proposals_at_height(3).unwrap().is_empty());
+        assert!(!s.has_proposal_at(3).unwrap());
     }
 }

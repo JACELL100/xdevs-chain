@@ -1,17 +1,23 @@
 //! Test utilities for xDEVS Chain (research doc §6.12, WP5). **Dev-only**: depend on it
 //! from `[dev-dependencies]` only.
 //!
-//! Planned contents (WP5):
-//! * `LocalNet::start(n, opts)`: `n` in-process nodes with fresh Ed25519 consensus and
-//!   node keys, a genesis with `n` equal-power validators plus the dev alloc, 127.0.0.1
-//!   ports, `persistent_peers` = all others, one tempdir per node.
-//! * Controls: `stop(i)`, `crash(i)`, `restart(i)`, `add_node()`.
-//! * Assertions: `wait_height(h, timeout)`, `assert_no_forks()`, `assert_roots()`.
+//! * [`LocalNet`]: N validators + M full nodes in-process (ephemeral 127.0.0.1 ports,
+//!   one temp dir per node), with stop / restart / late-joiner controls and the
+//!   `wait_for_height` / `assert_no_fork` assertions.
+//! * [`alerts`]: counters of safety-relevant log events (SignGuard refusals,
+//!   equivocation evidence, forks).
+//! * [`wait_until`]: the polling primitive.
 //!
-//! **Owner: WP5.** Day-0 skeleton only.
+//! The Phase 2 exit-criteria tests live in `tests/phase2_exit.rs`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+
+pub mod alerts;
+mod localnet;
+
+pub use alerts::{init_tracing, safety_alerts, SafetyAlerts};
+pub use localnet::{free_ports, tcp_addr, LocalNet, LocalNetOptions, NetNode, Role};
 
 use std::{
     future::Future,
