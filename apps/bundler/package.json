@@ -1,0 +1,26 @@
+{
+  "name": "@xdevs/dev-bundler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DEV-ONLY, single-operator ERC-4337 v0.9 bundler for xDEVS Chain dev chains (xdevs run --dev, anvil). Not for production.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "devnet": "node scripts/devnet.ts",
+    "build:meter": "node scripts/build-meter.ts",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "viem": "2.57.17"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}
