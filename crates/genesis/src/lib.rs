@@ -202,8 +202,12 @@ impl Genesis {
 
     /// Dev-style genesis for `chain_id` pre-funding only `accounts` with `balance` wei
     /// each (no treasury allocation). Useful for tests.
+    /// XIP-0001 (EOA lock) is active from genesis (`xip0001Block = 0`).
     pub fn dev_with_accounts(chain_id: u64, accounts: &[Address], balance: U256) -> Self {
-        let cfg = ChainConfig::new(chain_id);
+        let cfg = ChainConfig {
+            xip0001_block: Some(0),
+            ..ChainConfig::new(chain_id)
+        };
         Self {
             gas_limit: cfg.block_gas_limit,
             config: cfg,
@@ -357,6 +361,11 @@ mod tests {
             U256::from(200_000_000u64) * TXDS
         );
         assert_eq!(g.extra_data.as_ref(), b"xDEVS");
+        assert_eq!(
+            g.config.xip0001_block,
+            Some(0),
+            "XIP-0001 active from genesis"
+        );
 
         let (block, diff) = genesis_block(&g);
         assert_eq!(diff.accounts.len(), 11);

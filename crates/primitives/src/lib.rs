@@ -15,6 +15,7 @@ mod config;
 pub mod constants;
 pub mod serde_helpers;
 mod tx;
+pub mod xip0001;
 
 pub use account::{Account, AccountInfo};
 pub use block::{
@@ -23,6 +24,7 @@ pub use block::{
 };
 pub use config::{BaseFeeParams, ChainConfig};
 pub use tx::{RecoveredTx, TxLocation};
+pub use xip0001::EoaLockStatus;
 
 // ---------------------------------------------------------------------------
 // Re-exports: the canonical Ethereum types every other crate uses.

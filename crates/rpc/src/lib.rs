@@ -24,7 +24,8 @@ use async_trait::async_trait;
 use std::{net::SocketAddr, sync::Arc};
 use xdevs_primitives::{Address, Bytes, B256, U256};
 
-/// RPC types used by [`RpcBackend`] (re-exported from `alloy-rpc-types-eth`).
+/// RPC types used by [`RpcBackend`] (re-exported from `alloy-rpc-types-eth`, plus the
+/// xDEVS-specific [`EoaLockInfo`]).
 pub mod types {
     pub use alloy_rpc_types_eth::{
         Block as RpcBlock, BlockId, BlockNumberOrTag, BlockTransactions, BlockTransactionsKind,
@@ -32,6 +33,25 @@ pub mod types {
         SyncStatus, Transaction as RpcTransaction, TransactionReceipt as RpcReceipt,
         TransactionRequest,
     };
+    pub use xdevs_primitives::EoaLockStatus;
+
+    /// Result of `xdevs_getEoaLock(address, blockTag)` (XIP-0001 §5 f):
+    /// `{ "active": true, "status": "locked", "word": "0x…01", "delegatedTo": "0x…1005" }`.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct EoaLockInfo {
+        /// XIP-0001 is enforced for the block after the requested one (the block a new
+        /// transaction would go into).
+        pub active: bool,
+        /// `"unlocked"`, `"locked"` or `"sealed"` at the requested block (the protocol
+        /// classification, reported even when `active` is false).
+        pub status: EoaLockStatus,
+        /// Raw lock word `storage[address][LOCK_SLOT]` (32 bytes).
+        pub word: xdevs_primitives::B256,
+        /// Target of the account's EIP-7702 delegation (`0x…1005` for an xDEVS Smart
+        /// Account), `null` if the account is not delegated.
+        pub delegated_to: Option<xdevs_primitives::Address>,
+    }
 }
 use types::*;
 
@@ -132,6 +152,12 @@ pub trait RpcBackend: Send + Sync + 'static {
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> BackendResult<FeeHistory>;
+
+    /// `xdevs_getEoaLock(address, blockTag)`: XIP-0001 lock state of `address` at `block`.
+    /// The default reports the method as unsupported.
+    async fn eoa_lock(&self, _address: Address, _block: BlockId) -> BackendResult<EoaLockInfo> {
+        Err(RpcBackendError::Unsupported("xdevs_getEoaLock".into()))
+    }
 }
 
 /// `eth_getLogs` result cap check: `Err(LimitExceeded)` once `count` matching logs

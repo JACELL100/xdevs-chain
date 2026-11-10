@@ -5,6 +5,11 @@
 //! entry validation (§13.1, [`validation`]), pending / queued sub-pools per sender,
 //! +10% replacement bump, ordering by effective tip then arrival, lowest-fee eviction
 //! and a queued-tx TTL measured in block timestamps (no wall clock).
+//!
+//! XIP-0001 (EOA lock, spec §5 e): admission applies the same predicates as block
+//! validity against the head state ("first tx of the next block"); every new head
+//! re-checks every sender's lock status and evicts what became invalid; `LOCKED` senders
+//! may hold at most 4 txs and [`TxPool::best_txs`] yields at most one of them per block.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -16,7 +21,9 @@ pub use pool::{AccountReader, FromState, Pool};
 pub use validation::{intrinsic_gas, PoolParams};
 
 use serde::{Deserialize, Serialize};
-use xdevs_primitives::{Address, Block, ReceiptEnvelope, RecoveredTx, TxHash, U256};
+use xdevs_primitives::{
+    xip0001::Xip0001Error, Address, Block, ReceiptEnvelope, RecoveredTx, TxHash, U256,
+};
 
 /// Where a transaction came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -81,6 +88,14 @@ pub enum PoolError {
     /// Transaction type not supported (e.g. 0x03 blob txs).
     #[error("transaction type not supported: 0x{0:02x}")]
     UnsupportedType(u8),
+    /// EIP-7702 set-code transaction with an empty authorization list.
+    #[error("EIP-7702 transaction with empty auth list")]
+    EmptyAuthorizationList,
+    /// Rejected by XIP-0001 (EOA lock): the sender is sealed, or locked and the tx is not
+    /// a value-0 self-call within the gas / fee limits. RPC: code -32003 with
+    /// `data.reason` = [`Xip0001Error::violation`]`.reason()`.
+    #[error(transparent)]
+    Xip0001(#[from] Xip0001Error),
     /// Signature could not be recovered.
     #[error("invalid sender: {0}")]
     InvalidSignature(String),

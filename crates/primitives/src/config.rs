@@ -1,6 +1,9 @@
 //! Chain configuration (plan §15.1, §21.1, §33.1).
 
-use crate::{constants::*, serde_helpers::u64_flex};
+use crate::{
+    constants::*,
+    serde_helpers::{opt_u64_flex, u64_flex},
+};
 use alloy_primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
 
@@ -103,6 +106,15 @@ pub struct ChainConfig {
     /// `msg.sender` of protocol-initiated system calls.
     #[serde(default = "d_system")]
     pub system_address: Address,
+    /// First block at which XIP-0001 (EOA lock of EIP-7702 smart accounts,
+    /// `docs/specs/xip-0001-eoa-lock.md`) is enforced. JSON `xip0001Block`; absent =
+    /// never active. Dev chains and the testnet activate it at genesis (`0`).
+    #[serde(
+        default,
+        with = "opt_u64_flex",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub xip0001_block: Option<u64>,
 }
 
 impl ChainConfig {
@@ -115,12 +127,22 @@ impl ChainConfig {
             base_fee: BaseFeeParams::default(),
             treasury: TREASURY_ADDRESS,
             system_address: SYSTEM_ADDRESS,
+            xip0001_block: None,
         }
     }
 
-    /// Configuration of the local single-node dev chain ([`DEV_CHAIN_ID`]).
+    /// Configuration of the local single-node dev chain ([`DEV_CHAIN_ID`]): the
+    /// [`ChainConfig::new`] defaults with XIP-0001 active from genesis.
     pub fn dev() -> Self {
-        Self::new(DEV_CHAIN_ID)
+        Self {
+            xip0001_block: Some(0),
+            ..Self::new(DEV_CHAIN_ID)
+        }
+    }
+
+    /// `true` if the XIP-0001 rules apply to block `number` (`number >= xip0001Block`).
+    pub fn xip0001_active(&self, number: u64) -> bool {
+        self.xip0001_block.is_some_and(|start| number >= start)
     }
 
     /// Split a base-fee amount (wei) into `(burned, to_treasury)` using `burn_bps`.
@@ -158,6 +180,32 @@ mod tests {
         assert_eq!(cfg.base_fee, BaseFeeParams::default());
         assert_eq!(cfg.treasury, TREASURY_ADDRESS);
         assert_eq!(cfg.system_address, SYSTEM_ADDRESS);
+        // F2: absent = never active.
+        assert_eq!(cfg.xip0001_block, None);
+        assert!(!cfg.xip0001_active(0) && !cfg.xip0001_active(u64::MAX));
+    }
+
+    #[test]
+    fn xip0001_activation() {
+        for v in ["100", "\"100\"", "\"0x64\""] {
+            let json = format!(r#"{{"chainId": 1, "xip0001Block": {v}}}"#);
+            let cfg: ChainConfig = serde_json::from_str(&json).unwrap();
+            assert_eq!(cfg.xip0001_block, Some(100), "{v}");
+            // F1: block 99 inactive, block 100 active.
+            assert!(!cfg.xip0001_active(99));
+            assert!(cfg.xip0001_active(100));
+            assert!(cfg.xip0001_active(101));
+        }
+        let cfg: ChainConfig =
+            serde_json::from_str(r#"{"chainId": 1, "xip0001Block": null}"#).unwrap();
+        assert_eq!(cfg.xip0001_block, None);
+        // Serialized only when set.
+        assert!(!serde_json::to_string(&ChainConfig::new(1))
+            .unwrap()
+            .contains("xip0001"));
+        let dev = serde_json::to_string(&ChainConfig::dev()).unwrap();
+        assert!(dev.contains(r#""xip0001Block":0"#), "{dev}");
+        assert!(ChainConfig::dev().xip0001_active(0));
     }
 
     #[test]

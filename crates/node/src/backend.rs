@@ -10,8 +10,9 @@ use crate::chain::{self, Db};
 use std::sync::Arc;
 use xdevs_crypto::decode_and_recover;
 use xdevs_execution::{next_base_fee, CallResult, EvmExecutor, ExecutionError};
-use xdevs_mempool::{Pool, TxOrigin, TxPool};
+use xdevs_mempool::{Pool, PoolError, TxOrigin, TxPool};
 use xdevs_primitives::{
+    xip0001::{Xip0001Error, LOCK_SLOT},
     Address, Block, Bytes, ChainConfig, Header, ReceiptEnvelope, RecoveredTx, Transaction,
     TxEnvelope, TxKind, B256, U256,
 };
@@ -191,9 +192,25 @@ fn reverted(output: Bytes) -> RpcBackendError {
     }
 }
 
+/// XIP-0001 rejection: JSON-RPC -32003 with `data.reason` (spec §5 f).
+fn xip0001_rejected(e: &Xip0001Error) -> RpcBackendError {
+    RpcBackendError::TxRejected {
+        reason: e.violation.reason().to_string(),
+        message: e.to_string(),
+    }
+}
+
+fn pool_err(e: PoolError) -> RpcBackendError {
+    match e {
+        PoolError::Xip0001(e) => xip0001_rejected(&e),
+        other => RpcBackendError::Rejected(other.to_string()),
+    }
+}
+
 fn exec_err(e: ExecutionError) -> RpcBackendError {
     match e {
         ExecutionError::Reverted { output } => reverted(output),
+        ExecutionError::Xip0001 { error, .. } => xip0001_rejected(&error),
         ExecutionError::State(s) => RpcBackendError::Internal(s),
         ExecutionError::InvalidRequest(s) | ExecutionError::Evm(s) => RpcBackendError::Rejected(s),
         other => RpcBackendError::Rejected(other.to_string()),
@@ -484,8 +501,7 @@ impl RpcBackend for NodeBackend {
             let tx = decode_and_recover(&raw, chain_id)
                 .map_err(|e| RpcBackendError::Rejected(e.to_string()))?;
             let hash = tx.hash();
-            pool.add(tx, TxOrigin::External)
-                .map_err(|e| RpcBackendError::Rejected(e.to_string()))?;
+            pool.add(tx, TxOrigin::External).map_err(pool_err)?;
             tracing::debug!(target: "xdevs::rpc", %hash, "transaction added to pool");
             Ok(hash)
         })
@@ -601,6 +617,26 @@ impl RpcBackend for NodeBackend {
         self.read(|s, ctx| {
             let (_, head) = db(chain::latest_header(s))?;
             Ok(next_base_fee(&head, &ctx.cfg))
+        })
+        .await
+    }
+
+    async fn eoa_lock(&self, address: Address, block: BlockId) -> BackendResult<EoaLockInfo> {
+        self.read(move |s, ctx| {
+            let (header, state) = state_at(s, block)?;
+            let status = state.eoa_lock_status(address).map_err(state_err)?;
+            let word = state.storage(address, LOCK_SLOT).map_err(state_err)?;
+            let code = state.code(address).map_err(state_err)?;
+            let delegated_to = code
+                .strip_prefix(&[0xef, 0x01, 0x00])
+                .filter(|target| target.len() == 20)
+                .map(Address::from_slice);
+            Ok(EoaLockInfo {
+                active: ctx.cfg.xip0001_active(header.number + 1),
+                status,
+                word: B256::from(word),
+                delegated_to,
+            })
         })
         .await
     }

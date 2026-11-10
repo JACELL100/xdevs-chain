@@ -4,6 +4,8 @@ use xdevs_primitives::{
     constants::GWEI,
     reexports::alloy_consensus::{SignableTransaction, TxEip4844},
     reexports::alloy_eips::eip2930::{AccessList, AccessListItem},
+    reexports::alloy_eips::eip7702::Authorization,
+    xip0001::{DESIGNATOR_HASH, LOCK_SLOT},
     Bytes, Header, Signature, TxEip1559, TxEip2930, TxEip7702, TxEnvelope, TxKind, TxLegacy, B256,
 };
 
@@ -12,6 +14,27 @@ const BASE: u64 = GWEI;
 const RICH: u128 = 1_000_000_000_000_000_000_000; // 1000 XDS
 
 type Accounts = Arc<RwLock<BTreeMap<Address, AccountInfo>>>;
+type Slots = Arc<RwLock<BTreeMap<(Address, B256), U256>>>;
+
+/// Test state: accounts plus storage slots (for the XIP-0001 lock word).
+struct TestReader {
+    accounts: Accounts,
+    slots: Slots,
+}
+
+impl AccountReader for TestReader {
+    fn account(&self, address: Address) -> Result<Option<AccountInfo>, StateError> {
+        Ok(self.accounts.read().get(&address).copied())
+    }
+    fn storage(&self, address: Address, slot: B256) -> Result<U256, StateError> {
+        Ok(self
+            .slots
+            .read()
+            .get(&(address, slot))
+            .copied()
+            .unwrap_or_default())
+    }
+}
 
 fn addr(i: u8) -> Address {
     Address::with_last_byte(i)
@@ -62,20 +85,40 @@ fn legacy(sender: Address, nonce: u64, chain_id: Option<u64>, gas_price: u128) -
 struct Fixture {
     pool: Pool,
     accounts: Accounts,
+    slots: Slots,
 }
 
 impl Fixture {
-    fn with_config(config: PoolConfig) -> Self {
+    fn with_params(config: PoolConfig, params: PoolParams) -> Self {
         let accounts: Accounts = Arc::default();
-        let reader = {
-            let accounts = accounts.clone();
-            move |a: Address| -> Result<Option<AccountInfo>, StateError> {
-                Ok(accounts.read().get(&a).copied())
-            }
+        let slots: Slots = Arc::default();
+        let reader = TestReader {
+            accounts: accounts.clone(),
+            slots: slots.clone(),
         };
-        let params = PoolParams::from_chain_config(&xdevs_primitives::ChainConfig::dev());
         let pool = Pool::new(params, config, Arc::new(reader), BASE);
-        Self { pool, accounts }
+        Self {
+            pool,
+            accounts,
+            slots,
+        }
+    }
+
+    fn with_config(config: PoolConfig) -> Self {
+        let params = PoolParams::from_chain_config(&xdevs_primitives::ChainConfig::dev());
+        Self::with_params(config, params)
+    }
+
+    /// Make `a` an EIP-7702 account delegated to `0x…1005` with lock word `word`.
+    fn delegate(&self, a: Address, nonce: u64, word: u64) {
+        let mut info = AccountInfo::new(nonce, U256::from(RICH));
+        info.code_hash = DESIGNATOR_HASH;
+        self.accounts.write().insert(a, info);
+        self.set_word(a, word);
+    }
+
+    fn set_word(&self, a: Address, word: u64) {
+        self.slots.write().insert((a, LOCK_SLOT), U256::from(word));
     }
 
     fn new() -> Self {
@@ -157,23 +200,50 @@ fn rejects_unsupported_types() {
         PoolError::UnsupportedType(3)
     );
 
+    // EIP-7702 is supported, but needs a non-empty authorization list.
+    assert_eq!(
+        f.add(set_code(addr(1), 0, Address::repeat_byte(1), 0, 100_000))
+            .unwrap_err(),
+        PoolError::EmptyAuthorizationList
+    );
+    // Intrinsic gas counts 25,000 per authorization.
+    assert!(matches!(
+        f.add(set_code(addr(1), 0, Address::repeat_byte(1), 2, 70_000)),
+        Err(PoolError::IntrinsicGasTooLow {
+            intrinsic: 71_000,
+            ..
+        })
+    ));
+    let h = f
+        .add(set_code(addr(1), 0, Address::repeat_byte(1), 2, 71_000))
+        .unwrap();
+    assert_eq!(f.pool.get(&h).unwrap().tx_type_byte(), 4);
+}
+
+/// Type-4 tx with `auths` dummy authorizations (fake signatures).
+fn set_code(sender: Address, nonce: u64, to: Address, auths: usize, gas: u64) -> RecoveredTx {
     let auth = TxEip7702 {
         chain_id: CHAIN,
-        nonce: 0,
-        gas_limit: 100_000,
+        nonce,
+        gas_limit: gas,
         max_fee_per_gas: FEE,
         max_priority_fee_per_gas: 1,
-        to: Address::repeat_byte(1),
+        to,
         value: U256::ZERO,
         access_list: AccessList::default(),
-        authorization_list: vec![],
+        authorization_list: (0..auths)
+            .map(|i| {
+                Authorization {
+                    chain_id: U256::from(CHAIN),
+                    address: Address::repeat_byte(0x10 + i as u8),
+                    nonce: 0,
+                }
+                .into_signed(sig())
+            })
+            .collect(),
         input: Bytes::new(),
     };
-    let env = TxEnvelope::from(auth.into_signed(sig()));
-    assert_eq!(
-        f.add(RecoveredTx::new_unchecked(env, addr(1))).unwrap_err(),
-        PoolError::UnsupportedType(4)
-    );
+    RecoveredTx::new_unchecked(TxEnvelope::from(auth.into_signed(sig())), sender)
 }
 
 #[test]
@@ -952,4 +1022,216 @@ proptest::proptest! {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// XIP-0001 (EOA lock), spec §5 e and §10 M1 / M2 / M6
+// ---------------------------------------------------------------------------
+
+/// EIP-1559 tx with explicit target, value, gas and max fee (unique hash per sender).
+fn xtx(
+    sender: Address,
+    nonce: u64,
+    to: Address,
+    value: u64,
+    gas: u64,
+    max_fee: u128,
+) -> RecoveredTx {
+    let tx = TxEip1559 {
+        chain_id: CHAIN,
+        nonce,
+        gas_limit: gas,
+        max_fee_per_gas: max_fee,
+        max_priority_fee_per_gas: 1,
+        to: TxKind::Call(to),
+        value: U256::from(value),
+        access_list: AccessList::default(),
+        input: Bytes::copy_from_slice(sender.as_slice()),
+    };
+    RecoveredTx::new_unchecked(TxEnvelope::from(tx.into_signed(sig())), sender)
+}
+
+/// V2 shape from `a`: value-0 self-call, 300k gas, 2 gwei.
+fn self_call(a: Address, nonce: u64) -> RecoveredTx {
+    xtx(a, nonce, a, 0, 300_000, FEE)
+}
+
+fn xip_reason(r: Result<TxHash, PoolError>) -> &'static str {
+    match r {
+        Err(PoolError::Xip0001(e)) => e.violation.reason(),
+        other => panic!("expected an XIP-0001 rejection, got {other:?}"),
+    }
+}
+
+#[test]
+fn xip0001_admission_rules() {
+    let f = Fixture::new();
+    let a = addr(0xa1);
+    f.delegate(a, 0, 1);
+    let other = Address::repeat_byte(0xf1);
+    // M1 / V4, V3, V7b, V8b.
+    assert_eq!(
+        xip_reason(f.add(xtx(a, 0, other, 0, 50_000, FEE))),
+        "XIP0001_NOT_SELF_CALL"
+    );
+    assert_eq!(
+        xip_reason(f.add(xtx(a, 0, a, 1, 50_000, FEE))),
+        "XIP0001_VALUE_NOT_ZERO"
+    );
+    assert_eq!(
+        xip_reason(f.add(xtx(a, 0, a, 0, 2_000_001, FEE))),
+        "XIP0001_GAS_LIMIT"
+    );
+    assert_eq!(
+        xip_reason(f.add(xtx(a, 0, a, 0, 50_000, FEE + 1))),
+        "XIP0001_FEE_CAP"
+    );
+    // V2 shape is accepted; the error message names the sender.
+    f.add(self_call(a, 0)).unwrap();
+    let msg = f
+        .add(xtx(a, 1, other, 0, 50_000, FEE))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        msg.contains("is EOA-locked: only value-0 calls to itself"),
+        "{msg}"
+    );
+    // A set-code tx from a locked sender must be a self-call too.
+    assert_eq!(
+        xip_reason(f.add(set_code(a, 1, other, 1, 100_000))),
+        "XIP0001_NOT_SELF_CALL"
+    );
+    f.add(set_code(a, 1, a, 1, 100_000)).unwrap();
+
+    // M2: sealed rejects everything.
+    let s = addr(0xa2);
+    f.delegate(s, 0, 2);
+    assert_eq!(xip_reason(f.add(self_call(s, 0))), "XIP0001_SEALED");
+    // Garbage word = locked.
+    let g = addr(0xa3);
+    f.delegate(g, 0, 0xdead);
+    f.add(self_call(g, 0)).unwrap();
+    assert_eq!(
+        xip_reason(f.add(xtx(g, 1, other, 0, 50_000, FEE))),
+        "XIP0001_NOT_SELF_CALL"
+    );
+    // Word 0 / plain EOA with a word: unrestricted.
+    let u = addr(0xa4);
+    f.delegate(u, 0, 0);
+    f.add(xtx(u, 0, other, 5, 50_000, 100 * FEE)).unwrap();
+    let plain = addr(0xa5);
+    f.fund(plain, 0, RICH);
+    f.set_word(plain, 2);
+    f.add(xtx(plain, 0, other, 5, 50_000, FEE)).unwrap();
+}
+
+#[test]
+fn xip0001_locked_sender_limits() {
+    let f = Fixture::new();
+    let a = addr(0xa1);
+    f.delegate(a, 0, 1);
+    for n in 0..4 {
+        f.add(self_call(a, n)).unwrap();
+    }
+    assert_eq!(
+        f.add(self_call(a, 4)).unwrap_err(),
+        PoolError::SenderLimit(a)
+    );
+    // One tx per block for the locked sender, the lowest nonce.
+    let b = addr(0xb1);
+    f.fund(b, 0, RICH);
+    f.add(transfer(b, 0, FEE, 1)).unwrap();
+    f.add(transfer(b, 1, FEE, 1)).unwrap();
+    let best = f.pool.best_txs(BASE, 30_000_000);
+    let from_a: Vec<u64> = best
+        .iter()
+        .filter(|t| t.sender == a)
+        .map(|t| t.nonce())
+        .collect();
+    assert_eq!(from_a, vec![0]);
+    assert_eq!(best.iter().filter(|t| t.sender == b).count(), 2);
+    assert_eq!(f.pool.pending().len(), 6, "the others stay pending");
+}
+
+#[test]
+fn xip0001_recheck_on_new_head() {
+    let f = Fixture::new();
+    let other = Address::repeat_byte(0xf1);
+    // M6: a pending self-call is evicted once the sender is sealed.
+    let a = addr(0xa1);
+    f.delegate(a, 0, 1);
+    let h = f.add(self_call(a, 0)).unwrap();
+    f.set_word(a, 2);
+    f.commit(vec![], 10);
+    assert!(!f.pool.contains(&h), "evicted after the seal");
+    assert!(f.pool.best_txs(BASE, 30_000_000).is_empty());
+
+    // Lock enabled while unlocked txs wait: transfers go, self-calls stay, max 4.
+    let b = addr(0xb1);
+    f.delegate(b, 0, 0);
+    let xfer = f.add(xtx(b, 0, other, 1, 50_000, FEE)).unwrap();
+    let mut selfs = Vec::new();
+    for n in 1..7 {
+        selfs.push(f.add(self_call(b, n)).unwrap());
+    }
+    // Unlocked: 7 txs allowed.
+    assert_eq!(f.pool.len(), 7);
+    f.set_word(b, 1);
+    f.commit(vec![], 20);
+    assert!(!f.pool.contains(&xfer));
+    assert_eq!(f.pool.len(), 4, "trimmed to the 4 lowest nonces");
+    for h in &selfs[..4] {
+        assert!(f.pool.contains(h));
+    }
+    // Fee-cap failures stay queued: base fee halves, tx (2 gwei) is above 2 x 0.5 gwei.
+    let c = addr(0xc1);
+    f.delegate(c, 0, 1);
+    let h = f.add(self_call(c, 0)).unwrap();
+    f.pool.set_base_fee(BASE / 2);
+    f.commit(vec![], 30);
+    assert!(f.pool.contains(&h), "c3 failures are kept");
+    // A lifted lock lifts the limits.
+    f.set_word(c, 0);
+    f.commit(vec![], 40);
+    f.add(xtx(c, 1, other, 1, 50_000, FEE)).unwrap();
+}
+
+#[test]
+fn xip0001_activation_height() {
+    let mut params = PoolParams::from_chain_config(&xdevs_primitives::ChainConfig::dev());
+    params.xip0001_block = Some(100);
+    let f = Fixture::with_params(PoolConfig::default(), params);
+    let a = addr(0xa1);
+    f.delegate(a, 0, 1);
+    let other = Address::repeat_byte(0xf1);
+    // Head unknown (treated as before block 1) and head 98: next block < 100.
+    assert!(!f.pool.xip0001_active());
+    f.add(xtx(a, 0, other, 0, 50_000, FEE)).unwrap();
+    f.pool.set_head_number(98);
+    f.add(xtx(a, 1, other, 0, 50_000, FEE)).unwrap();
+    // Head 99: the next block is 100, the rules apply.
+    f.pool.set_head_number(99);
+    assert!(f.pool.xip0001_active());
+    assert_eq!(
+        xip_reason(f.add(xtx(a, 2, other, 0, 50_000, FEE))),
+        "XIP0001_NOT_SELF_CALL"
+    );
+    // F2: never active without the field.
+    let mut params = PoolParams::from_chain_config(&xdevs_primitives::ChainConfig::dev());
+    params.xip0001_block = None;
+    let f = Fixture::with_params(PoolConfig::default(), params);
+    f.delegate(a, 0, 2);
+    f.pool.set_head_number(1_000_000);
+    f.add(xtx(a, 0, other, 0, 50_000, FEE)).unwrap();
+}
+
+#[test]
+fn xip0001_set_code_tx_with_locked_authority_is_admitted() {
+    // The pool never inspects tuples: a locked authority's tuple is skipped at execution.
+    let f = Fixture::new();
+    let relayer = addr(0x77);
+    f.fund(relayer, 0, RICH);
+    f.delegate(addr(0xa1), 0, 2);
+    f.add(set_code(relayer, 0, Address::repeat_byte(1), 1, 100_000))
+        .unwrap();
 }

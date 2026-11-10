@@ -21,3 +21,5 @@ tracing.workspace = true
 [dev-dependencies]
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
+# P-256 test vectors for the 0x100 precompile (already in the graph via revm).
+p256.workspace = true

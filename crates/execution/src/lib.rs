@@ -9,6 +9,12 @@
 //! * [`EvmExecutor::call`] / [`EvmExecutor::estimate_gas`] — single-call execution for
 //!   `eth_call` / `eth_estimateGas`.
 //!
+//! XIP-0001 (EOA lock, `docs/specs/xip-0001-eoa-lock.md`) is enforced by both
+//! [`BlockExecutor::execute`] (an invalid tx fails the block) and
+//! [`BlockExecutor::build`] (invalid txs are left out), from
+//! [`ChainConfig::xip0001_block`] on. The shared classification is
+//! [`xdevs_primitives::xip0001`] / [`xdevs_state::StateProvider::eoa_lock_status`].
+//!
 //! Fee rule (§10.2): per tx, `base_fee * gas_used` is split `burn_bps` burned /
 //! rest to `ChainConfig::treasury`; the tip `min(max_priority, max_fee - base) * gas_used`
 //! goes to `header.beneficiary`.
@@ -23,6 +29,7 @@ mod error;
 mod executor;
 #[cfg(test)]
 mod tests;
+mod xip0001;
 
 pub use base_fee::next_base_fee;
 pub use db::StateDbError;

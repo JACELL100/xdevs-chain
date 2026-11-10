@@ -84,6 +84,7 @@ pub fn build_module(
     method!("eth_getTransactionReceipt", eth_get_transaction_receipt);
     method!("eth_getBlockReceipts", eth_get_block_receipts);
     method!("eth_getLogs", eth_get_logs);
+    method!("xdevs_getEoaLock", xdevs_get_eoa_lock);
     Ok(m)
 }
 
@@ -466,6 +467,20 @@ async fn eth_get_logs(params: Params<'static>, ctx: Arc<RpcContext>) -> RpcResul
     // Backstop: backends should already stop at `limit` (see `RpcBackend::logs`).
     crate::check_logs_limit(logs.len(), limit)?;
     Ok(logs)
+}
+
+// ---------------------------------------------------------------------------
+// xdevs_
+// ---------------------------------------------------------------------------
+
+async fn xdevs_get_eoa_lock(
+    params: Params<'static>,
+    ctx: Arc<RpcContext>,
+) -> RpcResult<EoaLockInfo> {
+    let mut seq = params.sequence();
+    let address: Address = seq.next()?;
+    let block = normalize_block_id(seq.optional_next()?);
+    Ok(ctx.backend.eoa_lock(address, block).await?)
 }
 
 #[cfg(test)]

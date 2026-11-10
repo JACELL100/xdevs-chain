@@ -59,6 +59,28 @@ pub mod u64_flex {
     }
 }
 
+/// `Option<u64>` as in [`u64_flex`] (`null` / missing = `None`; pair with
+/// `#[serde(default, skip_serializing_if = "Option::is_none")]`). Serializes as a plain integer.
+pub mod opt_u64_flex {
+    use super::*;
+    use serde::Deserialize;
+
+    /// Serialize `Some(v)` as a plain integer, `None` as `null`.
+    pub fn serialize<S: Serializer>(v: &Option<u64>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(v) => s.serialize_u64(*v),
+            None => s.serialize_none(),
+        }
+    }
+
+    /// Deserialize from `null`, integer, decimal string or hex string.
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+        #[derive(Deserialize)]
+        struct Flex(#[serde(with = "u64_flex")] u64);
+        Ok(Option::<Flex>::deserialize(d)?.map(|f| f.0))
+    }
+}
+
 /// `u64` as in [`u64_flex`] but serialized as a `0x` hex quantity (Ethereum JSON style).
 pub mod u64_hex_flex {
     use super::*;

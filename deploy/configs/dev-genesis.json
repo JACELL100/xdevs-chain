@@ -3,6 +3,7 @@
     "chainId": 7117,
     "name": "xdevs-dev",
     "hardfork": "xdevs-v1",
+    "xip0001Block": 0,
     "blockTimeMs": 2000,
     "baseFee": {
       "initial": "1000000000",

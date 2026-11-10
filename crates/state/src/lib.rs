@@ -25,7 +25,7 @@ pub use history::HistoricalStateProvider;
 pub use memory::InMemoryState;
 
 use std::sync::Arc;
-use xdevs_primitives::{AccountInfo, Address, Bytes, B256, U256};
+use xdevs_primitives::{xip0001, AccountInfo, Address, Bytes, EoaLockStatus, B256, U256};
 use xdevs_storage::DbError;
 
 /// Errors from state access.
@@ -63,6 +63,14 @@ pub trait StateProvider {
     /// Ethereum MPT state root of this state with `diff` applied on top
     /// (`diff = StateDiff::default()` gives the current root).
     fn state_root_with(&self, diff: &StateDiff) -> Result<B256, StateError>;
+
+    /// XIP-0001 lock status of `address` in this state (account code hash compared with
+    /// the `0x…1005` designator; the lock slot is read only for delegated accounts). The
+    /// same function the executor, the mempool and the RPC use.
+    fn eoa_lock_status(&self, address: Address) -> Result<EoaLockStatus, StateError> {
+        let code_hash = self.basic_account(address)?.map(|a| a.code_hash);
+        xip0001::eoa_lock_status(code_hash, || self.storage(address, xip0001::LOCK_SLOT))
+    }
 
     /// Convenience: code of an account (empty if none).
     fn code(&self, address: Address) -> Result<Bytes, StateError> {

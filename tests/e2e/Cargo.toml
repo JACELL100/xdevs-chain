@@ -21,3 +21,7 @@ serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+# P-256 signature for the 0x100 precompile test (already in the graph via revm).
+p256.workspace = true

@@ -4,7 +4,10 @@ use alloy_consensus::{SignableTransaction, Signed, TxEnvelope};
 use alloy_primitives::Signature;
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use xdevs_primitives::{Decodable2718, RecoveredTx, Transaction};
+use xdevs_primitives::{
+    reexports::alloy_eips::eip7702::{Authorization, SignedAuthorization},
+    Decodable2718, RecoveredTx, Transaction,
+};
 
 /// Why an incoming transaction was refused before reaching the pool.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -58,6 +61,16 @@ pub fn sign_tx<T: SignableTransaction<Signature>>(
 ) -> Result<Signed<T>, alloy_signer::Error> {
     let sig = signer.sign_hash_sync(&tx.signature_hash())?;
     Ok(tx.into_signed(sig))
+}
+
+/// Sign an EIP-7702 authorization tuple `(chain_id, address, nonce)` (signature over
+/// `keccak256(0x05 ‖ rlp([chain_id, address, nonce]))`, RFC 6979 low-s).
+pub fn sign_authorization(
+    signer: &PrivateKeySigner,
+    auth: Authorization,
+) -> Result<SignedAuthorization, alloy_signer::Error> {
+    let sig = signer.sign_hash_sync(&auth.signature_hash())?;
+    Ok(auth.into_signed(sig))
 }
 
 /// Sign `tx` and wrap it into a [`TxEnvelope`] ready for `encoded_2718()`.
@@ -158,6 +171,40 @@ mod tests {
         let env = sign_tx_envelope(&key(), tx).unwrap();
         // RFC 6979 deterministic nonces => byte-identical to the spec example.
         assert_eq!(hex::encode(env.encoded_2718()), EIP155_RAW);
+    }
+
+    #[test]
+    fn eip7702_sign_encode_and_recover() {
+        use xdevs_primitives::{TxEip7702, U256};
+        let signer = key();
+        let other = crate::generate_signer();
+        let auth = sign_authorization(
+            &other,
+            Authorization {
+                chain_id: U256::from(7117),
+                address: address!("0x0000000000000000000000000000000000001005"),
+                nonce: 4,
+            },
+        )
+        .unwrap();
+        assert_eq!(auth.recover_authority().unwrap(), other.address());
+        let tx = TxEip7702 {
+            chain_id: 7117,
+            nonce: 1,
+            gas_limit: 100_000,
+            max_fee_per_gas: 2_000_000_000,
+            max_priority_fee_per_gas: 1,
+            to: address!("0x00000000000000000000000000000000000000aa"),
+            value: U256::ZERO,
+            access_list: Default::default(),
+            authorization_list: vec![auth.clone()],
+            input: Bytes::new(),
+        };
+        let raw = sign_tx_envelope(&signer, tx).unwrap().encoded_2718();
+        assert_eq!(raw[0], 4);
+        let rtx = decode_and_recover(&raw, 7117).unwrap();
+        assert_eq!(rtx.sender, signer.address());
+        assert_eq!(rtx.authorization_list().unwrap(), &[auth][..]);
     }
 
     #[test]

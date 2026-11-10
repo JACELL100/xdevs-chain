@@ -24,6 +24,17 @@ pub enum RpcBackendError {
     /// e.g. "nonce too low", "insufficient funds for gas * price + value").
     #[error("{0}")]
     Rejected(String),
+    /// Transaction rejected by a protocol rule with a machine-readable reason
+    /// (code -32003 "transaction rejected", `data = { "reason": <reason> }`), e.g.
+    /// XIP-0001: `XIP0001_SEALED`, `XIP0001_NOT_SELF_CALL`, `XIP0001_VALUE_NOT_ZERO`,
+    /// `XIP0001_GAS_LIMIT`, `XIP0001_FEE_CAP`.
+    #[error("{message}")]
+    TxRejected {
+        /// Machine-readable reason (`error.data.reason`).
+        reason: String,
+        /// Human-readable message (`error.message`).
+        message: String,
+    },
     /// Request exceeds a server limit (code -32005), e.g. log range too large.
     #[error("limit exceeded: {0}")]
     LimitExceeded(String),
@@ -42,6 +53,7 @@ impl RpcBackendError {
             RpcBackendError::InvalidParams(_) => -32602,
             RpcBackendError::UnknownBlock | RpcBackendError::Rejected(_) => -32000,
             RpcBackendError::Reverted { .. } => 3,
+            RpcBackendError::TxRejected { .. } => -32003,
             RpcBackendError::LimitExceeded(_) => -32005,
             RpcBackendError::Unsupported(_) => -32601,
             RpcBackendError::Internal(_) => -32603,
@@ -56,6 +68,9 @@ impl From<RpcBackendError> for ErrorObjectOwned {
         match e {
             RpcBackendError::Reverted { data, .. } => {
                 ErrorObjectOwned::owned(code, msg, Some(hex::encode_prefixed(&data)))
+            }
+            RpcBackendError::TxRejected { reason, .. } => {
+                ErrorObjectOwned::owned(code, msg, Some(serde_json::json!({ "reason": reason })))
             }
             _ => ErrorObjectOwned::owned::<()>(code, msg, None),
         }
@@ -84,6 +99,18 @@ mod tests {
         assert_eq!(
             RpcBackendError::UnknownBlock.to_string(),
             "header not found"
+        );
+
+        let e = RpcBackendError::TxRejected {
+            reason: "XIP0001_SEALED".into(),
+            message: "xip-0001: sealed".into(),
+        };
+        assert_eq!(e.code(), -32003);
+        let obj: ErrorObjectOwned = e.into();
+        assert_eq!(obj.message(), "xip-0001: sealed");
+        assert_eq!(
+            obj.data().map(|d| d.get()),
+            Some(r#"{"reason":"XIP0001_SEALED"}"#)
         );
     }
 }

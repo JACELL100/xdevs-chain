@@ -28,11 +28,11 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{sync::watch, task::JoinHandle};
 use xdevs_execution::{next_base_fee, EvmExecutor};
 use xdevs_genesis::Genesis;
-use xdevs_mempool::{Pool, PoolConfig, PoolParams};
-use xdevs_primitives::{constants::DEV_CHAIN_ID, AccountInfo, Address, Bytes, ChainConfig, B256};
+use xdevs_mempool::{FromState, Pool, PoolConfig, PoolParams};
+use xdevs_primitives::{constants::DEV_CHAIN_ID, Bytes, ChainConfig, B256};
 use xdevs_rpc::{RpcServerConfig, RpcServerHandle};
-use xdevs_state::StateError;
-use xdevs_storage::{tables, DbReadExt, RedbDatabase};
+use xdevs_state::DbStateProvider;
+use xdevs_storage::RedbDatabase;
 
 /// Per-transaction gas cap of the Osaka rules the executor runs (EIP-7825).
 pub const MAX_TX_GAS: u64 = 1 << 24;
@@ -100,16 +100,15 @@ impl Node {
             max_per_sender: config.mempool.max_per_sender,
             ..PoolConfig::default()
         };
-        let reader_db = db.clone();
-        let reader = move |a: Address| -> Result<Option<AccountInfo>, StateError> {
-            Ok(reader_db.get::<tables::PlainAccounts>(&a)?)
-        };
+        // Latest committed state: accounts plus the XIP-0001 lock slot.
+        let reader = FromState(DbStateProvider::new(db.clone()));
         let pool = Arc::new(Pool::new(
             params,
             pool_config,
             Arc::new(reader),
             next_base_fee(&head, &cfg),
         ));
+        pool.set_head_number(head_number);
         Ok(Self {
             config,
             genesis_hash,

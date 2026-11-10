@@ -87,6 +87,20 @@ impl TestNode {
         }
     }
 
+    /// JSON-RPC call that must fail; returns `(code, message, data)`.
+    pub async fn err_data(&self, method: &str, params: Vec<Value>) -> (i32, String, Value) {
+        match self.call(method, params).await {
+            Err(ClientError::Call(e)) => {
+                let data = e
+                    .data()
+                    .map(|d| serde_json::from_str(d.get()).expect("error data is JSON"))
+                    .unwrap_or(Value::Null);
+                (e.code(), e.message().to_string(), data)
+            }
+            other => panic!("{method}: expected a JSON-RPC error, got {other:?}"),
+        }
+    }
+
     /// `eth_blockNumber`.
     pub async fn block_number(&self) -> u64 {
         let n: alloy_rpc_types_eth::BlockNumberOrTag = self.ok("eth_blockNumber", vec![]).await;

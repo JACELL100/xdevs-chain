@@ -1,6 +1,6 @@
 //! Execution errors.
 
-use xdevs_primitives::{Bytes, TxHash, B256};
+use xdevs_primitives::{xip0001::Xip0001Error, Bytes, TxHash, B256};
 use xdevs_state::StateError;
 
 /// Errors from block execution, block building and message calls.
@@ -14,6 +14,16 @@ pub enum ExecutionError {
         hash: TxHash,
         /// Why it is invalid.
         reason: String,
+    },
+    /// The transaction breaks an XIP-0001 (EOA lock) rule at its position: in a block
+    /// (`hash` set) it makes the block invalid; for `eth_estimateGas` (`hash = None`) the
+    /// request describes a transaction that can never be included.
+    #[error("{}{error}", hash.map(|h| format!("invalid transaction {h}: ")).unwrap_or_default())]
+    Xip0001 {
+        /// Transaction hash (`None` for call requests).
+        hash: Option<TxHash>,
+        /// The rule that is broken (boxed: keeps `ExecutionError` small).
+        error: Box<Xip0001Error>,
     },
     /// Transaction type not supported by xDEVS Chain (e.g. 0x03 blobs).
     #[error("unsupported transaction type 0x{0:02x}")]

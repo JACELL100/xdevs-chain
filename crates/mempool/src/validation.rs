@@ -36,6 +36,9 @@ pub struct PoolParams {
     pub max_tx_gas: Option<u64>,
     /// Max EIP-2718 encoded size (128 KiB).
     pub max_tx_size: usize,
+    /// First block of XIP-0001 (EOA lock) enforcement (`ChainConfig::xip0001_block`;
+    /// `None` = never).
+    pub xip0001_block: Option<u64>,
 }
 
 impl PoolParams {
@@ -46,7 +49,13 @@ impl PoolParams {
             block_gas_limit: cfg.block_gas_limit,
             max_tx_gas: None,
             max_tx_size: MAX_TX_SIZE,
+            xip0001_block: cfg.xip0001_block,
         }
+    }
+
+    /// `true` if XIP-0001 applies to block `number`.
+    pub fn xip0001_active(&self, number: u64) -> bool {
+        self.xip0001_block.is_some_and(|start| number >= start)
     }
 }
 
@@ -104,10 +113,14 @@ pub fn validate_stateless(
             max: params.max_tx_size,
         });
     }
-    // Phase 1: legacy, EIP-2930, EIP-1559. Blob (0x03) and EIP-7702 (0x04) are refused.
+    // Legacy, EIP-2930, EIP-1559 and EIP-7702 set-code txs. Blob txs (0x03) are refused.
     let ty = tx.tx_type_byte();
-    if ty > 2 {
+    if !matches!(ty, 0 | 1 | 2 | 4) {
         return Err(PoolError::UnsupportedType(ty));
+    }
+    // EIP-7702: a set-code tx needs at least one authorization (its `to` is never empty).
+    if tx.authorization_list().is_some_and(|l| l.is_empty()) {
+        return Err(PoolError::EmptyAuthorizationList);
     }
     match tx.chain_id() {
         Some(id) if id == params.chain_id => {}

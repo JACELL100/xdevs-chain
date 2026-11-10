@@ -12,13 +12,13 @@ report it.
 |---|---|---|---|
 | `crates/primitives` | `xdevs-primitives` | scaffold | complete |
 | `crates/crypto` | `xdevs-crypto` | crypto/cli agent | complete (recovery, signing, keystores) |
-| `crates/storage` | `xdevs-storage` | storage agent | interface + `MemDb` complete; `RedbDatabase` = `todo!()` |
-| `crates/state` | `xdevs-state` | state agent | complete (simple full-recompute root; may be optimized) |
-| `crates/execution` | `xdevs-execution` | execution agent | interface + `next_base_fee` complete; `EvmExecutor` = `todo!()` |
-| `crates/genesis` | `xdevs-genesis` | genesis agent | complete (extend: predeploys, dev accounts) |
-| `crates/mempool` | `xdevs-mempool` | mempool agent | complete (`Pool`) |
-| `crates/rpc` | `xdevs-rpc` | rpc agent | interface + error mapping; server + `convert` = `todo!()` |
-| `crates/node` | `xdevs-node` | node agent | `NodeConfig` complete; `Node::run` = `todo!()` |
+| `crates/storage` | `xdevs-storage` | storage agent | complete (`MemDb`, `RedbDatabase`, history tables) |
+| `crates/state` | `xdevs-state` | state agent | complete (simple full-recompute root; state history) |
+| `crates/execution` | `xdevs-execution` | execution agent | complete (`EvmExecutor`, EIP-7702, XIP-0001) |
+| `crates/genesis` | `xdevs-genesis` | genesis agent | complete (extend: predeploys) |
+| `crates/mempool` | `xdevs-mempool` | mempool agent | complete (`Pool`, EIP-7702, XIP-0001) |
+| `crates/rpc` | `xdevs-rpc` | rpc agent | complete (server, `convert`, `xdevs_getEoaLock`) |
+| `crates/node` | `xdevs-node` | node agent | complete (dev mode) |
 | `bin/xdevs` | `xdevs` | node agent | clap skeleton (`xdevs node --dev`) |
 | `bin/xdevs-cli` | `xdevs-cli` | crypto/cli agent | complete (`keygen`, `address`, `send`, `balance`) |
 
@@ -81,6 +81,7 @@ pub fn compute_logs_bloom(receipts: &[ReceiptEnvelope]) -> Bloom;
 pub fn set_compat_header_fields(header: &mut Header);
 
 pub struct RecoveredTx { pub tx: TxEnvelope, pub sender: Address }  // Deref<Target = TxEnvelope>
+//  tx types 0x00 / 0x01 / 0x02 / 0x04 (EIP-7702 set-code); 0x03 blobs are refused everywhere
 impl RecoveredTx {
     fn recover(tx: TxEnvelope) -> Result<Self, RecoveryError>;  // k256, EIP-2 low-s
     const fn new_unchecked(tx, sender) -> Self; fn hash(&self) -> TxHash;
@@ -99,9 +100,37 @@ pub struct Account { pub nonce: u64, pub balance: U256, pub code_hash: B256, pub
 pub struct BaseFeeParams { pub initial: u64, pub minimum: u64, pub elasticity: u64,
                            pub max_change_denominator: u64, pub burn_bps: u16 }
 pub struct ChainConfig { pub chain_id: u64, pub block_gas_limit: u64, pub block_time_ms: u64,
-                         pub base_fee: BaseFeeParams, pub treasury: Address, pub system_address: Address }
+                         pub base_fee: BaseFeeParams, pub treasury: Address, pub system_address: Address,
+                         pub xip0001_block: Option<u64> /* JSON `xip0001Block`; absent = never */ }
 //  serde camelCase = genesis `config` object (unknown keys ignored, numbers may be strings);
-//  ChainConfig::new(chain_id), ::dev() (chain id 7117), split_base_fee(amount) -> (burned, treasury)
+//  ChainConfig::new(chain_id) (xip0001_block = None), ::dev() (chain id 7117, xip0001_block = Some(0)),
+//  split_base_fee(amount) -> (burned, treasury), xip0001_active(block_number) -> bool
+```
+
+`xip0001` — XIP-0001 EOA lock (`docs/specs/xip-0001-eoa-lock.md`), pure functions shared by
+executor, block builder, mempool and RPC:
+
+```rust
+pub const ACCOUNT_IMPL: Address /* 0x…1005 */; pub const DESIGNATOR: [u8; 23] /* 0xef0100 ‖ 0x…1005 */;
+pub const DESIGNATOR_HASH: B256; pub const LOCK_SLOT: B256 /* 0xfd81d7ee…841ce */;
+pub const LOCKED: u64 = 1; pub const SEALED: u64 = 2; pub const MAX_GAS: u64 = 2_000_000;
+pub const FEE_MULTIPLIER: u128 = 2; pub const MAX_TXS_PER_BLOCK: usize = 1;
+pub const MAX_POOL_TXS_PER_LOCKED_SENDER: usize = 4;
+pub enum EoaLockStatus { Unlocked, Locked, Sealed }   // re-exported at the crate root; serde "locked"…
+impl EoaLockStatus { fn classify(code_hash: Option<B256>, word: U256) -> Self;
+                     fn from_code(code: &[u8], word: U256) -> Self; fn is_restricted(self) -> bool }
+/// reads the slot only if code_hash == DESIGNATOR_HASH
+pub fn eoa_lock_status<E>(code_hash: Option<B256>, read_word: impl FnOnce() -> Result<U256, E>)
+    -> Result<EoaLockStatus, E>;
+pub struct TxShape { sender, to: TxKind, value: U256, gas_limit: u64, max_fee_per_gas: u128 } // From<&RecoveredTx>
+pub fn check_shape(EoaLockStatus, &TxShape) -> Result<(), Xip0001Error>;           // rule (a)
+pub fn check_tx(EoaLockStatus, &TxShape, base_fee: u64, sender_already_in_block: bool)
+    -> Result<(), Xip0001Error>;                                                     // (a) + (c1-c3)
+pub struct Xip0001Error { pub sender: Address, pub violation: Xip0001Violation }     // Display = "xip-0001: …"
+pub enum Xip0001Violation { Sealed, NotSelfCall, ValueNotZero, OnePerBlock, GasLimit{gas_limit},
+                            FeeCap{max_fee, cap} }
+//  reason(): "XIP0001_SEALED" | "_NOT_SELF_CALL" | "_VALUE_NOT_ZERO" | "_ONE_PER_BLOCK" | "_GAS_LIMIT" | "_FEE_CAP"
+//  is_transient(): OnePerBlock, FeeCap (builder skips without dropping; pool keeps)
 ```
 
 `constants`: `DEV_CHAIN_ID = 7117` (**local dev only**, not registered), `GWEI`,
@@ -112,14 +141,15 @@ pub struct ChainConfig { pub chain_id: u64, pub block_gas_limit: u64, pub block_
 `GOVERNANCE_ADDRESS = 0x…1001`, `TREASURY_ADDRESS = 0x…1002`, `FEE_CONFIG_ADDRESS = 0x…1003`,
 `SYSTEM_ADDRESS = 0xffff…fffe`, `EMPTY_REQUESTS_HASH = sha256("")`, `CLIENT_VERSION = "xdevs/v0.1.0"`.
 
-`serde_helpers::{u64_flex, u64_hex_flex, u256_flex}` — accept integers, decimal strings and
-`0x` hex strings (for genesis / config files).
+`serde_helpers::{u64_flex, opt_u64_flex, u64_hex_flex, u256_flex}` — accept integers, decimal
+strings and `0x` hex strings (for genesis / config files).
 
 ## xdevs-storage
 
 ```rust
 pub enum TableId { Headers, HeaderNumbers, Bodies, Transactions, Receipts,
-                   PlainAccounts, PlainStorage, Bytecodes, Meta }   // ALL, name()
+                   PlainAccounts, PlainStorage, Bytecodes, Meta,
+                   AccountHistory, StorageHistory, StateChangeSets }   // ALL, name()
 pub trait Table { const ID: TableId; type Key: Encode + Decode; type Value: Encode + Decode; }
 pub mod tables {  // typed tables (§14.1)
   Headers:       u64            -> Header            (RLP)
@@ -131,7 +161,12 @@ pub mod tables {  // typed tables (§14.1)
   PlainStorage:  (Address, B256)-> U256              (32 B BE; zero = delete, never stored)
   Bytecodes:     B256           -> Bytes
   Meta:          String         -> Vec<u8>           (keys in meta_keys::{LATEST_BLOCK,
-                                                      CHAIN_CONFIG, GENESIS_HASH, SCHEMA_VERSION})
+                                                      CHAIN_CONFIG, GENESIS_HASH, SCHEMA_VERSION,
+                                                      STATE_HISTORY_START})
+  // State history (reverse diffs of the last N blocks, plan §14.1/§14.4):
+  AccountHistory:  (Address, u64)        -> Option<AccountInfo>  (account *before* block; None = absent)
+  StorageHistory:  (Address, B256, u64)  -> U256                 (slot *before* block; 0 = unset)
+  StateChangeSets: u64                   -> StateChangeSet { accounts, slots }  (pruning index)
 }
 // Integer keys are big-endian: byte order == numeric order. (Address,B256) = 20+32 bytes,
 // so an address is a prefix of all its storage keys.
@@ -189,6 +224,16 @@ pub struct InMemoryState;   // complete: new, from_diff, apply(&diff), insert_ac
                             // account(&addr) -> Option<Account>, storage_root(&addr), state_root()
 pub struct DbStateProvider<D: DbRead>;   // new(db), load_all() -> InMemoryState; StateProvider impl
 pub fn write_state_diff(batch: &mut WriteBatch, diff: &StateDiff);
+// StateProvider also provides (XIP-0001, shared by node / RPC):
+//   fn eoa_lock_status(&self, Address) -> Result<EoaLockStatus, StateError>;
+pub mod history {   // reverse diffs; `Meta[STATE_HISTORY_START] = s` => states s-1..=head readable
+    const DEFAULT_STATE_HISTORY_BLOCKS: u64 = 10_000; const MAX_PRUNE_BLOCKS_PER_COMMIT: u64 = 64;
+    fn history_start(db) -> Result<Option<u64>, DbError>; fn set_history_start(batch, start);
+    fn oldest_available_state(db, head) -> Result<u64, DbError>;
+    fn write_state_history(batch, pre: &R, block, diff: &StateDiff) -> Result<(), StateError>;
+    fn prune_state_history(batch, db, ...); fn record_block_history(batch, db, block, diff, keep_blocks);
+}
+pub struct HistoricalStateProvider<D: DbRead>;   // new(db, block): state after `block`; StateProvider impl
 pub mod root { fn storage_root(slots) -> B256; fn state_root(&accounts, &storage) -> B256; }
 ```
 
@@ -220,10 +265,23 @@ impl EvmExecutor {
     fn estimate_gas(&self, state: &dyn StateProvider, header: &Header, request: &TransactionRequest,
             gas_cap: u64) -> Result<u64, ExecutionError>;                 // eth_estimateGas
 }
-pub enum ExecutionError { InvalidTransaction{hash, reason}, UnsupportedTxType(u8),
+pub enum ExecutionError { InvalidTransaction{hash, reason},
+    Xip0001{hash: Option<TxHash>, error: Box<Xip0001Error>} /* hash None = estimateGas request */,
+    UnsupportedTxType(u8),
     BlockGasLimitExceeded{used, limit}, InvalidHeader(String), RootMismatch{field, expected, got},
     Reverted{output}, GasCapExceeded{cap}, InvalidRequest(String), State(String), Evm(String) }
 ```
+
+EIP-7702 (type 0x04) is executed by revm (Osaka rules); receipts are `ReceiptEnvelope::Eip7702`.
+XIP-0001 from `ChainConfig::xip0001_block` on: `execute` fails the block with
+`ExecutionError::Xip0001` for a tx invalid at its position (sender rule a, c1 one tx per block
+for a LOCKED sender, c2 gas ≤ 2M, c3 max fee ≤ 2 × base fee — all against the state before the
+tx); `build` leaves such txs out (`rejected` unless the violation `is_transient()`).
+Authorizations of LOCKED/SEALED authorities are skipped (spec §9 option 2, pre-filter: the
+tuple is handed to revm with `RecoveredAuthority::Invalid`, so revm skips it at EIP-7702 step 3:
+no code change, no nonce bump, no refund, not warmed; intrinsic gas unchanged). `eth_call` is
+never rejected (tuples are still filtered); `estimate_gas` returns `Xip0001` for a locked `from`
+(rule a, c3 if a fee field is set, c2 on the estimate).
 
 Fees (§10.2/§15.1): `base_fee * gas_used` → `ChainConfig::split_base_fee` (80% burned = not
 credited anywhere, 20% credited to `cfg.treasury`); tip → `header.beneficiary`. These
@@ -240,7 +298,8 @@ pub enum PoolError { Oversized{size,max}, UnsupportedType(u8), InvalidSignature(
     WrongChainId{expected, got}, NonceTooLow{state,tx}, NonceGapTooLarge{state,tx},
     InsufficientFunds{balance,cost}, Underpriced{max_fee,required}, ReplacementUnderpriced,
     IntrinsicGasTooLow{gas_limit,intrinsic}, GasLimitExceedsBlock, AlreadyKnown,
-    SenderLimit(Address), PoolFull, State(String) }   // Display = geth wording
+    SenderLimit(Address), PoolFull, State(String),
+    EmptyAuthorizationList, Xip0001(Xip0001Error) }   // Display = geth wording
 
 pub trait TxPool: Send + Sync {
     fn add(&self, tx: RecoveredTx, origin: TxOrigin) -> Result<TxHash, PoolError>;
@@ -262,19 +321,30 @@ Concrete pool (node wiring):
 
 ```rust
 pub trait AccountReader: Send + Sync {            // latest committed state
-    fn account(&self, Address) -> Result<Option<AccountInfo>, StateError>; }
+    fn account(&self, Address) -> Result<Option<AccountInfo>, StateError>;
+    fn storage(&self, Address, slot: B256) -> Result<U256, StateError>;  // provided: zero (no locks seen!)
+}
 // impl'd for closures Fn(Address) -> Result<Option<AccountInfo>, StateError> + Send + Sync
-pub struct FromState<S>(pub S);                   // any StateProvider + Send + Sync
-pub struct PoolParams { chain_id, block_gas_limit, max_tx_gas: Option<u64>, max_tx_size }
-impl PoolParams { fn from_chain_config(&ChainConfig) -> Self }   // max_tx_gas = None
+pub struct FromState<S>(pub S);                   // any StateProvider + Send + Sync (implements storage)
+pub struct PoolParams { chain_id, block_gas_limit, max_tx_gas: Option<u64>, max_tx_size,
+                        xip0001_block: Option<u64> }
+impl PoolParams { fn from_chain_config(&ChainConfig) -> Self;    // max_tx_gas = None
+                  fn xip0001_active(&self, block_number) -> bool }
 pub struct Pool;   // impl TxPool
 impl Pool { fn new(PoolParams, PoolConfig, Arc<dyn AccountReader>, base_fee: u64) -> Self;
             fn set_base_fee(&self, u64); fn base_fee(&self) -> u64; fn queued(&self) -> Vec<RecoveredTx>;
+            fn set_head_number(&self, u64) /* once at start-up */; fn xip0001_active(&self) -> bool;
             fn len(&self); fn is_empty(&self); fn total_bytes(&self) }
-pub fn intrinsic_gas(&TxEnvelope) -> u64;   // max(intrinsic, EIP-7623 floor)
+pub fn intrinsic_gas(&TxEnvelope) -> u64;   // max(intrinsic, EIP-7623 floor), 25,000 per authorization
 ```
 
-Accepted types: 0x00/0x01/0x02 (0x03 and 0x04 → `UnsupportedType`). `on_block_committed`
+Accepted types: 0x00/0x01/0x02/0x04 (0x03 → `UnsupportedType`; a type-4 tx with an empty
+authorization list → `EmptyAuthorizationList`). XIP-0001 (spec §5 e) when active for the next
+block: admission runs `xip0001::check_tx(status, tx, base_fee, false)` against the head state
+(→ `PoolError::Xip0001`); a LOCKED sender may hold at most 4 txs; `best_txs` yields at most one
+tx (the lowest nonce) per LOCKED sender and none of a SEALED one; `on_block_committed` re-reads
+every sender's lock status and evicts txs invalid by rule (a) or c2, and trims LOCKED senders to
+4 txs (c3 failures stay queued). The pool never inspects authorization tuples. `on_block_committed`
 sets the entry-check base fee to the block's base fee — call `set_base_fee(next_base_fee)`
 afterwards if you want the next block's. Queued TTL is measured in block timestamps.
 
@@ -289,6 +359,7 @@ pub enum TxRecoveryError { Decode(String) /* "rlp: .." */, Unprotected /* geth w
                            WrongChainId{expected, got}, InvalidSignature(String) }
 pub fn sign_tx<T: SignableTransaction<Signature>>(&PrivateKeySigner, T) -> Result<Signed<T>, _>;
 pub fn sign_tx_envelope(&PrivateKeySigner, T) -> Result<TxEnvelope, _>;
+pub fn sign_authorization(&PrivateKeySigner, Authorization) -> Result<SignedAuthorization, _>; // EIP-7702 tuple
 pub fn generate_signer() -> PrivateKeySigner; pub fn signer_from_hex(&str) -> Result<_, KeyError>;
 pub struct Keystore;   // Web3 Secret Storage v3: from_json_str, to_json_string, stored_address, decrypt
 pub fn encrypt_signer(&PrivateKeySigner, password, ScryptParams::{STANDARD, LIGHT}) -> Result<Keystore, _>;
@@ -305,7 +376,8 @@ pub struct Genesis { pub config: ChainConfig, pub timestamp: u64, pub gas_limit:
     pub validators: Vec<serde_json::Value> /* Phase 2+, ignored */ }
 impl Genesis { fn from_json_str(&str) -> Result<Self, GenesisError>; fn from_file(&Path) -> ...;
     fn validate(&self); fn chain_config(&self) -> ChainConfig /* block_gas_limit = gas_limit */;
-    fn dev(accounts: &[Address], balance: U256) -> Self }
+    fn dev(chain_id) -> Self; fn dev_with_accounts(chain_id, &[Address], U256) -> Self }
+//  dev genesis (and deploy/configs/dev-genesis.json): "xip0001Block": 0
 pub fn genesis_state(&Genesis) -> StateDiff;
 pub fn genesis_header(&Genesis, state_root: B256) -> Header;  // base_fee = config.base_fee.initial
 pub fn genesis_block(&Genesis) -> (Block, StateDiff);
@@ -320,7 +392,10 @@ JSON shape = plan §21.1 (`config`, `timestamp`, `gasLimit`, `extraData`,
 ```rust
 pub mod types { RpcBlock, RpcHeader, RpcTransaction, RpcReceipt, RpcLog, BlockId,
                 BlockNumberOrTag, BlockTransactions, BlockTransactionsKind, FeeHistory, Filter,
-                SyncStatus, SyncInfo, TransactionRequest }   // alloy-rpc-types-eth
+                FilterBlockOption, SyncStatus, SyncInfo, TransactionRequest,   // alloy-rpc-types-eth
+                EoaLockStatus,
+                EoaLockInfo { active: bool, status: EoaLockStatus, word: B256,
+                              delegated_to: Option<Address> } }   // camelCase JSON
 pub type BackendResult<T> = Result<T, RpcBackendError>;
 
 #[async_trait] pub trait RpcBackend: Send + Sync + 'static {
@@ -341,16 +416,21 @@ pub type BackendResult<T> = Result<T, RpcBackendError>;
     async fn transaction_by_hash(&self, B256) -> BackendResult<Option<RpcTransaction>>;
     async fn transaction_receipt(&self, B256) -> BackendResult<Option<RpcReceipt>>;
     async fn block_receipts(&self, BlockId) -> BackendResult<Option<Vec<RpcReceipt>>>;
-    async fn logs(&self, Filter) -> BackendResult<Vec<RpcLog>>;
+    /// server resolves tags and enforces max_logs_range first; backend must stop with
+    /// LimitExceeded as soon as more than `limit` logs match (use check_logs_limit)
+    async fn logs(&self, Filter, limit: Option<usize>) -> BackendResult<Vec<RpcLog>>;
     async fn gas_price(&self) -> BackendResult<U256>;
     async fn max_priority_fee_per_gas(&self) -> BackendResult<U256>;
     async fn next_base_fee(&self) -> BackendResult<u64>;
     async fn fee_history(&self, block_count: u64, newest: BlockNumberOrTag,
                          reward_percentiles: Option<Vec<f64>>) -> BackendResult<FeeHistory>;
+    async fn eoa_lock(&self, Address, BlockId) -> BackendResult<EoaLockInfo>;  // provided: Unsupported
 }
+pub fn check_logs_limit(count: usize, limit: Option<usize>) -> BackendResult<()>;
 pub enum RpcBackendError {          // -> jsonrpsee ErrorObjectOwned (implemented)
     InvalidParams(String) /*-32602*/, UnknownBlock /*-32000 "header not found"*/,
     Reverted{data, reason} /*3, data = 0x-hex*/, Rejected(String) /*-32000, geth wording*/,
+    TxRejected{reason, message} /*-32003, data = {"reason": reason}, e.g. XIP0001_SEALED*/,
     LimitExceeded(String) /*-32005*/, Unsupported(String) /*-32601*/, Internal(String) /*-32603*/ }
 pub struct RpcServerConfig { http: 127.0.0.1:8545, gas_cap: 50M, max_logs_range: 10_000,
                              max_logs_results: 10_000, max_batch: 50, cors: ["*"] }
@@ -373,8 +453,14 @@ Methods served (§19.1, Phase 1): `web3_clientVersion`, `web3_sha3`, `net_versio
 `eth_getTransactionCount`, `eth_getCode`, `eth_getStorageAt`, `eth_call`,
 `eth_estimateGas`, `eth_sendRawTransaction`, `eth_getBlockByNumber`, `eth_getBlockByHash`,
 `eth_getBlockTransactionCountByNumber/ByHash`, `eth_getTransactionByHash`,
-`eth_getTransactionReceipt`, `eth_getBlockReceipts`, `eth_getLogs`. Tags: `latest` = `safe`
-= `finalized` = latest committed block.
+`eth_getTransactionReceipt`, `eth_getBlockReceipts`, `eth_getLogs`, and
+`xdevs_getEoaLock(address, blockTag?)` → `{ "active", "status": "unlocked"|"locked"|"sealed",
+"word": "0x…32 bytes", "delegatedTo": "0x…" | null }` (`active` = XIP-0001 applies to the block
+after `blockTag`; `delegatedTo` = target of any EIP-7702 delegation). XIP-0001 rejections from
+`eth_sendRawTransaction` / `eth_estimateGas` are `-32003` with `data.reason`. Type-4 txs are
+served with `type: "0x4"` and `authorizationList`. Tags: `latest` = `safe` = `finalized` =
+latest committed block. State queries at past blocks read the state history (default
+10,000 blocks, `[chain] pruning` / `state_history_blocks`); older blocks fail with -32000.
 
 ## xdevs-node
 
@@ -402,7 +488,10 @@ CLI: `xdevs node [--dev] [--config config.toml] [--genesis genesis.json] [--data
 3. `built = executor.build(parent, BlockAttributes{timestamp: max(now, parent.ts + 1), beneficiary:
    dev.fee_recipient, prev_randao: parent hash, extra_data: "xdevs", gas_limit}, txs, &state)`.
 4. One `WriteBatch`: header/body/tx index/receipts + `write_state_diff(&built.outcome.state_diff)` + `Meta`.
-5. `pool.remove(rejected)`, `pool.on_block_committed(&block, &receipts)`.
+5. `pool.remove(rejected)`, `pool.on_block_committed(&block, &receipts)`,
+   `pool.set_base_fee(next_base_fee(&block.header))`. The node creates the pool with a
+   `FromState(DbStateProvider)` reader (accounts + XIP-0001 lock slot) and calls
+   `pool.set_head_number(head)` at start-up.
 
 Restart safety: on start, if `Meta[GENESIS_HASH]` exists it must equal the computed genesis
 hash; otherwise write genesis (header, state) in one batch.

@@ -6,7 +6,7 @@
 | Title | Opt-in protocol-level lock of the EOA key of an EIP-7702 account delegated to the xDEVS Smart Account |
 | Status | Draft, accepted for implementation (testnet: active from genesis) |
 | Type | Consensus (transaction validity + EIP-7702 authorization processing), mempool, RPC |
-| Layers | Account side: `contracts/src/accounts` (done, tested). Node side: crates/ (to be implemented from this document). |
+| Layers | Account side: `contracts/src/accounts` (done, tested). Node side: crates/ (done, tested: `xdevs_primitives::xip0001`, block execution and building, mempool, RPC `-32003` and `xdevs_getEoaLock`; authorization pre-filter per §9 option 2). |
 | Requires | EIP-1559, EIP-2718, EIP-7702; xDEVS Smart Account at `0x0000000000000000000000000000000000001005` |
 | Plan refs | §16 (user-safety layer), ADR-0006 (§6), §13 (mempool), §15 (fees), §24.6 (fork activation) |
 

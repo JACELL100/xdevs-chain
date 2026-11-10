@@ -3,7 +3,7 @@
 use crate::{
     db::{StateDbError, StateOverlay},
     env::{block_env, call_tx_env, cfg_env, tx_env, BLOB_TX_TYPE},
-    next_base_fee, BlockAttributes, BlockExecutor, BuiltBlock, CallResult, EvmExecutor,
+    next_base_fee, xip0001, BlockAttributes, BlockExecutor, BuiltBlock, CallResult, EvmExecutor,
     ExecutionError, ExecutionOutcome,
 };
 use alloy_consensus::Eip658Value;
@@ -21,8 +21,11 @@ use revm::{
 use std::collections::BTreeSet;
 use xdevs_primitives::{
     compute_logs_bloom, compute_receipts_root, compute_transactions_root,
-    constants::MAX_EXTRA_DATA_SIZE, set_compat_header_fields, Address, Block, Header, Log, Receipt,
-    ReceiptEnvelope, RecoveredTx, Transaction, Typed2718, U256,
+    constants::MAX_EXTRA_DATA_SIZE,
+    set_compat_header_fields,
+    xip0001::{check_shape, check_tx, TxShape, Xip0001Error, Xip0001Violation, MAX_GAS},
+    Address, Block, EoaLockStatus, Header, Log, Receipt, ReceiptEnvelope, RecoveredTx, Transaction,
+    TxKind, Typed2718, U256,
 };
 use xdevs_state::{StateDiff, StateProvider};
 
@@ -45,6 +48,8 @@ fn new_evm<'o, 'a>(db: &'o mut StateOverlay<'a>, cfg: CfgEnv, block: BlockEnv) -
 enum TxFailure {
     /// Invalid against the current state / block (revm validation).
     Invalid(InvalidTransaction),
+    /// Invalid under XIP-0001 at its position in the block.
+    Xip0001(Xip0001Error),
     /// State/EVM failure: aborts the whole block.
     Fatal(ExecutionError),
 }
@@ -82,13 +87,30 @@ impl EvmExecutor {
     /// Run `tx` on `evm`, commit its state changes and pay the treasury share of the
     /// base fee (§15.1). revm itself charges the sender, burns the base fee and pays the
     /// tip to the block beneficiary.
+    ///
+    /// `xip0001 = Some(senders)` when XIP-0001 is active in this block, with the senders
+    /// of the transactions already in the block: rules (a) / (c) are checked and the
+    /// authorization list is filtered (b), all against the current overlay = `S₀(tx)`.
     fn apply_tx(
         &self,
         evm: &mut Evm<'_, '_>,
         tx: &RecoveredTx,
         base_fee: u64,
+        xip_senders: Option<&BTreeSet<Address>>,
     ) -> Result<AppliedTx, TxFailure> {
-        let env = tx_env(tx).map_err(TxFailure::Fatal)?;
+        let mut env = tx_env(tx).map_err(TxFailure::Fatal)?;
+        if let Some(senders_in_block) = xip_senders {
+            let db = evm.ctx.db_mut();
+            let status = xip0001::status(db, tx.sender)?;
+            check_tx(
+                status,
+                &TxShape::from(tx),
+                base_fee,
+                senders_in_block.contains(&tx.sender),
+            )
+            .map_err(TxFailure::Xip0001)?;
+            xip0001::filter_authorizations(db, &mut env.authorization_list)?;
+        }
         let out = match evm.transact(env) {
             Ok(out) => out,
             Err(EVMError::Transaction(e)) => return Err(TxFailure::Invalid(e)),
@@ -175,7 +197,13 @@ impl EvmExecutor {
             .account(from)
             .map_err(|e| ExecutionError::State(e.0))?
             .map_or(0, |a| a.nonce);
-        let env: TxEnv = call_tx_env(request, self.chain_config().chain_id, gas_limit, nonce)?;
+        let mut env: TxEnv = call_tx_env(request, self.chain_config().chain_id, gas_limit, nonce)?;
+        // Simulations are never rejected by XIP-0001, but locked authorities are skipped
+        // exactly as in a real transaction so results and gas match inclusion.
+        if self.chain_config().xip0001_active(header.number + 1) {
+            xip0001::filter_authorizations(db, &mut env.authorization_list)
+                .map_err(|e| ExecutionError::State(e.0))?;
+        }
         let mut cfg = cfg_env(self.chain_config().chain_id);
         cfg.disable_nonce_check = true;
         cfg.disable_base_fee = true;
@@ -223,6 +251,7 @@ impl EvmExecutor {
         gas_cap: u64,
     ) -> Result<u64, ExecutionError> {
         let mut db = StateOverlay::new(state);
+        let locked = self.check_request_xip0001(&mut db, header, request)?;
         let mut hi = request
             .gas
             .filter(|g| *g >= MIN_TX_GAS)
@@ -301,7 +330,62 @@ impl EvmExecutor {
                 lo = mid;
             }
         }
+        if locked && hi > MAX_GAS {
+            // c2: a locked sender's transaction could never be included.
+            return Err(xip_request_error(
+                request,
+                Xip0001Violation::GasLimit { gas_limit: hi },
+            ));
+        }
         Ok(hi)
+    }
+
+    /// XIP-0001 checks of an `eth_estimateGas` request against the state of the
+    /// requested block (the transaction would go into the block after `header`). Returns
+    /// `true` if `from` is `LOCKED` (the caller then checks c2 on the estimate).
+    fn check_request_xip0001(
+        &self,
+        db: &mut StateOverlay<'_>,
+        header: &Header,
+        request: &TransactionRequest,
+    ) -> Result<bool, ExecutionError> {
+        if !self.chain_config().xip0001_active(header.number + 1) {
+            return Ok(false);
+        }
+        let from = request.from.unwrap_or_default();
+        let status = xip0001::status(db, from).map_err(|e| ExecutionError::State(e.0))?;
+        if status == EoaLockStatus::Unlocked {
+            return Ok(false);
+        }
+        let shape = TxShape {
+            sender: from,
+            to: request.to.unwrap_or(TxKind::Create),
+            value: request.value.unwrap_or_default(),
+            gas_limit: 0,
+            max_fee_per_gas: 0,
+        };
+        check_shape(status, &shape).map_err(|e| xip_request_error(request, e.violation))?;
+        // c3 only if the request carries a fee field.
+        if let Some(max_fee) = request.max_fee_per_gas.or(request.gas_price) {
+            let base_fee = next_base_fee(header, self.chain_config());
+            let shape = TxShape {
+                max_fee_per_gas: max_fee,
+                ..shape
+            };
+            check_tx(status, &shape, base_fee, false)
+                .map_err(|e| xip_request_error(request, e.violation))?;
+        }
+        Ok(true)
+    }
+}
+
+fn xip_request_error(request: &TransactionRequest, violation: Xip0001Violation) -> ExecutionError {
+    ExecutionError::Xip0001 {
+        hash: None,
+        error: Box::new(Xip0001Error {
+            sender: request.from.unwrap_or_default(),
+            violation,
+        }),
     }
 }
 
@@ -368,6 +452,8 @@ impl BlockExecutor for EvmExecutor {
         let mut db = StateOverlay::new(state);
         let mut receipts = Vec::with_capacity(block.body.len());
         let mut cumulative = 0u64;
+        let xip0001_active = self.chain_config().xip0001_active(header.number);
+        let mut senders: BTreeSet<Address> = BTreeSet::new();
         {
             let mut evm = new_evm(
                 &mut db,
@@ -392,7 +478,8 @@ impl BlockExecutor for EvmExecutor {
                         limit: header.gas_limit,
                     });
                 }
-                let applied = match self.apply_tx(&mut evm, &rtx, base_fee) {
+                let xip = xip0001_active.then_some(&senders);
+                let applied = match self.apply_tx(&mut evm, &rtx, base_fee, xip) {
                     Ok(a) => a,
                     Err(TxFailure::Invalid(e)) => {
                         return Err(ExecutionError::InvalidTransaction {
@@ -400,8 +487,15 @@ impl BlockExecutor for EvmExecutor {
                             reason: e.to_string(),
                         })
                     }
+                    Err(TxFailure::Xip0001(error)) => {
+                        return Err(ExecutionError::Xip0001 {
+                            hash: Some(hash),
+                            error: Box::new(error),
+                        })
+                    }
                     Err(TxFailure::Fatal(e)) => return Err(e),
                 };
+                senders.insert(rtx.sender);
                 cumulative += applied.gas_used;
                 receipts.push(make_receipt(&rtx, applied, cumulative));
             }
@@ -448,6 +542,9 @@ impl BlockExecutor for EvmExecutor {
         let mut rejected = Vec::new();
         // Once a sender's tx is skipped, its later (higher-nonce) txs cannot apply.
         let mut skipped: BTreeSet<Address> = BTreeSet::new();
+        // Senders of the included txs (XIP-0001 c1).
+        let mut included: BTreeSet<Address> = BTreeSet::new();
+        let xip0001_active = self.chain_config().xip0001_active(header.number);
         let mut cumulative = 0u64;
         {
             let mut evm = new_evm(
@@ -473,8 +570,10 @@ impl BlockExecutor for EvmExecutor {
                     skipped.insert(tx.sender);
                     continue;
                 }
-                match self.apply_tx(&mut evm, &tx, base_fee) {
+                let xip = xip0001_active.then_some(&included);
+                match self.apply_tx(&mut evm, &tx, base_fee, xip) {
                     Ok(applied) => {
+                        included.insert(tx.sender);
                         cumulative += applied.gas_used;
                         receipts.push(make_receipt(&tx, applied, cumulative));
                         senders.push(tx.sender);
@@ -489,6 +588,20 @@ impl BlockExecutor for EvmExecutor {
                                 ExecutionError::InvalidTransaction {
                                     hash,
                                     reason: e.to_string(),
+                                },
+                            ));
+                        }
+                    }
+                    Err(TxFailure::Xip0001(error)) => {
+                        skipped.insert(tx.sender);
+                        // c1 (next block) and c3 (base fee may move) are "not now".
+                        if !error.violation.is_transient() {
+                            tracing::debug!(%hash, %error, "rejecting transaction (XIP-0001)");
+                            rejected.push((
+                                hash,
+                                ExecutionError::Xip0001 {
+                                    hash: Some(hash),
+                                    error: Box::new(error),
                                 },
                             ));
                         }

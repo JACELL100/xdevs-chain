@@ -16,7 +16,12 @@ use std::{
 
 use parking_lot::RwLock;
 use xdevs_primitives::{
-    AccountInfo, Address, Block, ReceiptEnvelope, RecoveredTx, Transaction, TxHash, U256,
+    xip0001::{
+        check_shape, check_tx, eoa_lock_status, TxShape, LOCK_SLOT, MAX_GAS,
+        MAX_POOL_TXS_PER_LOCKED_SENDER,
+    },
+    AccountInfo, Address, Block, EoaLockStatus, ReceiptEnvelope, RecoveredTx, Transaction, TxHash,
+    B256, U256,
 };
 use xdevs_state::{StateError, StateProvider};
 
@@ -25,10 +30,18 @@ use crate::{
     PoolConfig, PoolError, PoolStatus, TxOrigin, TxPool,
 };
 
-/// Read access to the **latest committed** account state (nonce + balance).
+/// Read access to the **latest committed** account state (nonce + balance, and the
+/// XIP-0001 lock slot of EIP-7702 accounts).
 pub trait AccountReader: Send + Sync {
     /// Account at the latest committed block (`None` = does not exist).
     fn account(&self, address: Address) -> Result<Option<AccountInfo>, StateError>;
+
+    /// Storage slot at the latest committed block. Only read for accounts delegated to
+    /// the xDEVS Smart Account (XIP-0001 lock word). The default returns zero, i.e. such a
+    /// reader cannot see EOA locks: node readers must implement it (see [`FromState`]).
+    fn storage(&self, _address: Address, _slot: B256) -> Result<U256, StateError> {
+        Ok(U256::ZERO)
+    }
 }
 
 impl<F> AccountReader for F
@@ -47,6 +60,10 @@ pub struct FromState<S>(pub S);
 impl<S: StateProvider + Send + Sync> AccountReader for FromState<S> {
     fn account(&self, address: Address) -> Result<Option<AccountInfo>, StateError> {
         self.0.basic_account(address)
+    }
+
+    fn storage(&self, address: Address, slot: B256) -> Result<U256, StateError> {
+        self.0.storage(address, slot)
     }
 }
 
@@ -82,6 +99,8 @@ struct SenderTxs {
     nonce: u64,
     /// Account balance at the latest state read.
     balance: U256,
+    /// XIP-0001 lock status at the latest state read (`Unlocked` while inactive).
+    lock: EoaLockStatus,
     txs: BTreeMap<u64, PooledTx>,
 }
 
@@ -113,6 +132,8 @@ struct Inner {
     base_fee: u64,
     /// Timestamp of the latest committed block seen by the pool.
     last_timestamp: Option<u64>,
+    /// Number of the latest committed block (`None` = unknown, treated as before block 1).
+    head: Option<u64>,
 }
 
 impl Inner {
@@ -137,19 +158,49 @@ impl Inner {
         self.remove_at(sender, nonce)
     }
 
-    /// Apply a fresh account read: drop stale nonces and unaffordable txs.
-    fn reset_sender(&mut self, sender: Address, account: AccountInfo) -> Vec<TxHash> {
+    /// Number of the block the pool fills next.
+    fn next_block(&self) -> u64 {
+        self.head.map_or(0, |h| h.saturating_add(1))
+    }
+
+    /// Apply a fresh account read: drop stale nonces and unaffordable txs, and (XIP-0001)
+    /// everything a `SEALED` sender holds, a `LOCKED` sender's txs that are not value-0
+    /// self-calls or exceed the gas cap, and its txs beyond the 4 lowest nonces. Txs that
+    /// only fail the fee cap (c3) stay: the base fee may move.
+    fn reset_sender(
+        &mut self,
+        sender: Address,
+        account: AccountInfo,
+        lock: EoaLockStatus,
+    ) -> Vec<TxHash> {
         let Some(entry) = self.senders.get_mut(&sender) else {
             return Vec::new();
         };
         entry.nonce = account.nonce;
         entry.balance = account.balance;
-        let doomed: Vec<u64> = entry
+        entry.lock = lock;
+        let xip_invalid = |t: &PooledTx| {
+            let shape = TxShape::from(&t.tx);
+            check_shape(lock, &shape).is_err()
+                || (lock == EoaLockStatus::Locked && shape.gas_limit > MAX_GAS)
+        };
+        let mut doomed: Vec<u64> = entry
             .txs
             .iter()
-            .filter(|(n, t)| **n < account.nonce || t.cost > account.balance)
+            .filter(|(n, t)| **n < account.nonce || t.cost > account.balance || xip_invalid(t))
             .map(|(n, _)| *n)
             .collect();
+        if lock == EoaLockStatus::Locked {
+            doomed.extend(
+                entry
+                    .txs
+                    .keys()
+                    .filter(|n| !doomed.contains(n))
+                    .skip(MAX_POOL_TXS_PER_LOCKED_SENDER)
+                    .copied()
+                    .collect::<Vec<_>>(),
+            );
+        }
         doomed
             .into_iter()
             .filter_map(|n| self.remove_at(sender, n).map(|t| t.hash))
@@ -234,6 +285,19 @@ impl Pool {
         self.inner.write().base_fee = base_fee;
     }
 
+    /// Set the number of the latest committed block (call once at start-up; afterwards
+    /// [`TxPool::on_block_committed`] keeps it current). Decides whether XIP-0001 applies
+    /// to the next block.
+    pub fn set_head_number(&self, number: u64) {
+        self.inner.write().head = Some(number);
+    }
+
+    /// `true` if XIP-0001 applies to the block the pool fills next.
+    pub fn xip0001_active(&self) -> bool {
+        let next = self.inner.read().next_block();
+        self.params.xip0001_active(next)
+    }
+
     /// Base fee used by the entry check.
     pub fn base_fee(&self) -> u64 {
         self.inner.read().base_fee
@@ -280,6 +344,22 @@ impl Pool {
             .account(address)
             .map(Option::unwrap_or_default)
             .map_err(|e| PoolError::State(e.to_string()))
+    }
+
+    /// XIP-0001 status of `address` (whose account is `account`) at the head state, or
+    /// `Unlocked` if XIP-0001 does not apply to the next block.
+    fn read_lock(
+        &self,
+        address: Address,
+        account: &AccountInfo,
+    ) -> Result<EoaLockStatus, PoolError> {
+        if !self.xip0001_active() {
+            return Ok(EoaLockStatus::Unlocked);
+        }
+        eoa_lock_status(Some(account.code_hash), || {
+            self.state.storage(address, LOCK_SLOT)
+        })
+        .map_err(|e| PoolError::State(e.to_string()))
     }
 
     /// Plan which txs to evict so that `extra_bytes` more bytes and (if `new_slot`) one
@@ -367,6 +447,9 @@ impl TxPool for Pool {
             .saturating_add(tx.value());
         // Read state before taking the write lock (the reader may be slow).
         let account = self.read_account(sender)?;
+        let lock = self.read_lock(sender, &account)?;
+        // XIP-0001 (§5 e): as if the tx were the first one of the next block.
+        check_tx(lock, &TxShape::from(&tx), self.base_fee(), false)?;
 
         let mut inner = self.inner.write();
         if inner.by_hash.contains_key(&hash) {
@@ -374,7 +457,7 @@ impl TxPool for Pool {
         }
         // Refresh the sender: the chain may have moved since its last read.
         if inner.senders.contains_key(&sender) {
-            inner.reset_sender(sender, account);
+            inner.reset_sender(sender, account, lock);
         }
 
         if nonce < account.nonce {
@@ -422,8 +505,14 @@ impl TxPool for Pool {
         }
 
         let old_size = replaced.map(|t| t.size);
-        if old_size.is_none() && existing.is_some_and(|s| s.txs.len() >= self.config.max_per_sender)
-        {
+        let max_per_sender = if lock == EoaLockStatus::Locked {
+            self.config
+                .max_per_sender
+                .min(MAX_POOL_TXS_PER_LOCKED_SENDER)
+        } else {
+            self.config.max_per_sender
+        };
+        if old_size.is_none() && existing.is_some_and(|s| s.txs.len() >= max_per_sender) {
             return Err(PoolError::SenderLimit(sender));
         }
 
@@ -452,6 +541,7 @@ impl TxPool for Pool {
         let entry = inner.senders.entry(sender).or_default();
         entry.nonce = account.nonce;
         entry.balance = account.balance;
+        entry.lock = lock;
         entry.txs.insert(
             nonce,
             PooledTx {
@@ -482,6 +572,9 @@ impl TxPool for Pool {
 
         let mut heap = BinaryHeap::new();
         for (addr, s) in &inner.senders {
+            if s.lock == EoaLockStatus::Sealed {
+                continue;
+            }
             if let Some(t) = s.txs.get(&s.nonce).filter(|t| fee_ok(t)) {
                 heap.extend(candidate(*addr, t));
             }
@@ -501,6 +594,10 @@ impl TxPool for Pool {
             }
             remaining -= t.tx.gas_limit();
             out.push(t.tx.clone());
+            if s.lock == EoaLockStatus::Locked {
+                // XIP-0001 c1: at most one tx (the lowest nonce) of a LOCKED sender.
+                continue;
+            }
             if let Some(next) = s.txs.get(&(c.nonce + 1)).filter(|t| fee_ok(t)) {
                 heap.extend(candidate(c.sender, next));
             }
@@ -520,6 +617,7 @@ impl TxPool for Pool {
             }
             let ts = block.header.timestamp;
             inner.last_timestamp = Some(ts);
+            inner.head = Some(block.header.number);
             for s in inner.senders.values_mut() {
                 for t in s.txs.values_mut() {
                     t.added_at.get_or_insert(ts);
@@ -528,21 +626,26 @@ impl TxPool for Pool {
             inner.senders.keys().copied().collect()
         };
 
-        let accounts: Vec<(Address, AccountInfo)> = senders
+        let accounts: Vec<(Address, AccountInfo, EoaLockStatus)> = senders
             .into_iter()
-            .filter_map(|addr| match self.read_account(addr) {
-                Ok(acc) => Some((addr, acc)),
-                Err(e) => {
-                    tracing::warn!(%addr, error = %e, "mempool: account refresh failed");
-                    None
+            .filter_map(|addr| {
+                let read = self
+                    .read_account(addr)
+                    .and_then(|acc| Ok((acc, self.read_lock(addr, &acc)?)));
+                match read {
+                    Ok((acc, lock)) => Some((addr, acc, lock)),
+                    Err(e) => {
+                        tracing::warn!(%addr, error = %e, "mempool: account refresh failed");
+                        None
+                    }
                 }
             })
             .collect();
 
         let mut inner = self.inner.write();
-        for (addr, acc) in accounts {
-            for hash in inner.reset_sender(addr, acc) {
-                tracing::trace!(%hash, "dropped stale / unaffordable tx");
+        for (addr, acc, lock) in accounts {
+            for hash in inner.reset_sender(addr, acc, lock) {
+                tracing::trace!(%hash, "dropped stale / unaffordable / XIP-0001-invalid tx");
             }
         }
         self.expire_queued(&mut inner, block.header.timestamp);

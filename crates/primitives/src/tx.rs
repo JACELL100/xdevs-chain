@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 /// [`Transaction`] getters (`nonce()`, `gas_limit()`, `max_fee_per_gas()`, ...) work directly.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveredTx {
-    /// The signed transaction (types 0x00, 0x01, 0x02; 0x04 later).
+    /// The signed transaction (types 0x00, 0x01, 0x02 and 0x04; blob txs 0x03 are
+    /// refused by the mempool and the executor).
     pub tx: TxEnvelope,
     /// Address recovered from the signature.
     pub sender: Address,
