@@ -1,0 +1,13 @@
+---
+# Plays that include this role on validators run with `serial: 1`, so a restart handler
+# never fires on more than one validator at a time.
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Restart xdevs
+  ansible.builtin.systemd_service:
+    name: xdevs
+    # Never start a node that is meant to stay down (docs/runbooks/emergency-restart.md).
+    state: "{{ 'restarted' if (xdevs_service_state | default('started')) == 'started' else 'stopped' }}"
+    daemon_reload: true

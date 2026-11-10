@@ -1,0 +1,48 @@
+---
+# Upgrade / restart / reboot the CURRENT host and wait until it is healthy.
+# Callers run this under `serial: 1` after tasks/quorum_check.yml for validators.
+
+- name: Version before
+  ansible.builtin.command: /usr/local/bin/xdevs --version
+  register: roll_before
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# Downloads, verifies and smoke-tests the release while the old node keeps running; the
+# symlink switch / config change notifies "Restart xdevs".
+- name: Install release and config
+  ansible.builtin.include_role:
+    name: xdevs_node
+
+- name: Restart now if the binary or config changed
+  ansible.builtin.meta: flush_handlers
+
+- name: Forced restart (-e xdevs_force_restart=true)
+  ansible.builtin.systemd_service:
+    name: xdevs
+    state: restarted
+  when:
+    - xdevs_force_restart | default(false) | bool
+    - not (xdevs_rolling_reboot | default(false) | bool)
+
+- name: OS reboot (-e xdevs_rolling_reboot=true)
+  ansible.builtin.reboot:
+    reboot_timeout: 900
+    msg: "xDEVS rolling reboot"
+  when: xdevs_rolling_reboot | default(false) | bool
+
+- name: Wait until the node follows the chain again
+  ansible.builtin.include_role:
+    name: xdevs_node
+    tasks_from: wait_healthy
+
+- name: Version after
+  ansible.builtin.command: /usr/local/bin/xdevs --version
+  register: roll_after
+  changed_when: false
+  check_mode: false
+
+- name: Report
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: {{ roll_before.stdout | default('?') }} -> {{ roll_after.stdout }}"

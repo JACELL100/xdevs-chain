@@ -1,0 +1,186 @@
+---
+# Plan §24.4 checklist, items 1-5 (the rest: xdevs_node, validator_keys, monitoring_agent,
+# snapshots).
+
+- name: Check the OS (Ubuntu 24.04+; ARM64 on Oracle A1, x86_64 or ARM64 elsewhere)
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_version is version(common_min_ubuntu_version, '>=')
+      - ansible_architecture in ["aarch64", "x86_64"]
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_distribution }} {{ ansible_distribution_version }}
+      ({{ ansible_architecture }}). Use Ubuntu {{ common_min_ubuntu_version }} LTS or newer:
+      the release binaries need glibc 2.39.
+
+- name: Require at least one SSH admin CIDR before touching the firewall
+  ansible.builtin.assert:
+    that:
+      - (firewall_ssh_allowed_cidrs | length) > 0 or (firewall_trusted_interfaces | length) > 0
+    fail_msg: "Set vault_admin_ssh_cidrs (or firewall_trusted_interfaces) or you will lock yourself out."
+  when: firewall_enabled | bool
+
+# ---- 1. packages and automatic security updates -----------------------------------------
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable daily package lists and unattended security upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      // Managed by Ansible (roles/common)
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+
+- name: Unattended-upgrades policy (security only, never reboot on its own)
+  ansible.builtin.template:
+    src: 52xdevs-unattended-upgrades.j2
+    dest: /etc/apt/apt.conf.d/52xdevs-unattended-upgrades
+    mode: "0644"
+
+- name: Never let needrestart restart the node or tunnel after library upgrades
+  ansible.builtin.copy:
+    dest: /etc/needrestart/conf.d/50-xdevs.conf
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/common).
+      # Unattended upgrades run on every host on the same day; if needrestart restarted
+      # xdevs everywhere at once, more than 1/3 of the voting power could go down together.
+      # Restarts go through deploy/ansible/rolling-upgrade.yml instead.
+      $nrconf{override_rc}{qr(^xdevs\.service$)} = 0;
+      $nrconf{override_rc}{qr(^cloudflared\.service$)} = 0;
+      $nrconf{override_rc}{qr(^xdevs-docker\.service$)} = 0;
+
+- name: Use UTC
+  ansible.builtin.command: timedatectl set-timezone UTC
+  when: ansible_date_time.tz != "UTC"
+  changed_when: true
+
+# ---- 2. service user and data directory ---------------------------------------------------
+- name: Create the xdevs system group
+  ansible.builtin.group:
+    name: "{{ xdevs_user }}"
+    system: true
+
+- name: Create the xdevs system user (no login shell)
+  ansible.builtin.user:
+    name: "{{ xdevs_user }}"
+    group: "{{ xdevs_user }}"
+    system: true
+    home: "{{ xdevs_home }}"
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Create the data directory
+  ansible.builtin.file:
+    path: "{{ xdevs_home }}"
+    state: directory
+    owner: "{{ xdevs_user }}"
+    group: "{{ xdevs_user }}"
+    mode: "0750"
+
+# ---- 3. SSH hardening + fail2ban ------------------------------------------------------------
+- name: SSH hardening drop-in (keys only, no root, no passwords)
+  ansible.builtin.template:
+    src: sshd-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-xdevs-hardening.conf
+    mode: "0644"
+  notify: Validate and reload sshd
+
+- name: fail2ban jail for sshd
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Enable fail2ban
+  ansible.builtin.systemd_service:
+    name: fail2ban
+    enabled: true
+    state: started
+
+# ---- 4. firewall ------------------------------------------------------------------------------
+- name: Firewall
+  ansible.builtin.include_tasks: firewall.yml
+  when: firewall_enabled | bool
+
+# ---- 5. time sync -------------------------------------------------------------------------------
+- name: chrony configuration
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    mode: "0644"
+  notify: Restart chrony
+
+- name: Enable chrony (replaces systemd-timesyncd)
+  ansible.builtin.systemd_service:
+    name: chrony
+    enabled: true
+    state: started
+
+# ---- misc: journald cap, swap on micro VMs, kernel settings ------------------------------------
+- name: journald drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: "0755"
+
+- name: Cap the journal size (small boot volumes)
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/50-xdevs.conf
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/common)
+      [Journal]
+      SystemMaxUse={{ journald_max_use }}
+  notify: Restart journald
+
+- name: Swap file
+  when: (swap_file_size_mb | int) > 0
+  block:
+    - name: Check for an existing swap file
+      ansible.builtin.stat:
+        path: /swapfile
+      register: common_swapfile
+
+    - name: Create the swap file
+      ansible.builtin.command: "fallocate -l {{ swap_file_size_mb }}M /swapfile"
+      when: not common_swapfile.stat.exists
+      changed_when: true
+
+    - name: Swap file permissions
+      ansible.builtin.file:
+        path: /swapfile
+        mode: "0600"
+
+    - name: Format the swap file
+      ansible.builtin.command: mkswap /swapfile
+      when: not common_swapfile.stat.exists
+      changed_when: true
+
+    - name: Enable swap at boot
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: "/swapfile none swap sw 0 0"
+
+    - name: Turn swap on
+      ansible.builtin.command: swapon -a
+      changed_when: false
+
+- name: Kernel settings (low swappiness, UDP buffers for QUIC later)
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/60-xdevs.conf
+    reload: true
+  loop:
+    - { name: vm.swappiness, value: "10" }
+    - { name: net.core.rmem_max, value: "7500000" }
+    - { name: net.core.wmem_max, value: "7500000" }

@@ -1,0 +1,94 @@
+---
+# GitHub Release tarball (release.yml): xdevs-<tag>-<target>.tar.gz containing
+# xdevs-<tag>-<target>/{xdevs,xdevs-cli,LICENSE,README.md}, plus <tarball>.sha256 and
+# SHA256SUMS. The download happens BEFORE the running node is touched; only the symlink
+# switch notifies a restart.
+
+- name: Pick the release target for this CPU
+  ansible.builtin.set_fact:
+    xdevs_target: "{{ xdevs_arch_targets[ansible_architecture] }}"
+
+- name: Release asset names
+  ansible.builtin.set_fact:
+    xdevs_asset: "xdevs-{{ xdevs_version }}-{{ xdevs_target }}"
+    xdevs_release_dir: "{{ xdevs_release_root }}/{{ xdevs_version }}"
+    xdevs_release_base_url: "https://github.com/{{ xdevs_github_repo }}/releases/download/{{ xdevs_version }}"
+
+- name: Check whether this release is already unpacked
+  ansible.builtin.stat:
+    path: "{{ xdevs_release_dir }}/xdevs"
+  register: xdevs_release_present
+
+- name: Download and verify the release
+  when: not xdevs_release_present.stat.exists
+  block:
+    - name: Download directory
+      ansible.builtin.file:
+        path: /opt/xdevs/downloads
+        state: directory
+        mode: "0755"
+
+    - name: Download the tarball and verify its SHA-256
+      ansible.builtin.get_url:
+        url: "{{ xdevs_release_base_url }}/{{ xdevs_asset }}.tar.gz"
+        dest: "/opt/xdevs/downloads/{{ xdevs_asset }}.tar.gz"
+        mode: "0644"
+        timeout: 120
+        # Pinned hash from the inventory when given (preferred), else the published .sha256.
+        checksum: >-
+          {{ 'sha256:' ~ xdevs_release_sha256[xdevs_target]
+             if (xdevs_release_sha256[xdevs_target] | default('') | length) > 0
+             else 'sha256:' ~ xdevs_release_base_url ~ '/' ~ xdevs_asset ~ '.tar.gz.sha256' }}
+
+    - name: Release directory
+      ansible.builtin.file:
+        path: "{{ xdevs_release_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Unpack
+      ansible.builtin.unarchive:
+        src: "/opt/xdevs/downloads/{{ xdevs_asset }}.tar.gz"
+        dest: "{{ xdevs_release_dir }}"
+        remote_src: true
+        extra_opts: ["--strip-components=1"]
+        owner: root
+        group: root
+
+    - name: Remove the tarball
+      ansible.builtin.file:
+        path: "/opt/xdevs/downloads/{{ xdevs_asset }}.tar.gz"
+        state: absent
+
+- name: Smoke-test the binary (runs on this CPU and glibc)
+  ansible.builtin.command: "{{ xdevs_release_dir }}/xdevs --version"
+  register: xdevs_version_out
+  changed_when: false
+  check_mode: false
+  # In --check mode a new release is never downloaded, so there is nothing to run yet.
+  when: not ansible_check_mode or xdevs_release_present.stat.exists
+
+- name: Point /usr/local/bin at this release
+  ansible.builtin.file:
+    src: "{{ xdevs_release_dir }}/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+    force: true
+  loop: [xdevs, xdevs-cli]
+  notify: Restart xdevs
+
+- name: Find old release directories
+  ansible.builtin.find:
+    paths: "{{ xdevs_release_root }}"
+    file_type: directory
+  register: xdevs_old_releases
+
+- name: Prune all but the newest {{ xdevs_keep_releases }} releases (never the active one)
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: >-
+    {{ (xdevs_old_releases.files | sort(attribute='mtime', reverse=true))[xdevs_keep_releases | int:]
+       | rejectattr('path', 'equalto', xdevs_release_dir) | list }}
+  loop_control:
+    label: "{{ item.path }}"

@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Cloudflare Tunnel for the xDEVS Chain public RPC
+After=network-online.target xdevs.service
+Wants=network-online.target
+
+[Service]
+User={{ cloudflared_user }}
+Group={{ cloudflared_user }}
+ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

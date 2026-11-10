@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+# /etc/cloudflared/config.yml: plan §33.5 adapted to the one-level hostnames that the free
+# Cloudflare certificate (*.xdevs.in) covers. Reference copy: deploy/cloudflare/tunnel-config.example.yml
+tunnel: {{ cloudflared_tunnel_id }}
+credentials-file: /etc/cloudflared/{{ cloudflared_tunnel_id }}.json
+metrics: {{ cloudflared_metrics_addr }}
+no-autoupdate: true
+
+originRequest:
+  connectTimeout: 10s
+  tcpKeepAlive: 30s
+  keepAliveConnections: 50
+  keepAliveTimeout: 90s
+
+ingress:
+  # JSON-RPC over HTTPS -> node [rpc] http (127.0.0.1 only).
+  - hostname: {{ xdevs_public_rpc_hostname }}
+    service: {{ cloudflared_rpc_origin }}
+  # WebSocket (wss://) -> node [rpc] ws listener. cloudflared upgrades WS on an http service.
+  - hostname: {{ xdevs_public_ws_hostname }}
+    service: {{ cloudflared_ws_origin }}
+    originRequest:
+      # Long-lived eth_subscribe connections.
+      keepAliveTimeout: 10m
+  # Everything else (other hostnames, scanners) gets a 404 from cloudflared itself.
+  - service: http_status:404

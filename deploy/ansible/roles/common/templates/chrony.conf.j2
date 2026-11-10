@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+# BFT round timeouts and the proposal timestamp check ([validator] max_timestamp_drift_secs,
+# default 2 s) need clocks within tens of milliseconds. Check with: chronyc tracking
+{% for s in chrony_servers %}
+server {{ s }} iburst
+{% endfor %}
+{% for p in chrony_pools %}
+pool {{ p }} iburst maxsources 4
+{% endfor %}
+sourcedir /run/chrony-dhcp
+sourcedir /etc/chrony/sources.d
+keyfile /etc/chrony/chrony.keys
+driftfile /var/lib/chrony/chrony.drift
+ntsdumpdir /var/lib/chrony
+logdir /var/log/chrony
+maxupdateskew 100.0
+rtcsync
+# Step the clock only during the first updates after boot; slew afterwards.
+makestep 1 3
+leapsectz right/UTC

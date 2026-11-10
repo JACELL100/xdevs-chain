@@ -1,0 +1,9 @@
+---
+# Bootnodes run a non-validating full node (the binary has no discovery-only mode yet).
+# 1 GB micro VMs: smallest state window, fewer peers, swap from roles/common.
+xdevs_role: bootnode
+xdevs_pruning: minimal
+xdevs_gossip_max_peers: 50
+xdevs_rpc_namespaces: ["eth", "net", "web3"]
+xdevs_mempool_max_txs: 2000
+xdevs_mempool_max_bytes: 16777216

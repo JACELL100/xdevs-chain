@@ -1,0 +1,65 @@
+---
+# Shared settings of the xDEVS Chain testnet. No secrets here: every secret is a
+# `vault_*` variable from vault.yml (see vault.yml.example) and every placeholder that
+# must be changed contains CHANGE_ME (site.yml refuses to run while one is left).
+#
+# Precedence note: variables the inventory file sets per provider group (chrony_servers,
+# firewall_p2p_public, ...) must NOT be set here, because inventory group_vars/all beats
+# group vars from the inventory file. Their defaults live in the roles' defaults/main.yml.
+
+# ---- network ---------------------------------------------------------------------------
+xdevs_network: testnet
+xdevs_chain_id: 717171            # placeholder id (docs/specs/sdk.md); not on chainlist yet
+xdevs_block_time_ms: 2000
+
+# ---- release (roles/xdevs_node) ---------------------------------------------------------
+xdevs_github_repo: JACELL100/xdevs-chain
+xdevs_version: "CHANGE_ME"        # release tag, e.g. v0.3.0
+# binary (default): GitHub Release tarball + SHA-256 check; docker: ghcr.io image
+xdevs_install_method: binary
+# Optional pins of the tarball SHA-256 per target (from SHA256SUMS of the release). When
+# set they are used instead of the .sha256 file downloaded next to the tarball, which
+# only protects against corruption, not against a tampered release.
+xdevs_release_sha256: {}
+#   aarch64-unknown-linux-gnu: "<64 hex>"
+#   x86_64-unknown-linux-gnu: "<64 hex>"
+xdevs_docker_image: ghcr.io/jacell100/xdevs-chain
+# Pin by digest for production-like runs: "ghcr.io/jacell100/xdevs-chain@sha256:<digest>"
+xdevs_docker_image_ref: ""
+
+# ---- genesis -----------------------------------------------------------------------------
+# genesis.json lives outside git (inventory/testnet/files/ is gitignored) until it is
+# published; its SHA-256 is checked on every host so a node can never join the wrong chain.
+xdevs_genesis_src: "{{ inventory_dir }}/files/genesis.json"
+xdevs_genesis_sha256: "CHANGE_ME"
+
+# ---- keys (roles/validator_keys) ----------------------------------------------------------
+# Directory on the CONTROLLER holding the vault-encrypted keys, one sub-directory per
+# inventory host. Outside the repo by default. See docs/runbooks/bootstrap-validator.md.
+xdevs_keys_dir: "{{ lookup('ansible.builtin.env', 'XDEVS_KEYS_DIR') | default('~/xdevs-keys/' + xdevs_network, true) }}"
+
+# ---- access ------------------------------------------------------------------------------
+# CIDRs allowed to SSH in (your admin IP). Kept in the vault so it is not public.
+firewall_ssh_allowed_cidrs: "{{ vault_admin_ssh_cidrs }}"
+# Oracle VCN private subnet (validators peer and expose /metrics on it).
+firewall_private_cidrs: ["10.0.1.0/24"]
+
+# ---- monitoring (roles/monitoring_agent) ---------------------------------------------------
+grafana_cloud_prometheus_url: "{{ vault_grafana_cloud_prometheus_url }}"
+grafana_cloud_prometheus_user: "{{ vault_grafana_cloud_prometheus_user }}"
+grafana_cloud_loki_url: "{{ vault_grafana_cloud_loki_url }}"
+grafana_cloud_loki_user: "{{ vault_grafana_cloud_loki_user }}"
+grafana_cloud_api_token: "{{ vault_grafana_cloud_api_token }}"
+
+# ---- snapshots (roles/snapshots): Oracle Object Storage, S3-compatible API ----------------
+snapshot_s3_endpoint: "https://{{ vault_oci_namespace }}.compat.objectstorage.{{ oci_region }}.oraclecloud.com"
+oci_region: "CHANGE_ME"           # home region, e.g. ap-mumbai-1
+snapshot_bucket: xdevs-testnet-snapshots
+snapshot_access_key_id: "{{ vault_oci_s3_access_key_id }}"
+snapshot_secret_access_key: "{{ vault_oci_s3_secret_access_key }}"
+
+# ---- public endpoints (roles/cloudflared, docs) -------------------------------------------
+xdevs_public_rpc_hostname: xdevschain-rpc.xdevs.in
+xdevs_public_ws_hostname: xdevschain-ws.xdevs.in
+cloudflared_tunnel_id: "{{ vault_cloudflared_tunnel_id }}"
+cloudflared_credentials_json: "{{ vault_cloudflared_credentials_json }}"

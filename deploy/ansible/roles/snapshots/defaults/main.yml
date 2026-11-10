@@ -1,0 +1,28 @@
+---
+# roles/snapshots: daily state snapshot -> Oracle Object Storage, keep the last 3
+# (plan §24.4 item 10, §24.8). Uses rclone over the S3 compatibility API.
+#
+# Credentials: create a DEDICATED OCI IAM user for snapshots with a policy limited to the
+# bucket, e.g.
+#   Allow group xdevs-snapshots to manage objects in compartment xdevs
+#     where target.bucket.name = 'xdevs-testnet-snapshots'
+# and give it a Customer Secret Key. A Customer Secret Key carries ALL of its user's
+# permissions, so never use your admin user's key here.
+
+snapshot_install_cron: "{{ snapshot_enabled | default(false) | bool }}"
+snapshot_cron_hour: "3"
+snapshot_cron_minute: "17"
+snapshot_keep: 3
+snapshot_min_peers: 3
+snapshot_s3_endpoint: ""
+snapshot_bucket: xdevs-testnet-snapshots
+snapshot_prefix: "{{ xdevs_network | default('testnet') }}"
+snapshot_access_key_id: ""
+snapshot_secret_access_key: ""
+oci_region: ""
+snapshot_staging_dir: /var/lib/xdevs-snapshots
+snapshot_textfile_dir: /var/lib/alloy/textfile
+xdevs_home: /var/lib/xdevs
+xdevs_rpc_http_bind: 127.0.0.1
+xdevs_rpc_http_port: 8545
+xdevs_chain_id: 717171

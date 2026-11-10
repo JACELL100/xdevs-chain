@@ -1,0 +1,59 @@
+---
+# restore-from-snapshot.yml: restore ONE node's chain data from Oracle Object Storage
+# (plan §24.8). Runbook: docs/runbooks/restore-from-snapshot.md
+#
+#   ansible-playbook restore-from-snapshot.yml -e target=rpc-1
+#   ansible-playbook restore-from-snapshot.yml -e target=validator-3 -e snapshot=xdevs-testnet-20261110T031700Z-h123456
+#   # fresh replacement machine for a validator (old one destroyed, see the runbook first):
+#   ansible-playbook restore-from-snapshot.yml -e target=validator-3 -e allow_empty_signguard=true
+#
+# The host must already be converged by site.yml (genesis, binary, keys, config). The node's
+# own data/consensus (WAL + sign guard) is always kept; it is never taken from a snapshot.
+
+- name: Preflight
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Shared controller checks
+      ansible.builtin.include_tasks: tasks/preflight.yml
+
+    - name: Exactly one known target
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target in groups['all']
+        fail_msg: "Pass -e target=<one inventory host>."
+
+- name: Restore {{ target | default('?') }}
+  hosts: "{{ target | default('none') }}"
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Quorum check (a validator under restore is offline for a while)
+      ansible.builtin.include_tasks: tasks/quorum_check.yml
+      vars:
+        quorum_target: "{{ inventory_hostname }}"
+      when: inventory_hostname in groups['validators']
+  roles:
+    # Installs rclone, the credentials, xdevs-restore; no cron unless snapshot_enabled.
+    - role: snapshots
+  tasks:
+    - name: Restore (stops xdevs, swaps data/, keeps data/consensus, starts, waits)
+      ansible.builtin.command: >-
+        /usr/local/bin/xdevs-restore --env /etc/xdevs/snapshot.env --yes
+        {{ ('--snapshot ' ~ (snapshot | quote)) if (snapshot | default('') | length > 0) else '--latest' }}
+        {{ '--allow-empty-signguard' if (allow_empty_signguard | default(false) | bool) else '' }}
+        --wait-healthy {{ restore_wait_seconds | default(900) }}
+      register: restore_out
+      changed_when: true
+
+    - name: Restore log
+      ansible.builtin.debug:
+        var: restore_out.stderr_lines
+
+    - name: Back in consensus (validators)
+      ansible.builtin.include_role:
+        name: xdevs_node
+        tasks_from: wait_signing
+      when: inventory_hostname in groups['validators']

@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+# Oracle Object Storage through its S3 compatibility API (path-style URLs required).
+[oci]
+type = s3
+provider = Other
+access_key_id = {{ snapshot_access_key_id }}
+secret_access_key = {{ snapshot_secret_access_key }}
+region = {{ oci_region }}
+endpoint = {{ snapshot_s3_endpoint }}
+force_path_style = true
+no_check_bucket = true

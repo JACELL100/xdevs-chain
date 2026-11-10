@@ -1,0 +1,100 @@
+# {{ ansible_managed }}
+# xDEVS Chain {{ xdevs_network | default('testnet') }}: {{ inventory_hostname }} ({{ xdevs_role }})
+# Rendered from deploy/ansible/roles/xdevs_node/templates/config.toml.j2; field reference:
+# crates/node/src/config.rs. Run: xdevs node --config {{ xdevs_config_dir }}/config.toml
+{#
+  Dial address of host `h` on `port`: the VCN private IP when both hosts sit in the same
+  Oracle VCN (plan §24.2: validators talk over the private subnet), else the public DNS
+  name (p2p_host). Hosts with neither are skipped. /p2p/<peer id> is appended when known.
+#}
+{% macro dial_addr(h, port) -%}
+{%- set hv = hostvars[h] -%}
+{%- set same_vcn = (private_ip is defined) and (hv.private_ip is defined) and (oci_vcn is defined) and (hv.oci_vcn is defined) and (oci_vcn == hv.oci_vcn) -%}
+{%- if same_vcn -%}
+/ip4/{{ hv.private_ip }}/tcp/{{ port }}{% if hv.p2p_peer_id | default('') | length > 0 %}/p2p/{{ hv.p2p_peer_id }}{% endif %}
+{%- elif hv.p2p_host | default('') | length > 0 -%}
+/dns4/{{ hv.p2p_host }}/tcp/{{ port }}{% if hv.p2p_peer_id | default('') | length > 0 %}/p2p/{{ hv.p2p_peer_id }}{% endif %}
+{%- endif -%}
+{%- endmacro %}
+{% set ns = namespace(peers=[], boot=[]) %}
+{% for h in groups['validators'] | default([]) if h != inventory_hostname %}
+{%   set a = dial_addr(h, hostvars[h].xdevs_p2p_port | default(xdevs_p2p_port)) | trim %}
+{%   if a | length > 0 %}{% set ns.peers = ns.peers + [a] %}{% endif %}
+{% endfor %}
+{% for h in (groups['validators'] | default([])) + (groups['bootnodes'] | default([])) if h != inventory_hostname %}
+{%   set a = dial_addr(h, hostvars[h].xdevs_gossip_port | default(xdevs_gossip_port)) | trim %}
+{%   if a | length > 0 %}{% set ns.boot = ns.boot + [a] %}{% endif %}
+{% endfor %}
+{% set peers = ns.peers + xdevs_extra_persistent_peers %}
+{% set bootnodes = ns.boot + xdevs_extra_gossip_bootnodes %}
+
+[chain]
+genesis = "{{ xdevs_home }}/genesis.json"
+data_dir = "{{ xdevs_home }}/data"
+pruning = "{{ xdevs_pruning }}"
+
+[dev]
+# A genesis with validators ignores [dev]; disabled explicitly anyway.
+enabled = false
+
+[validator]
+{% if xdevs_role == 'validator' %}
+enabled = true
+key_file = "{{ xdevs_consensus_key_file }}"
+password_file = "{{ xdevs_key_password_file }}"
+fee_recipient = "{{ xdevs_fee_recipient }}"
+max_timestamp_drift_secs = {{ xdevs_max_timestamp_drift_secs }}
+{% else %}
+enabled = false   # full node: follows consensus, never signs
+{% endif %}
+
+[consensus]
+block_time_ms = {{ xdevs_block_time_ms }}
+{% for k, v in xdevs_timeouts.items() %}
+{{ k }} = {{ v }}
+{% endfor %}
+
+[p2p]
+listen = "/ip4/0.0.0.0/tcp/{{ xdevs_p2p_port }}"
+node_key_file = "{{ xdevs_node_key_file }}"
+persistent_peers = {{ peers | to_json }}
+discovery = {{ xdevs_p2p_discovery | bool | lower }}
+
+[gossip]
+enabled = true
+listen = "/ip4/0.0.0.0/tcp/{{ xdevs_gossip_port }}"
+bootnodes = {{ bootnodes | to_json }}
+max_peers = {{ xdevs_gossip_max_peers }}
+{% if xdevs_gossip_max_inbound_peers | string | length > 0 %}
+max_inbound_peers = {{ xdevs_gossip_max_inbound_peers }}
+{% endif %}
+
+[rpc]
+# Never public on this host: published only through Cloudflare Tunnel (rpc role).
+http = "{{ xdevs_rpc_http_bind }}:{{ xdevs_rpc_http_port }}"
+{% if xdevs_rpc_ws_enabled | bool %}
+ws = "127.0.0.1:{{ xdevs_rpc_ws_port }}"
+{% endif %}
+namespaces = {{ xdevs_rpc_namespaces | to_json }}
+cors = {{ xdevs_rpc_cors | to_json }}
+gas_cap = {{ xdevs_rpc_gas_cap }}
+max_logs_range = {{ xdevs_rpc_max_logs_range }}
+max_batch = {{ xdevs_rpc_max_batch }}
+max_concurrent_requests = {{ xdevs_rpc_max_concurrent_requests }}
+evm_timeout_ms = {{ xdevs_rpc_evm_timeout_ms }}
+max_in_flight_per_connection = {{ xdevs_rpc_max_in_flight_per_connection }}
+rate_limit_per_ip = {{ xdevs_rpc_rate_limit_per_ip }}
+rate_limit_burst = {{ xdevs_rpc_rate_limit_burst }}
+
+[mempool]
+max_txs = {{ xdevs_mempool_max_txs }}
+max_bytes = {{ xdevs_mempool_max_bytes }}
+max_per_sender = {{ xdevs_mempool_max_per_sender }}
+
+[metrics]
+enabled = true
+listen = "{{ xdevs_metrics_bind }}:{{ xdevs_metrics_port }}"
+
+[log]
+level = "{{ xdevs_log_level }}"
+format = "{{ xdevs_log_format }}"

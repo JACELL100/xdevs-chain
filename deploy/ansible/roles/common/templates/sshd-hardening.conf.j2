@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+# Loaded before 50-cloud-init.conf (sshd uses the FIRST value it reads), so these win.
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+PermitEmptyPasswords no
+MaxAuthTries 3
+LoginGraceTime 30
+X11Forwarding no
+AllowAgentForwarding no
+AllowTcpForwarding no
+AllowUsers {{ ssh_allow_users | join(' ') }}

@@ -1,0 +1,20 @@
+---
+# roles/cloudflared: Cloudflare Tunnel for the public RPC node (plan §24.2, §33.5).
+# Locally-managed tunnel: create it once from a workstation
+#   cloudflared tunnel login
+#   cloudflared tunnel create xdevschain-rpc        # prints the tunnel id, writes <id>.json
+#   cloudflared tunnel route dns xdevschain-rpc xdevschain-rpc.xdevs.in
+#   cloudflared tunnel route dns xdevschain-rpc xdevschain-ws.xdevs.in
+# then put the id and the JSON into vault.yml (deploy/cloudflare/README.md).
+
+cloudflared_tunnel_id: ""
+cloudflared_credentials_json: ""
+xdevs_public_rpc_hostname: xdevschain-rpc.xdevs.in
+xdevs_public_ws_hostname: xdevschain-ws.xdevs.in
+cloudflared_rpc_origin: "http://127.0.0.1:8545"
+cloudflared_ws_origin: "http://127.0.0.1:8546"
+cloudflared_metrics_addr: "127.0.0.1:20241"
+cloudflared_user: cloudflared
+# Cloudflare's apt repository. Check https://pkg.cloudflare.com/ if the key URL changes.
+cloudflared_apt_key_url: https://pkg.cloudflare.com/cloudflare-main.gpg
+cloudflared_apt_repo: "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main"

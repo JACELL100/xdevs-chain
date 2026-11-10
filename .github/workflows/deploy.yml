@@ -1,0 +1,159 @@
+name: deploy
+
+# Manual deploy of the testnet with Ansible (plan §24.5). Manual dispatch ONLY; never runs on
+# push, tag or schedule. Docs: deploy/ansible/README.md, docs/runbooks/upgrade-network.md.
+#
+# DISABLED until both are true:
+#   1. Repository variable XDEVS_DEPLOY_ENABLED = "true" (Settings -> Variables -> Actions).
+#   2. These secrets exist in the "testnet" environment (Settings -> Environments -> testnet;
+#      add yourself as a required reviewer so every run waits for an approval):
+#        DEPLOY_SSH_PRIVATE_KEY   private key of the deploy user (ed25519, dedicated to CI)
+#        DEPLOY_SSH_KNOWN_HOSTS   `ssh-keyscan` lines of every host (strict host key checking)
+#        ANSIBLE_INVENTORY_YML    contents of inventory/testnet/hosts.yml (holds host addresses)
+#        ANSIBLE_VAULT_YML        contents of the ENCRYPTED group_vars/all/vault.yml
+#        ANSIBLE_VAULT_PASSWORD   the vault password
+#      Optional, when hosts are reached over Tailscale instead of public SSH (recommended:
+#      GitHub runner IPs change, and SSH is open only to your admin IP):
+#        TS_OAUTH_CLIENT_ID, TS_OAUTH_SECRET   Tailscale OAuth client (tag:ci)
+#      and set firewall_trusted_interfaces: ["tailscale0"] in the inventory.
+#
+# Validator keys are NEVER deployed from CI (--skip-tags keys). Install them from a trusted
+# workstation (docs/runbooks/bootstrap-validator.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      playbook:
+        description: "Playbook"
+        type: choice
+        options: [rolling-upgrade.yml, site.yml]
+        default: rolling-upgrade.yml
+      version:
+        description: "Release tag to deploy (vX.Y.Z)"
+        type: string
+        required: true
+      limit:
+        description: "Optional --limit (e.g. rpc, validator-3)"
+        type: string
+        required: false
+        default: ""
+      check_mode:
+        description: "Dry run (--check --diff)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-testnet
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.XDEVS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: testnet
+    timeout-minutes: 120
+    env:
+      HAS_SSH_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY != '' }}
+      HAS_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS != '' }}
+      HAS_INVENTORY: ${{ secrets.ANSIBLE_INVENTORY_YML != '' }}
+      HAS_VAULT: ${{ secrets.ANSIBLE_VAULT_YML != '' }}
+      HAS_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD != '' }}
+      HAS_TAILSCALE: ${{ secrets.TS_OAUTH_CLIENT_ID != '' }}
+      # Inputs go through env, never straight into a script (no expression injection).
+      PLAYBOOK: ${{ inputs.playbook }}
+      VERSION: ${{ inputs.version }}
+      LIMIT: ${{ inputs.limit }}
+      CHECK_MODE: ${{ inputs.check_mode }}
+      ANSIBLE_FORCE_COLOR: "1"
+    defaults:
+      run:
+        working-directory: deploy/ansible
+    steps:
+      - name: Required secrets present
+        working-directory: .
+        run: |
+          missing=""
+          [ "$HAS_SSH_KEY" = true ] || missing="$missing DEPLOY_SSH_PRIVATE_KEY"
+          [ "$HAS_KNOWN_HOSTS" = true ] || missing="$missing DEPLOY_SSH_KNOWN_HOSTS"
+          [ "$HAS_INVENTORY" = true ] || missing="$missing ANSIBLE_INVENTORY_YML"
+          [ "$HAS_VAULT" = true ] || missing="$missing ANSIBLE_VAULT_YML"
+          [ "$HAS_VAULT_PASSWORD" = true ] || missing="$missing ANSIBLE_VAULT_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::deploy is not configured; missing secrets:$missing (see the header of deploy.yml)"
+            exit 1
+          fi
+
+      - name: Validate inputs
+        working-directory: .
+        run: |
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || { echo "::error::bad version: $VERSION"; exit 1; }
+          [[ "$LIMIT" =~ ^[A-Za-z0-9_.,:!*-]*$ ]] || { echo "::error::bad limit: $LIMIT"; exit 1; }
+          case "$PLAYBOOK" in rolling-upgrade.yml|site.yml) ;; *) echo "::error::bad playbook"; exit 1 ;; esac
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "ansible-core~=2.18.0"
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Join the tailnet (optional)
+        if: env.HAS_TAILSCALE == 'true'
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Write SSH key, known_hosts, inventory and vault (umask 077)
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          INVENTORY: ${{ secrets.ANSIBLE_INVENTORY_YML }}
+          VAULT_YML: ${{ secrets.ANSIBLE_VAULT_YML }}
+          VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$INVENTORY" > inventory/testnet/hosts.yml
+          printf '%s\n' "$VAULT_YML" > inventory/testnet/group_vars/all/vault.yml
+          printf '%s' "$VAULT_PASSWORD" > "$RUNNER_TEMP/vault_pass"
+          head -c 15 inventory/testnet/group_vars/all/vault.yml | grep -q '^\$ANSIBLE_VAULT;' \
+            || { echo "::error::ANSIBLE_VAULT_YML must be the ansible-vault ENCRYPTED file"; exit 1; }
+
+      - name: Genesis file
+        # genesis.json is public once the network launches; it is fetched from the release
+        # (asset name "genesis-testnet.json") and checked against xdevs_genesis_sha256 by Ansible.
+        run: |
+          mkdir -p inventory/testnet/files
+          curl -fsSL -o inventory/testnet/files/genesis.json \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/genesis-testnet.json" \
+            || { echo "::error::release ${VERSION} has no genesis-testnet.json asset (see deploy/ansible/README.md)"; exit 1; }
+
+      - name: Run ansible-playbook
+        run: |
+          args=(-i inventory/testnet/hosts.yml "$PLAYBOOK"
+                --private-key ~/.ssh/id_deploy
+                --vault-password-file "$RUNNER_TEMP/vault_pass"
+                -e "xdevs_version=$VERSION"
+                --skip-tags keys)
+          [ -n "$LIMIT" ] && args+=(--limit "$LIMIT")
+          [ "$CHECK_MODE" = true ] && args+=(--check --diff)
+          echo "ansible-playbook ${args[*]}"
+          ansible-playbook "${args[@]}"
+
+      - name: Remove secrets from the runner
+        if: always()
+        run: |
+          rm -f ~/.ssh/id_deploy "$RUNNER_TEMP/vault_pass" \
+            inventory/testnet/hosts.yml inventory/testnet/group_vars/all/vault.yml

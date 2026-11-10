@@ -1,0 +1,123 @@
+// {{ ansible_managed }}
+// Grafana Alloy on {{ inventory_hostname }} ({{ xdevs_role }}): node + host metrics and the
+// node's journal -> Grafana Cloud. Metric names: deploy/monitoring/README.md.
+
+local.file "grafana_cloud_token" {
+  filename  = "/etc/alloy/grafana_cloud_token"
+  is_secret = true
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = "{{ grafana_cloud_prometheus_url }}"
+
+    basic_auth {
+      username = "{{ grafana_cloud_prometheus_user }}"
+      password = local.file.grafana_cloud_token.content
+    }
+  }
+
+  // Every series carries these labels; dashboards and alerts filter on them. The label is
+  // `env`, not `network`: xdevs_peers already uses network="consensus"|"gossip".
+  external_labels = {
+    env  = "{{ xdevs_network }}",
+    role = "{{ xdevs_role }}",
+  }
+}
+
+// ---- xdevs node: /metrics ([metrics] listen) -------------------------------------------
+prometheus.scrape "xdevs" {
+  targets = [{
+    "__address__" = "{{ xdevs_metrics_bind }}:{{ xdevs_metrics_port }}",
+    "instance"    = "{{ inventory_hostname }}",
+  }]
+  job_name        = "xdevs"
+  metrics_path    = "/metrics"
+  scrape_interval = "{{ monitoring_xdevs_scrape_interval }}"
+  scrape_timeout  = "10s"
+  forward_to      = [prometheus.relabel.xdevs_keep.receiver]
+}
+
+prometheus.relabel "xdevs_keep" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "{{ monitoring_xdevs_keep_regex }}"
+    action        = "keep"
+  }
+}
+
+// ---- host metrics (built-in node_exporter) ----------------------------------------------
+prometheus.exporter.unix "host" {
+  set_collectors = ["cpu", "meminfo", "filesystem", "netdev", "loadavg", "timex", "textfile", "stat"]
+
+  filesystem {
+    mount_points_exclude = "^/(dev|proc|run|sys|snap|boot/efi|var/lib/docker)($|/)"
+    fs_types_exclude     = "^(tmpfs|squashfs|overlay|autofs|proc|sysfs|devtmpfs|vfat)$"
+  }
+
+  netdev {
+    device_exclude = "^(lo|docker.*|veth.*|tailscale.*)$"
+  }
+
+  textfile {
+    directory = "{{ monitoring_textfile_dir }}"
+  }
+}
+
+discovery.relabel "host" {
+  targets = prometheus.exporter.unix.host.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ inventory_hostname }}"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "node"
+  }
+}
+
+prometheus.scrape "host" {
+  targets         = discovery.relabel.host.output
+  scrape_interval = "{{ monitoring_host_scrape_interval }}"
+  forward_to      = [prometheus.relabel.host_keep.receiver]
+}
+
+prometheus.relabel "host_keep" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "{{ monitoring_host_keep_regex | trim }}"
+    action        = "keep"
+  }
+}
+{% if monitoring_logs_enabled | bool and (grafana_cloud_loki_url | length) > 0 %}
+
+// ---- logs: xdevs (and cloudflared on the RPC node) -> Loki -----------------------------
+loki.source.journal "xdevs" {
+  matches    = "_SYSTEMD_UNIT=xdevs.service _SYSTEMD_UNIT=cloudflared.service"
+  max_age    = "12h"
+  forward_to = [loki.write.grafana_cloud.receiver]
+  labels     = {
+    job      = "xdevs",
+    instance = "{{ inventory_hostname }}",
+    env      = "{{ xdevs_network }}",
+    role     = "{{ xdevs_role }}",
+  }
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = "{{ grafana_cloud_loki_url }}"
+
+    basic_auth {
+      username = "{{ grafana_cloud_loki_user }}"
+      password = local.file.grafana_cloud_token.content
+    }
+  }
+}
+{% endif %}

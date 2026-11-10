@@ -1,0 +1,56 @@
+---
+# roles/common: plan §24.4 server checklist (OS, user, SSH, firewall, time, swap).
+
+# Hosts must run Ubuntu 24.04+ : release binaries are built on ubuntu-24.04 runners
+# (glibc 2.39); older glibc cannot load them.
+common_min_ubuntu_version: "24.04"
+
+cloud_provider: generic                     # oracle | gcp | home | generic
+
+# ---- users & SSH -----------------------------------------------------------------------
+xdevs_user: xdevs
+xdevs_home: /var/lib/xdevs
+ssh_allow_users: ["{{ ansible_user }}"]
+ssh_port: 22
+
+# ---- firewall (nftables) ---------------------------------------------------------------
+firewall_enabled: true
+firewall_ssh_allowed_cidrs: []              # REQUIRED (assert); IPv4 and/or IPv6 CIDRs
+firewall_private_cidrs: []                  # VCN subnet(s): metrics, soak RPC
+firewall_trusted_interfaces: []             # e.g. ["tailscale0"] for CI deploys over Tailscale
+firewall_p2p_public: true                   # open P2P to the internet
+firewall_p2p_tcp_ports: [30333, 30334]      # consensus [p2p], tx gossip [gossip]
+firewall_p2p_udp_ports: [30333]             # QUIC later (plan §24.3); harmless while unused
+firewall_metrics_port: 9100
+# Soak only: lets the soak driver reach validators' JSON-RPC over the private subnet.
+firewall_rpc_private: false
+firewall_rpc_port: 8545
+firewall_extra_rules: []                    # raw nft rule lines appended to the input chain
+# Oracle images ship iptables rules (netfilter-persistent) ending in a REJECT. They are kept
+# (including the InstanceServices egress rules that protect the metadata service); only
+# the final INPUT REJECT is removed, so nftables decides inbound traffic.
+firewall_oracle_remove_input_reject: "{{ cloud_provider == 'oracle' }}"
+
+# ---- time (BFT timeouts need accurate clocks, plan §24.4) ------------------------------
+chrony_servers: []
+chrony_pools: ["2.ubuntu.pool.ntp.org"]
+
+# ---- misc ------------------------------------------------------------------------------
+# 1 GB micro VMs get a 2 GB swap file; 0 = no swap file.
+swap_file_size_mb: "{{ 2048 if (ansible_memtotal_mb | int) < 2048 else 0 }}"
+journald_max_use: "{{ '300M' if (ansible_memtotal_mb | int) < 2048 else '1G' }}"
+common_packages:
+  - chrony
+  - fail2ban
+  - unattended-upgrades
+  - nftables
+  - curl
+  - ca-certificates
+  - jq
+  - zstd
+  - tar
+  - python3
+  - needrestart
+  - tmux
+fail2ban_bantime: 1h
+fail2ban_maxretry: 5

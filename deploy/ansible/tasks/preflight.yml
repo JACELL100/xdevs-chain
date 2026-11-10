@@ -1,0 +1,27 @@
+---
+# Controller-side checks shared by every playbook (run on localhost with the inventory vars
+# of the first host in the play, via hostvars).
+
+- name: Ansible version
+  ansible.builtin.assert:
+    that: ansible_version.full is version('2.16', '>=')
+    fail_msg: "Use ansible-core 2.16 or newer (tested with 2.18)."
+
+- name: Inventory exists and has the expected groups
+  ansible.builtin.assert:
+    that:
+      - groups['validators'] | default([]) | length > 0
+    fail_msg: "No [validators] group. Copy inventory/testnet/hosts.yml.example to hosts.yml and fill it in."
+
+- name: No CHANGE_ME placeholders left in the settings this run uses
+  ansible.builtin.assert:
+    that:
+      - "'CHANGE_ME' not in (hostvars[groups['validators'][0]].xdevs_version | default('CHANGE_ME'))"
+      - "'CHANGE_ME' not in (hostvars[groups['validators'][0]].xdevs_genesis_sha256 | default('CHANGE_ME'))"
+    fail_msg: "Set xdevs_version and xdevs_genesis_sha256 (group_vars/all/main.yml or -e)."
+
+- name: Voting power is set for every validator
+  ansible.builtin.assert:
+    that: (hostvars[item].voting_power | default(-1) | int) >= 0
+    fail_msg: "{{ item }} has no voting_power (must match genesis.json)."
+  loop: "{{ groups['validators'] }}"

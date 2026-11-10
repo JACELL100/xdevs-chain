@@ -1,0 +1,54 @@
+# {{ ansible_managed }}
+# xDEVS Chain node: /etc/systemd/system/xdevs.service (plan §33.4, deploy/systemd/xdevs.service)
+# Install method: {{ xdevs_install_method }}
+[Unit]
+Description=xDEVS Chain node ({{ xdevs_role }})
+Documentation=https://github.com/{{ xdevs_github_repo }}/tree/main/docs/runbooks
+After=network-online.target
+Wants=network-online.target chrony.service
+{% if xdevs_install_method == 'docker' %}
+After=docker.service
+Requires=docker.service
+{% endif %}
+
+[Service]
+{% if xdevs_install_method == 'binary' %}
+User={{ xdevs_user }}
+Group={{ xdevs_user }}
+ExecStart=/usr/local/bin/xdevs node --config {{ xdevs_config_dir }}/config.toml --data-dir {{ xdevs_home }}
+{% else %}
+# Host networking: no Docker port mapping, no forwarding through the host firewall. The
+# container runs as the host's xdevs uid/gid so file ownership matches the binary method.
+ExecStartPre=-/usr/bin/docker rm -f xdevs
+ExecStart=/usr/bin/docker run --rm --name xdevs --network host \
+  --user {{ xdevs_uid }}:{{ xdevs_gid }} \
+  --ulimit nofile=65535:65535 \
+  --stop-signal SIGINT --stop-timeout 60 \
+  -v {{ xdevs_home }}:{{ xdevs_home }} \
+  -v {{ xdevs_config_dir }}:{{ xdevs_config_dir }}:ro \
+  {{ xdevs_image }} node --config {{ xdevs_config_dir }}/config.toml --data-dir {{ xdevs_home }}
+ExecStop=/usr/bin/docker stop -t 60 xdevs
+{% endif %}
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+# The node shuts down gracefully on SIGINT (Ctrl-C), not SIGTERM: give it time to flush
+# the consensus WAL and the chain database.
+KillSignal=SIGINT
+TimeoutStopSec=90
+{% if xdevs_install_method == 'binary' %}
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ xdevs_home }}
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+{% endif %}
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,73 @@
+---
+- name: Grafana Cloud settings must come from the vault
+  ansible.builtin.assert:
+    that:
+      - grafana_cloud_prometheus_url is match('^https://')
+      - grafana_cloud_api_token | length > 0
+      - "'CHANGE_ME' not in grafana_cloud_api_token"
+    fail_msg: "Set the vault_grafana_cloud_* variables (vault.yml.example)."
+
+- name: apt keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Grafana apt key
+  ansible.builtin.get_url:
+    url: "{{ monitoring_apt_key_url }}"
+    dest: /etc/apt/keyrings/grafana.asc
+    mode: "0644"
+
+- name: Grafana apt repository
+  ansible.builtin.apt_repository:
+    repo: "{{ monitoring_apt_repo }}"
+    filename: grafana
+    state: present
+
+- name: Install Grafana Alloy
+  ansible.builtin.apt:
+    name: alloy
+    state: present
+    update_cache: true
+
+- name: Let Alloy read the systemd journal
+  ansible.builtin.user:
+    name: alloy
+    groups: [systemd-journal]
+    append: true
+  notify: Restart alloy
+
+- name: Textfile collector directory (snapshot metrics)
+  ansible.builtin.file:
+    path: "{{ monitoring_textfile_dir }}"
+    state: directory
+    owner: alloy
+    group: alloy
+    mode: "0755"
+
+- name: Grafana Cloud token (read by Alloy's local.file, never in the config)
+  ansible.builtin.copy:
+    content: "{{ grafana_cloud_api_token }}"
+    dest: /etc/alloy/grafana_cloud_token
+    owner: root
+    group: alloy
+    mode: "0640"
+  no_log: true
+  diff: false
+  notify: Restart alloy
+
+- name: Alloy pipeline
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: /etc/alloy/config.alloy
+    owner: root
+    group: alloy
+    mode: "0640"
+  notify: Restart alloy
+
+- name: Enable and start Alloy
+  ansible.builtin.systemd_service:
+    name: alloy
+    enabled: true
+    state: started

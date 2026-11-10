@@ -1,0 +1,98 @@
+---
+# rolling-upgrade.yml: roll a new release (or a restart / OS reboot) across the testnet,
+# ONE node at a time, never taking down 1/3 or more of the voting power (plan §24.5, §24.6).
+# Runbook: docs/runbooks/upgrade-network.md
+#
+#   ansible-playbook rolling-upgrade.yml -e xdevs_version=v0.4.0
+#   ansible-playbook rolling-upgrade.yml -e xdevs_version=v0.4.0 -e xdevs_fork_height=250000
+#   ansible-playbook rolling-upgrade.yml -e xdevs_force_restart=true        # restart only
+#   ansible-playbook rolling-upgrade.yml -e xdevs_rolling_reboot=true       # kernel updates
+#
+# Order: the RPC node first (canary, no voting power) -> validators one by one -> bootnodes.
+# For every validator:
+#   1. quorum check: validators already down + this one must stay < 1/3 of the power;
+#   2. install the new binary BEFORE stopping anything (download + SHA-256 + smoke test);
+#   3. restart (or reboot) this validator only;
+#   4. wait until it follows the chain again (head advancing, synced, peers);
+#   5. wait until it is back in consensus at the tip, with no sign-guard / equivocation logs;
+#   6. pause xdevs_rolling_pause_seconds, then the next validator.
+# Any failure stops the whole rollout (any_errors_fatal) with at most ONE node affected.
+
+- name: Preflight
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Shared controller checks
+      ansible.builtin.include_tasks: tasks/preflight.yml
+
+    - name: Fork-height releases must land well before the fork
+      when: (xdevs_fork_height | default(0) | int) > 0
+      block:
+        - name: Current height from the first validator
+          ansible.builtin.command: >-
+            curl -fsS --max-time 5 -H 'Content-Type: application/json'
+            --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'
+            http://127.0.0.1:{{ hostvars[groups['validators'][0]].xdevs_rpc_http_port | default(8545) }}
+          delegate_to: "{{ groups['validators'][0] }}"
+          register: rolling_height_raw
+          changed_when: false
+          check_mode: false
+
+        - name: Enough blocks left to finish the rollout before the fork
+          vars:
+            rolling_height: "{{ (rolling_height_raw.stdout | from_json).result | int(base=16) }}"
+            # 4 validators x ~5 min each, plus margin; at 2 s blocks ~ 1,800 blocks/h.
+            rolling_margin: "{{ xdevs_fork_margin_blocks | default(5400) }}"
+          ansible.builtin.assert:
+            that: (rolling_height | int) + (rolling_margin | int) < (xdevs_fork_height | int)
+            fail_msg: >-
+              Height {{ rolling_height }} is within {{ rolling_margin }} blocks of the fork at
+              {{ xdevs_fork_height }}. A rolling upgrade may not finish in time; nodes still on
+              the old binary would stop at the fork. Use the coordinated procedure in
+              docs/runbooks/upgrade-network.md (fork-height section) instead.
+
+- name: Canary - public RPC node (no voting power)
+  hosts: rpc
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Upgrade, restart and wait
+      ansible.builtin.include_tasks: tasks/roll_one.yml
+
+- name: Validators, strictly one at a time
+  hosts: validators
+  become: true
+  serial: 1
+  order: inventory
+  any_errors_fatal: true
+  max_fail_percentage: 0
+  tasks:
+    - name: Quorum check before stopping this validator
+      ansible.builtin.include_tasks: tasks/quorum_check.yml
+      vars:
+        quorum_target: "{{ inventory_hostname }}"
+
+    - name: Upgrade, restart and wait
+      ansible.builtin.include_tasks: tasks/roll_one.yml
+
+    - name: Back in consensus (head at the tip, no safety alerts)
+      ansible.builtin.include_role:
+        name: xdevs_node
+        tasks_from: wait_signing
+
+    - name: Let the network settle before the next validator
+      ansible.builtin.pause:
+        seconds: "{{ xdevs_rolling_pause_seconds | default(30) }}"
+      when: inventory_hostname != (ansible_play_hosts_all | last)
+
+- name: Bootnodes
+  hosts: bootnodes
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Upgrade, restart and wait
+      ansible.builtin.include_tasks: tasks/roll_one.yml
+      vars:
+        xdevs_min_peers: 2

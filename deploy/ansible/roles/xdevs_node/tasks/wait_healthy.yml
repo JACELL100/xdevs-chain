@@ -1,0 +1,38 @@
+---
+# Wait until this node is back: RPC answers, right chain id, not syncing, enough peers and
+# the head advances (deploy/scripts/check-health.sh: 0 OK, 1 WARN, 2 CRIT).
+# include_role: name=xdevs_node tasks_from=wait_healthy
+
+- name: Wait for JSON-RPC to listen
+  ansible.builtin.wait_for:
+    host: "{{ xdevs_rpc_http_bind }}"
+    port: "{{ xdevs_rpc_http_port }}"
+    timeout: 180
+
+- name: Wait for the node to follow the chain (advancing, synced, peers >= {{ xdevs_min_peers }})
+  ansible.builtin.command: >-
+    /usr/local/bin/xdevs-check-health
+    --rpc http://{{ xdevs_rpc_http_bind }}:{{ xdevs_rpc_http_port }}
+    --chain-id {{ xdevs_chain_id }}
+    --min-peers {{ xdevs_min_peers }}
+    --wait {{ ((xdevs_block_time_ms | int) * 3 / 1000) | round(0, 'ceil') | int }}
+  register: xdevs_health
+  until: xdevs_health.rc == 0
+  retries: "{{ xdevs_health_retries }}"
+  delay: 5
+  changed_when: false
+  check_mode: false
+  when: not (xdevs_genesis_launch | bool)
+
+- name: Genesis launch - only check that RPC answers with the right chain id
+  ansible.builtin.command: >-
+    /usr/local/bin/xdevs-check-health
+    --rpc http://{{ xdevs_rpc_http_bind }}:{{ xdevs_rpc_http_port }}
+    --chain-id {{ xdevs_chain_id }} --min-peers 0 --no-progress
+  register: xdevs_health_launch
+  until: xdevs_health_launch.rc != 2
+  retries: 24
+  delay: 5
+  changed_when: false
+  check_mode: false
+  when: xdevs_genesis_launch | bool

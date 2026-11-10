@@ -1,0 +1,11 @@
+---
+xdevs_role: validator
+# Default power; set the real one per host in hosts.yml (must match genesis.json).
+voting_power: 1
+xdevs_fee_recipient: "{{ vault_fee_recipients[inventory_hostname] | default('0x0000000000000000000000000000000000000000') }}"
+# Validators keep a bounded state history; the public RPC node serves history.
+xdevs_pruning: full
+# Validators never serve public RPC (plan §12.4): localhost only, eth/net/web3.
+xdevs_rpc_namespaces: ["eth", "net", "web3"]
+# Metrics on the private VCN address so a future central scraper can reach them.
+xdevs_metrics_bind: "{{ private_ip | default('127.0.0.1') }}"

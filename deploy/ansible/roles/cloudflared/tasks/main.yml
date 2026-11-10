@@ -1,0 +1,80 @@
+---
+- name: Tunnel id and credentials must come from the vault
+  ansible.builtin.assert:
+    that:
+      - cloudflared_tunnel_id is match('^[0-9a-f-]{36}$')
+      - cloudflared_tunnel_id != '00000000-0000-0000-0000-000000000000'
+      - cloudflared_credentials_json | length > 0
+    fail_msg: "Set vault_cloudflared_tunnel_id and vault_cloudflared_credentials_json (deploy/cloudflare/README.md)."
+
+- name: Cloudflare apt key
+  ansible.builtin.get_url:
+    url: "{{ cloudflared_apt_key_url }}"
+    dest: /usr/share/keyrings/cloudflare-main.gpg
+    mode: "0644"
+
+- name: Cloudflare apt repository
+  ansible.builtin.apt_repository:
+    repo: "{{ cloudflared_apt_repo }}"
+    filename: cloudflared
+    state: present
+
+- name: Install cloudflared
+  ansible.builtin.apt:
+    name: cloudflared
+    state: present
+    update_cache: true
+
+- name: Service user
+  ansible.builtin.user:
+    name: "{{ cloudflared_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Config directory
+  ansible.builtin.file:
+    path: /etc/cloudflared
+    state: directory
+    owner: root
+    group: "{{ cloudflared_user }}"
+    mode: "0750"
+
+- name: Tunnel credentials (secret)
+  ansible.builtin.copy:
+    content: "{{ cloudflared_credentials_json }}"
+    dest: "/etc/cloudflared/{{ cloudflared_tunnel_id }}.json"
+    owner: root
+    group: "{{ cloudflared_user }}"
+    mode: "0640"
+  no_log: true
+  diff: false
+  notify: Restart cloudflared
+
+- name: Tunnel ingress config
+  ansible.builtin.template:
+    src: config.yml.j2
+    dest: /etc/cloudflared/config.yml
+    owner: root
+    group: "{{ cloudflared_user }}"
+    mode: "0640"
+  notify: Restart cloudflared
+
+- name: Validate the ingress rules
+  ansible.builtin.command: cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
+  changed_when: false
+  check_mode: false
+
+- name: systemd unit
+  ansible.builtin.template:
+    src: cloudflared.service.j2
+    dest: /etc/systemd/system/cloudflared.service
+    mode: "0644"
+  notify: Restart cloudflared
+
+- name: Enable and start cloudflared
+  ansible.builtin.systemd_service:
+    name: cloudflared
+    enabled: true
+    state: started
+    daemon_reload: true

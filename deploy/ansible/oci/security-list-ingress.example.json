@@ -1,0 +1,66 @@
+[
+  {
+    "description": "SSH from the admin IP only (replace 192.0.2.10/32)",
+    "protocol": "6",
+    "source": "192.0.2.10/32",
+    "sourceType": "CIDR_BLOCK",
+    "isStateless": false,
+    "tcpOptions": { "destinationPortRange": { "min": 22, "max": 22 } }
+  },
+  {
+    "description": "xDEVS consensus P2P [p2p] (TCP)",
+    "protocol": "6",
+    "source": "0.0.0.0/0",
+    "sourceType": "CIDR_BLOCK",
+    "isStateless": false,
+    "tcpOptions": { "destinationPortRange": { "min": 30333, "max": 30333 } }
+  },
+  {
+    "description": "xDEVS consensus P2P over QUIC (later, plan 24.3)",
+    "protocol": "17",
+    "source": "0.0.0.0/0",
+    "sourceType": "CIDR_BLOCK",
+    "isStateless": false,
+    "udpOptions": { "destinationPortRange": { "min": 30333, "max": 30333 } }
+  },
+  {
+    "description": "xDEVS tx gossip [gossip] (TCP)",
+    "protocol": "6",
+    "source": "0.0.0.0/0",
+    "sourceType": "CIDR_BLOCK",
+    "isStateless": false,
+    "tcpOptions": { "destinationPortRange": { "min": 30334, "max": 30334 } }
+  },
+  {
+    "description": "Prometheus /metrics from the VCN private subnet only",
+    "protocol": "6",
+    "source": "10.0.1.0/24",
+    "sourceType": "CIDR_BLOCK",
+    "isStateless": false,
+    "tcpOptions": { "destinationPortRange": { "min": 9100, "max": 9100 } }
+  },
+  {
+    "description": "SOAK ONLY: JSON-RPC from the VCN private subnet (remove after the soak)",
+    "protocol": "6",
+    "source": "10.0.1.0/24",
+    "sourceType": "CIDR_BLOCK",
+    "isStateless": false,
+    "tcpOptions": { "destinationPortRange": { "min": 8545, "max": 8545 } }
+  },
+  {
+    "description": "ICMP fragmentation-needed (path MTU discovery), Oracle default",
+    "protocol": "1",
+    "source": "0.0.0.0/0",
+    "sourceType": "CIDR_BLOCK",
+    "isStateless": false,
+    "icmpOptions": { "type": 3, "code": 4 }
+  },
+  {
+    "description": "ICMP destination-unreachable inside the VCN, Oracle default",
+    "protocol": "1",
+    "source": "10.0.0.0/16",
+    "sourceType": "CIDR_BLOCK",
+    "isStateless": false,
+    "icmpOptions": { "type": 3 }
+  }
+]

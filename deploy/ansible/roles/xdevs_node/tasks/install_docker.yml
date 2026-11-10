@@ -1,0 +1,43 @@
+---
+# Alternative install: the multi-arch image ghcr.io/jacell100/xdevs-chain (docker.yml).
+# Tags: X.Y.Z / X.Y for release vX.Y.Z, plus main, sha-<short>, latest. The binary method
+# stays the default: one fewer daemon on 1 GB micro VMs and a smaller attack surface.
+
+- name: Image reference (an explicit digest pin wins)
+  ansible.builtin.set_fact:
+    xdevs_image: >-
+      {{ xdevs_docker_image_ref
+         if (xdevs_docker_image_ref | length) > 0
+         else xdevs_docker_image ~ ':' ~ (xdevs_version | regex_replace('^v', '')) }}
+
+- name: Install Docker from the Ubuntu archive
+  ansible.builtin.apt:
+    name: docker.io
+    state: present
+
+- name: Enable Docker
+  ansible.builtin.systemd_service:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Pull the image
+  ansible.builtin.command: "docker pull {{ xdevs_image }}"
+  register: xdevs_pull
+  changed_when: "'Downloaded newer image' in xdevs_pull.stdout"
+  notify: Restart xdevs
+
+- name: Look up the xdevs uid / gid for the container user
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ xdevs_user }}"
+
+- name: Remember uid / gid
+  ansible.builtin.set_fact:
+    xdevs_uid: "{{ ansible_facts.getent_passwd[xdevs_user][1] }}"
+    xdevs_gid: "{{ ansible_facts.getent_passwd[xdevs_user][2] }}"
+
+- name: Smoke-test the image
+  ansible.builtin.command: "docker run --rm {{ xdevs_image }} --version"
+  changed_when: false
+  when: not ansible_check_mode

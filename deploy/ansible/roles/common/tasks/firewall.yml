@@ -1,0 +1,45 @@
+---
+# Host firewall (plan §24.3). Oracle has TWO firewalls: the VCN security list (configured in
+# the Oracle console / OCI CLI, see deploy/ansible/oci/ and docs/runbooks/oracle-always-free.md)
+# AND the OS firewall configured here. Both must allow a port for traffic to arrive.
+#
+#   30333/tcp+udp, 30334/tcp  public P2P (consensus, tx gossip)
+#   8545/8546                 never opened: the RPC binds 127.0.0.1 (Cloudflare Tunnel)
+#   9100                      metrics, private subnet only
+#   22                        admin CIDRs only
+
+- name: Render the nftables ruleset (validated before it is installed)
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    mode: "0644"
+    validate: "nft -c -f %s"
+  notify: Reload nftables
+
+- name: Enable nftables at boot
+  ansible.builtin.systemd_service:
+    name: nftables
+    enabled: true
+    state: started
+
+# Apply the new rules now, while this SSH session is still open (established connections
+# stay allowed), so a mistake shows up before the Oracle REJECT is removed.
+- name: Apply nftables now
+  ansible.builtin.meta: flush_handlers
+
+- name: Oracle image firewall
+  when: firewall_oracle_remove_input_reject | bool
+  block:
+    - name: Check for the Oracle iptables rules file
+      ansible.builtin.stat:
+        path: /etc/iptables/rules.v4
+      register: common_oracle_rules
+
+    - name: Drop the final INPUT REJECT of the Oracle image (nftables decides inbound)
+      ansible.builtin.lineinfile:
+        path: /etc/iptables/rules.v4
+        regexp: '^-A INPUT -j REJECT'
+        state: absent
+        backup: true
+      when: common_oracle_rules.stat.exists
+      notify: Reload netfilter-persistent

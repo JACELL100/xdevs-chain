@@ -1,0 +1,63 @@
+---
+# Never take down >= 1/3 of the voting power (plan §24.5, §25.1).
+#
+# Probes every validator's own JSON-RPC (over SSH, as the RPC binds 127.0.0.1) with
+# xdevs-check-health: a validator counts as LIVE when its head advances. Then asserts that
+# the power of (validators already down) + (quorum_target, about to go down) stays strictly
+# below 1/3 of the total, i.e. more than 2/3 stays online and BFT keeps finalizing.
+#
+# Input:  quorum_target  inventory name of the host about to be stopped (may be a non-validator)
+# Output: quorum_live    list of live validators
+
+# The RPC normally binds 127.0.0.1; during a soak it binds the private IP, so try both.
+- name: Probe every validator (head advancing?)
+  ansible.builtin.shell: |
+    hc() { /usr/local/bin/xdevs-check-health --rpc "http://$1:{{ hostvars[item].xdevs_rpc_http_port | default(8545) }}"       --min-peers 0 --wait {{ ((xdevs_block_time_ms | default(2000) | int) * 4 / 1000) | round(0, 'ceil') | int }} --quiet; }
+    hc 127.0.0.1; rc=$?
+    if [ "$rc" -ge 2 ] && [ -n "{{ hostvars[item].private_ip | default('') }}" ]; then
+      hc "{{ hostvars[item].private_ip | default('') }}"; rc=$?
+    fi
+    exit "$rc"
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['validators'] }}"
+  register: quorum_probe
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  check_mode: false
+
+- name: Compute live and offline power
+  ansible.builtin.set_fact:
+    quorum_live: >-
+      {{ quorum_probe.results
+         | rejectattr('unreachable', 'defined')
+         | selectattr('rc', 'defined')
+         | rejectattr('rc', 'equalto', 2)
+         | rejectattr('rc', 'gt', 2)
+         | map(attribute='item') | list }}
+
+- name: Sum the voting power
+  ansible.builtin.set_fact:
+    quorum_offline_after: "{{ (groups['validators'] | difference(quorum_live)) | union([quorum_target] if quorum_target in groups['validators'] else []) }}"
+    quorum_total_power: "{{ groups['validators'] | map('extract', hostvars, 'voting_power') | map('int') | sum }}"
+
+- name: Offline power after this step
+  ansible.builtin.set_fact:
+    quorum_offline_power: "{{ quorum_offline_after | map('extract', hostvars, 'voting_power') | map('int') | sum }}"
+
+- name: Show the quorum math
+  ansible.builtin.debug:
+    msg: >-
+      live={{ quorum_live }} offline_after={{ quorum_offline_after }}
+      power offline {{ quorum_offline_power }} of {{ quorum_total_power }}
+      (must stay < 1/3, i.e. 3 x {{ quorum_offline_power }} < {{ quorum_total_power }})
+
+- name: Never take down >= 1/3 of the voting power
+  ansible.builtin.assert:
+    that: (quorum_offline_power | int) * 3 < (quorum_total_power | int)
+    fail_msg: >-
+      REFUSING to stop {{ quorum_target }}: validators {{ quorum_offline_after }} would be
+      offline ({{ quorum_offline_power }} of {{ quorum_total_power }} power, >= 1/3) and the
+      chain would halt. Bring the offline validators back first (docs/runbooks/chain-halted.md).

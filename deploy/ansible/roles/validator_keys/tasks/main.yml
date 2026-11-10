@@ -1,0 +1,127 @@
+---
+# Never run the same validator key on two machines (plan §11.8): the node's sign guard
+# (data/consensus/consensus.redb) protects one host only. These tasks refuse plaintext key
+# files, refuse to overwrite a different key, and refuse two hosts sharing one key.
+
+- name: Keys directory must be set
+  ansible.builtin.assert:
+    that: xdevs_keys_dir | length > 0
+    fail_msg: "Set XDEVS_KEYS_DIR (or xdevs_keys_dir) to the directory holding the vault-encrypted keys."
+
+- name: Key files for this host
+  ansible.builtin.set_fact:
+    validator_keys_files: >-
+      {{ ([
+           {'src': 'consensus_key.json.vault', 'dest': 'consensus_key.json', 'required': true},
+           {'src': 'password.vault', 'dest': 'password', 'required': true}
+         ] if xdevs_role == 'validator' else [])
+         + [ {'src': 'node_key.json.vault', 'dest': 'node_key.json',
+              'required': (xdevs_role == 'validator') or ((p2p_peer_id | default('')) | length > 0)} ] }}
+    validator_keys_src_dir: "{{ (xdevs_keys_dir | expanduser) ~ '/' ~ inventory_hostname }}"
+
+- name: Look for the key files on the controller
+  ansible.builtin.stat:
+    path: "{{ validator_keys_src_dir }}/{{ item.src }}"
+  loop: "{{ validator_keys_files }}"
+  loop_control:
+    label: "{{ item.src }}"
+  delegate_to: localhost
+  become: false
+  register: validator_keys_local
+
+- name: Required key files must exist (they are never generated here)
+  ansible.builtin.assert:
+    that: item.stat.exists or not item.item.required
+    fail_msg: >-
+      Missing {{ validator_keys_src_dir }}/{{ item.item.src }}. Generate keys OFFLINE
+      (xdevs-cli testnet init / keygen), back them up (deploy/scripts/backup-keys.md) and
+      vault-encrypt them (deploy/scripts/import-testnet-keys.sh).
+  loop: "{{ validator_keys_local.results }}"
+  loop_control:
+    label: "{{ item.item.src }}"
+
+- name: Read the first bytes of each key file (must be vault-encrypted)
+  ansible.builtin.command: "head -c 15{{ item.stat.path | quote }}"
+  loop: "{{ validator_keys_local.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item.src }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  check_mode: false
+  register: validator_keys_headers
+
+- name: Refuse plaintext key files
+  ansible.builtin.assert:
+    that: item.stdout == '$ANSIBLE_VAULT;'
+    fail_msg: "{{ item.item.stat.path }} is not vault-encrypted. Run: ansible-vault encrypt {{ item.item.stat.path }}"
+  loop: "{{ validator_keys_headers.results }}"
+  loop_control:
+    label: "{{ item.item.item.src }}"
+
+- name: Hash every validator's decrypted consensus key on the controller
+  ansible.builtin.set_fact:
+    validator_keys_hashes: >-
+      {{ validator_keys_hashes | default([]) + [lookup('ansible.builtin.file', item, rstrip=false) | hash('sha256')] }}
+  loop: >-
+    {{ groups['validators']
+       | map('regex_replace', '^', (xdevs_keys_dir | expanduser) ~ '/')
+       | map('regex_replace', '$', '/consensus_key.json.vault')
+       | select('ansible.builtin.file') | list }}
+  loop_control:
+    label: "{{ item | dirname | basename }}"
+  run_once: true
+  no_log: true
+
+- name: Consensus keys are unique across the inventory
+  ansible.builtin.assert:
+    that: (validator_keys_hashes | default([]) | unique | length) == (validator_keys_hashes | default([]) | length)
+    fail_msg: "Two inventory hosts hold the SAME consensus key. That is a double-sign waiting to happen."
+  run_once: true
+
+- name: Current key files on the host
+  ansible.builtin.stat:
+    path: "{{ xdevs_keys_path }}/{{ item.item.dest }}"
+    checksum_algorithm: sha1
+  loop: "{{ validator_keys_local.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  register: validator_keys_remote
+
+- name: Refuse to replace a DIFFERENT key already on the host (unless rotating)
+  ansible.builtin.assert:
+    that: >-
+      (not item.stat.exists)
+      or (validator_keys_force_replace | bool)
+      or (item.stat.checksum == (lookup('ansible.builtin.file', item.item.stat.path, rstrip=false) | hash('sha1')))
+    fail_msg: >-
+      {{ inventory_hostname }}:{{ item.stat.path }} differs from the vaulted key. Replacing a
+      validator key in place is a key rotation: follow docs/runbooks/rotate-consensus-key.md
+      (it sets validator_keys_force_replace=true).
+  loop: "{{ validator_keys_remote.results }}"
+  loop_control:
+    label: "{{ item.item.item.dest }}"
+  no_log: true
+
+- name: Keys directory (owner xdevs, 0700)
+  ansible.builtin.file:
+    path: "{{ xdevs_keys_path }}"
+    state: directory
+    owner: "{{ xdevs_user }}"
+    group: "{{ xdevs_user }}"
+    mode: "0700"
+
+- name: Install the key files (decrypted in transit by Ansible, mode 0600)
+  ansible.builtin.copy:
+    src: "{{ item.stat.path }}"
+    dest: "{{ xdevs_keys_path }}/{{ item.item.dest }}"
+    owner: "{{ xdevs_user }}"
+    group: "{{ xdevs_user }}"
+    mode: "0600"
+    decrypt: true
+  loop: "{{ validator_keys_local.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  no_log: true
+  diff: false
+  notify: Restart xdevs

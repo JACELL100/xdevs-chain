@@ -1,0 +1,17 @@
+---
+# roles/validator_keys: copy PRE-GENERATED keys from vault-encrypted files on the controller.
+# Keys are never generated here (docs/runbooks/bootstrap-validator.md, deploy/scripts/backup-keys.md).
+#
+# Controller layout (outside the repo; deploy/scripts/import-testnet-keys.sh creates it from
+# `xdevs-cli testnet init` output):
+#   {{ xdevs_keys_dir }}/<inventory_hostname>/consensus_key.json.vault   validators only
+#   {{ xdevs_keys_dir }}/<inventory_hostname>/password.vault             validators only
+#   {{ xdevs_keys_dir }}/<inventory_hostname>/node_key.json.vault        every node (stable peer id)
+# Each file is encrypted with `ansible-vault encrypt`; plaintext files are refused.
+
+xdevs_keys_dir: ""
+xdevs_user: xdevs
+xdevs_keys_path: /var/lib/xdevs/keys
+xdevs_role: fullnode
+# Set to true ONLY in the key-rotation runbook: replaces a different key already on the host.
+validator_keys_force_replace: false

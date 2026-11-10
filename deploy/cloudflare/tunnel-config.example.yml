@@ -1,0 +1,28 @@
+# /etc/cloudflared/config.yml on the public RPC node (plan §33.5, adapted).
+# Reference copy. The deployed file is rendered by
+# deploy/ansible/roles/cloudflared/templates/config.yml.j2 from vault values.
+#
+# Changes from §33.5:
+#   - one-level hostnames xdevschain-rpc / xdevschain-ws .xdevs.in, which the free Universal SSL
+#     certificate (*.xdevs.in) covers; rpc.testnet.<domain> would need a paid certificate;
+#   - WS goes to the node's separate [rpc] ws listener (127.0.0.1:8546);
+#   - metrics on localhost, auto-update off (upgrades go through apt / Ansible).
+tunnel: 00000000-0000-0000-0000-000000000000          # vault_cloudflared_tunnel_id
+credentials-file: /etc/cloudflared/00000000-0000-0000-0000-000000000000.json
+metrics: 127.0.0.1:20241
+no-autoupdate: true
+
+originRequest:
+  connectTimeout: 10s
+  tcpKeepAlive: 30s
+  keepAliveConnections: 50
+  keepAliveTimeout: 90s
+
+ingress:
+  - hostname: xdevschain-rpc.xdevs.in
+    service: http://127.0.0.1:8545
+  - hostname: xdevschain-ws.xdevs.in
+    service: http://127.0.0.1:8546
+    originRequest:
+      keepAliveTimeout: 10m
+  - service: http_status:404

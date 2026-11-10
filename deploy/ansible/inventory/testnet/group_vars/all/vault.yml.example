@@ -1,0 +1,43 @@
+---
+# Shape of group_vars/all/vault.yml. TEMPLATE ONLY: every value is a placeholder.
+#
+#   cp vault.yml.example vault.yml
+#   $EDITOR vault.yml                       # fill in real values
+#   ansible-vault encrypt vault.yml         # strong passphrase, stored in your password manager
+#
+# vault.yml is gitignored. Do not commit it, not even encrypted: the repo is public and an
+# encrypted file can be brute-forced offline. For CI it is a GitHub Actions secret
+# (ANSIBLE_VAULT_YML, see .github/workflows/deploy.yml).
+#
+# Validator consensus keys are NOT here: they are separate vault-encrypted files under
+# xdevs_keys_dir (roles/validator_keys), so a CI run never needs them.
+
+# Admin IPs allowed to SSH (CIDR list).
+vault_admin_ssh_cidrs:
+  - "192.0.2.10/32"
+
+# Grafana Cloud (My Account -> stack -> Prometheus / Loki "Details"); the token needs
+# metrics:write and logs:write only.
+vault_grafana_cloud_prometheus_url: "https://prometheus-prod-XX-prod-REGION.grafana.net/api/prom/push"
+vault_grafana_cloud_prometheus_user: "000000"
+vault_grafana_cloud_loki_url: "https://logs-prod-XXX.grafana.net/loki/api/v1/push"
+vault_grafana_cloud_loki_user: "000000"
+vault_grafana_cloud_api_token: "glc_CHANGE_ME"
+
+# Oracle Object Storage, S3 compatibility API: Identity -> your user -> Customer Secret Keys.
+vault_oci_namespace: "CHANGE_ME"
+vault_oci_s3_access_key_id: "CHANGE_ME"
+vault_oci_s3_secret_access_key: "CHANGE_ME"
+
+# Cloudflare Tunnel (`cloudflared tunnel create xdevschain-rpc` prints the id and writes
+# ~/.cloudflared/<id>.json; paste that file's JSON here).
+vault_cloudflared_tunnel_id: "00000000-0000-0000-0000-000000000000"
+vault_cloudflared_credentials_json: |
+  {"AccountTag":"CHANGE_ME","TunnelSecret":"CHANGE_ME","TunnelID":"00000000-0000-0000-0000-000000000000"}
+
+# Fee recipient of each validator (an address you control; public, but kept per operator).
+vault_fee_recipients:
+  validator-1: "0x0000000000000000000000000000000000000000"
+  validator-2: "0x0000000000000000000000000000000000000000"
+  validator-3: "0x0000000000000000000000000000000000000000"
+  validator-4: "0x0000000000000000000000000000000000000000"

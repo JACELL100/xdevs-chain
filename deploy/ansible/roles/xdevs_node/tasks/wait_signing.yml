@@ -1,0 +1,82 @@
+---
+# After a validator restart: is it back in consensus (and signing) before we touch the next
+# one? include_role: name=xdevs_node tasks_from=wait_signing
+#
+# What is checked (with the metrics the node exports today, crates/metrics/src/chain.rs):
+#   1. xdevs_consensus_height advances: the engine is working through heights, not stuck in
+#      sync or crashed.
+#   2. xdevs_consensus_height >= xdevs_block_height: the engine is at the tip (not behind).
+#   3. The journal since the restart has no "sign guard:" refusal or equivocation line.
+#   4. Optional, once the node exports it: xdevs_sign_check_metric increases.
+# Limitation: with 3 of 4 validators the chain also advances WITHOUT this node's votes, so
+# 1-3 prove "in consensus at the tip", not "its precommits land in certificates". That needs a
+# per-validator signed/missed-votes metric (see deploy/monitoring/README.md).
+
+- name: Metrics sample 1
+  ansible.builtin.uri:
+    url: "http://{{ xdevs_metrics_bind }}:{{ xdevs_metrics_port }}/metrics"
+    return_content: true
+  register: xdevs_m1
+  check_mode: false
+
+- name: Wait {{ xdevs_sign_check_seconds }} s
+  ansible.builtin.pause:
+    seconds: "{{ xdevs_sign_check_seconds }}"
+
+- name: Metrics sample 2
+  ansible.builtin.uri:
+    url: "http://{{ xdevs_metrics_bind }}:{{ xdevs_metrics_port }}/metrics"
+    return_content: true
+  register: xdevs_m2
+  check_mode: false
+
+- name: Parse samples
+  ansible.builtin.set_fact:
+    xdevs_ch1: "{{ (xdevs_m1.content | regex_search('(?m)^xdevs_consensus_height(?:\\{[^}]*\\})? ([0-9.e+]+)', '\\1') | default(['-1'], true) | first) | float }}"
+    xdevs_ch2: "{{ (xdevs_m2.content | regex_search('(?m)^xdevs_consensus_height(?:\\{[^}]*\\})? ([0-9.e+]+)', '\\1') | default(['-1'], true) | first) | float }}"
+    xdevs_bh2: "{{ (xdevs_m2.content | regex_search('(?m)^xdevs_block_height(?:\\{[^}]*\\})? ([0-9.e+]+)', '\\1') | default(['-1'], true) | first) | float }}"
+
+- name: The consensus engine advances and is at the tip
+  ansible.builtin.assert:
+    that:
+      - (xdevs_ch1 | float) >= 0
+      - (xdevs_ch2 | float) > (xdevs_ch1 | float)
+      - (xdevs_ch2 | float) >= (xdevs_bh2 | float)
+    fail_msg: >-
+      {{ inventory_hostname }}: consensus_height {{ xdevs_ch1 }} -> {{ xdevs_ch2 }},
+      block_height {{ xdevs_bh2 }}. The validator is not back in consensus. STOP the rollout
+      and check `journalctl -u xdevs` (docs/runbooks/chain-halted.md).
+
+- name: Optional signing counter increases
+  when: xdevs_sign_check_metric | length > 0
+  block:
+    - name: Parse the signing counter
+      ansible.builtin.set_fact:
+        xdevs_sig1: "{{ (xdevs_m1.content | regex_search('(?m)^' ~ xdevs_sign_check_metric ~ '(?:\\{[^}]*\\})? ([0-9.e+]+)', '\\1') | default(['-1'], true) | first) | float }}"
+        xdevs_sig2: "{{ (xdevs_m2.content | regex_search('(?m)^' ~ xdevs_sign_check_metric ~ '(?:\\{[^}]*\\})? ([0-9.e+]+)', '\\1') | default(['-1'], true) | first) | float }}"
+
+    - name: Signing counter increased
+      ansible.builtin.assert:
+        that:
+          - (xdevs_sig1 | float) >= 0
+          - (xdevs_sig2 | float) > (xdevs_sig1 | float)
+        fail_msg: "{{ xdevs_sign_check_metric }} did not increase ({{ xdevs_sig1 }} -> {{ xdevs_sig2 }})."
+
+- name: Scan the journal since the last start for safety alerts
+  ansible.builtin.shell: |
+    set -o pipefail
+    since=$(systemctl show -p ActiveEnterTimestamp --value xdevs)
+    journalctl -u xdevs --since "$since" -o cat --no-pager \
+      | grep -E -i 'sign guard:|equivocation|FORK:|state root mismatch|consensus halted|panicked' || true
+  args:
+    executable: /bin/bash
+  register: xdevs_journal_alerts
+  changed_when: false
+  check_mode: false
+
+- name: No safety alerts in the journal
+  ansible.builtin.assert:
+    that: xdevs_journal_alerts.stdout | length == 0
+    fail_msg: |
+      {{ inventory_hostname }} logged safety alerts after the restart. STOP the rollout.
+      {{ xdevs_journal_alerts.stdout_lines[:20] | join('\n') }}

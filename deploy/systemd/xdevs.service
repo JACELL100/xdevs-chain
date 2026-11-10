@@ -9,7 +9,11 @@ Wants=network-online.target
 [Service]
 User=xdevs
 Group=xdevs
-ExecStart=/usr/local/bin/xdevs node --config /etc/xdevs/config.toml --data-dir /var/lib/xdevs
+ExecStart=/usr/local/bin/xdevs run --config /etc/xdevs/config.toml --data-dir /var/lib/xdevs
+# The node shuts down cleanly (flushes and releases the database) on SIGINT; the default
+# SIGTERM/SIGKILL would make every stop a hard crash.
+KillSignal=SIGINT
+TimeoutStopSec=90
 Restart=always
 RestartSec=5
 LimitNOFILE=65535

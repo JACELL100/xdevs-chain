@@ -1,0 +1,66 @@
+---
+- name: Object Storage settings must come from the vault
+  ansible.builtin.assert:
+    that:
+      - snapshot_s3_endpoint is match('^https://[a-z0-9-]+\.compat\.objectstorage\.[a-z0-9-]+\.oraclecloud\.com$')
+      - snapshot_access_key_id | length > 0
+      - "'CHANGE_ME' not in snapshot_access_key_id"
+    fail_msg: "Set oci_region and the vault_oci_* variables (vault.yml.example)."
+
+- name: Install rclone
+  ansible.builtin.apt:
+    name: [rclone, zstd, jq, curl]
+    state: present
+
+- name: Config directory
+  ansible.builtin.file:
+    path: /etc/xdevs
+    state: directory
+    mode: "0755"
+
+- name: rclone remote for Oracle Object Storage (secret, root only)
+  ansible.builtin.template:
+    src: rclone.conf.j2
+    dest: /etc/xdevs/rclone.conf
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Snapshot settings
+  ansible.builtin.template:
+    src: snapshot.env.j2
+    dest: /etc/xdevs/snapshot.env
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Staging directory (outside the node's data dir)
+  ansible.builtin.file:
+    path: "{{ snapshot_staging_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the snapshot and restore scripts
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../scripts/{{ item.src }}"
+    dest: "/usr/local/bin/{{ item.dest }}"
+    mode: "0755"
+  loop:
+    - { src: snapshot.sh, dest: xdevs-snapshot }
+    - { src: restore.sh, dest: xdevs-restore }
+
+- name: Daily snapshot cron job (one host only)
+  ansible.builtin.cron:
+    name: xdevs daily state snapshot
+    cron_file: xdevs-snapshot
+    user: root
+    hour: "{{ snapshot_cron_hour }}"
+    minute: "{{ snapshot_cron_minute }}"
+    job: >-
+      flock -n /run/xdevs-snapshot.lock /usr/local/bin/xdevs-snapshot --env /etc/xdevs/snapshot.env
+      2>&1 | systemd-cat -t xdevs-snapshot
+    state: "{{ 'present' if (snapshot_install_cron | bool) else 'absent' }}"

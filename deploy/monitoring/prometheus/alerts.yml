@@ -1,0 +1,217 @@
+# xDEVS Chain alert rules (plan §24.7), Prometheus rule-file format.
+# Load into Grafana Cloud (Mimir ruler) with:
+#   mimirtool rules load deploy/monitoring/prometheus/alerts.yml \
+#     --address=<prometheus url without /api/prom/push> --id=<prometheus user> --key=<token with rules:write>
+# or import them as Grafana-managed alert rules (Alerting -> Alert rules -> Import).
+# Validate locally with: promtool check rules deploy/monitoring/prometheus/alerts.yml
+#
+# Labels come from Grafana Alloy (roles/monitoring_agent): env (testnet), role
+# (validator|rpc|bootnode), instance (inventory host), job (xdevs | node).
+# Metric names: deploy/monitoring/README.md. Severity: critical -> page (Discord + email),
+# warning -> Discord only (Grafana Cloud contact points / notification policies).
+
+groups:
+  - name: xdevs-chain-liveness
+    interval: 15s
+    rules:
+      - alert: XdevsNoNewBlock
+        # Plan §24.7: no new block for 30 s -> critical.
+        expr: |
+          max by (env) (xdevs_block_height)
+            <= max by (env) (xdevs_block_height offset 30s)
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.env }}: no new block for 30 s - chain halted?"
+          description: "The highest block height of {{ $labels.env }} has not moved for 30 s."
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/chain-halted.md
+
+      - alert: XdevsQuorumLost
+        # More than 1/3 of the (equal-power) validators unreachable: BFT cannot finalize.
+        expr: |
+          count by (env) (up{job="xdevs", role="validator"} == 0) * 3
+            >= count by (env) (up{job="xdevs", role="validator"})
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.env }}: 1/3 or more of the validators are down"
+          description: "{{ $value }} validator scrape targets are down. The chain halts below 2/3 online."
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/chain-halted.md
+
+      - alert: XdevsNodeDown
+        expr: up{job="xdevs"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} ({{ $labels.role }}): xdevs metrics unreachable for 2 min"
+          description: "The node process is down, or the metrics endpoint / Alloy agent is. With 4 validators, one down is tolerated; a second one halts the chain."
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/chain-halted.md
+
+      - alert: XdevsMetricsAbsent
+        expr: absent(xdevs_block_height{env="testnet"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No xdevs metrics at all for 5 min (every node or the monitoring pipeline is down)"
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/chain-halted.md
+
+      - alert: XdevsNodeLagging
+        expr: |
+          scalar(max(xdevs_block_height)) - xdevs_block_height > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} is {{ $value }} blocks behind the highest node"
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/chain-halted.md
+
+  - name: xdevs-consensus
+    interval: 1m
+    rules:
+      - alert: XdevsConsensusExtraRounds
+        # Rounds > 0 = trouble (plan §24.7): a proposer was slow or offline, or votes were late.
+        expr: max by (env) (increase(xdevs_consensus_rounds_total[10m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.env }}: {{ $value | printf \"%.0f\" }} extra consensus rounds in 10 min"
+          description: "Check which validator is slow or offline, the clocks (chronyc tracking) and the block build / validate times."
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/chain-halted.md
+
+      - alert: XdevsConsensusRoundClimbing
+        expr: xdevs_consensus_round >= 3
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} stuck in consensus round {{ $value }}"
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/chain-halted.md
+
+      - alert: XdevsValidatorMissedVotes
+        # Plan §24.7: a validator missed > 10% of votes over the last 1,000 blocks (~2,000 s at
+        # 2 s blocks). NEEDS xdevs_missed_votes_total{validator} - NOT EXPORTED YET (see
+        # deploy/monitoring/README.md). Until then this rule evaluates to nothing.
+        expr: |
+          (
+            max by (env, validator) (increase(xdevs_missed_votes_total[2000s]))
+            / on (env) group_left
+            clamp_min(max by (env) (delta(xdevs_block_height[2000s])), 1)
+          ) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Validator {{ $labels.validator }} missed {{ $value | humanizePercentage }} of votes in the last ~1,000 blocks"
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/chain-halted.md
+
+  - name: xdevs-network
+    interval: 1m
+    rules:
+      - alert: XdevsLowPeers
+        # Plan §24.7: peers < 3 -> warning. Per network ("consensus" / "gossip").
+        expr: xdevs_peers < 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: only {{ $value }} {{ $labels.network }} peers"
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/chain-halted.md
+
+      - alert: XdevsMempoolNearlyFull
+        expr: sum by (env, instance) (xdevs_mempool_size) > 8000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: {{ $value }} txs in the mempool (limit 10,000)"
+
+  - name: xdevs-rpc
+    interval: 1m
+    rules:
+      - alert: XdevsRpcErrorRate
+        expr: |
+          sum by (env, instance) (rate(xdevs_rpc_requests_total{role="rpc", result!="ok"}[5m]))
+            / clamp_min(sum by (env, instance) (rate(xdevs_rpc_requests_total{role="rpc"}[5m])), 0.001)
+            > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: {{ $value | humanizePercentage }} of public RPC calls fail"
+          description: "Also check Cloudflare Security -> Events (deploy/cloudflare/waf-and-rate-limits.md)."
+
+      - alert: XdevsRpcSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le, instance) (rate(xdevs_rpc_latency_seconds_bucket{role="rpc"}[5m]))) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: public RPC p95 latency {{ $value | humanizeDuration }}"
+      # "RPC down" (plan §24.7, critical) is checked from outside by UptimeRobot:
+      # deploy/monitoring/uptimerobot.md.
+
+  - name: xdevs-hosts
+    interval: 1m
+    rules:
+      - alert: XdevsDiskUsageHigh
+        # Plan §24.7: disk > 80% -> warning.
+        expr: |
+          1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} > 0.80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: root disk {{ $value | humanizePercentage }} full"
+          description: "Oracle boot volumes are ~47 GB. Check pruning, the journal, and old release / snapshot staging files."
+
+      - alert: XdevsDiskAlmostFull
+        expr: |
+          1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} > 0.92
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }}: root disk {{ $value | humanizePercentage }} full - the node will stop when it is full"
+
+      - alert: XdevsMemoryHigh
+        expr: 1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes > 0.90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: memory {{ $value | humanizePercentage }} used"
+
+      - alert: XdevsClockSkew
+        # BFT timeouts and the 2 s proposal timestamp drift check need synced clocks.
+        expr: abs(node_timex_offset_seconds) > 0.1 or node_timex_sync_status == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: clock offset {{ $value }} s or not synced (chronyc tracking)"
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/chain-halted.md
+
+      - alert: XdevsSnapshotStale
+        # Daily snapshot (plan §24.8) missing for 36 h.
+        expr: time() - max by (env) (xdevs_snapshot_last_success_timestamp_seconds) > 129600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.env }}: no successful state snapshot for over 36 h"
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/restore-from-snapshot.md
+
+      - alert: XdevsHostRebooted
+        expr: time() - node_boot_time_seconds < 600
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} rebooted in the last 10 min (Oracle maintenance or reclamation?)"
+          runbook_url: https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/oracle-always-free.md

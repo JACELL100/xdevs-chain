@@ -1,0 +1,101 @@
+---
+# roles/xdevs_node: install the node (binary or Docker), render config.toml, run it under
+# systemd (plan §24.4 items 6-7, §33.2, §33.4). Keys come from roles/validator_keys.
+
+xdevs_role: fullnode                      # validator | rpc | bootnode | fullnode
+xdevs_user: xdevs
+xdevs_home: /var/lib/xdevs
+xdevs_config_dir: /etc/xdevs
+xdevs_keys_path: "{{ xdevs_home }}/keys"
+
+xdevs_chain_id: 717171
+
+# ---- install ---------------------------------------------------------------------------
+xdevs_github_repo: JACELL100/xdevs-chain
+xdevs_version: ""                         # release tag (vX.Y.Z), required
+xdevs_install_method: binary              # binary | docker
+xdevs_release_sha256: {}
+xdevs_arch_targets:
+  aarch64: aarch64-unknown-linux-gnu
+  x86_64: x86_64-unknown-linux-gnu
+xdevs_release_root: /opt/xdevs/releases
+xdevs_keep_releases: 3                    # older release dirs are pruned (rollback = re-run with the old tag)
+xdevs_docker_image: ghcr.io/jacell100/xdevs-chain
+xdevs_docker_image_ref: ""                # empty = <image>:<version without the leading v>
+
+# ---- genesis -----------------------------------------------------------------------------
+xdevs_genesis_src: ""
+xdevs_genesis_sha256: ""
+
+# ---- [chain] -----------------------------------------------------------------------------
+xdevs_pruning: full                       # full | minimal | archive
+
+# ---- [validator] ---------------------------------------------------------------------------
+xdevs_fee_recipient: "0x0000000000000000000000000000000000000000"
+xdevs_consensus_key_file: "{{ xdevs_keys_path }}/consensus_key.json"
+xdevs_key_password_file: "{{ xdevs_keys_path }}/password"
+xdevs_max_timestamp_drift_secs: 2
+
+# ---- [consensus] (plan §11.2 defaults) ------------------------------------------------------
+xdevs_block_time_ms: 2000
+xdevs_timeouts:
+  timeout_propose_ms: 1000
+  timeout_propose_delta_ms: 500
+  timeout_prevote_ms: 500
+  timeout_prevote_delta_ms: 250
+  timeout_precommit_ms: 500
+  timeout_precommit_delta_ms: 250
+  max_timeout_ms: 10000
+
+# ---- [p2p] / [gossip] -----------------------------------------------------------------------
+xdevs_p2p_port: 30333
+xdevs_gossip_port: 30334
+xdevs_node_key_file: "{{ xdevs_keys_path }}/node_key.json"
+xdevs_p2p_discovery: false                # Phase 2: static peers
+xdevs_gossip_max_peers: 50
+xdevs_gossip_max_inbound_peers: ""        # "" = node default (max(max_peers/5, bootnodes, 1))
+# Extra multiaddrs (e.g. community nodes) added to persistent_peers / bootnodes.
+xdevs_extra_persistent_peers: []
+xdevs_extra_gossip_bootnodes: []
+
+# ---- [rpc] (plan §19.3) -------------------------------------------------------------------------
+xdevs_rpc_http_bind: 127.0.0.1            # soak only: the private IP (with firewall_rpc_private)
+xdevs_rpc_http_port: 8545
+xdevs_rpc_ws_enabled: false
+xdevs_rpc_ws_port: 8546
+xdevs_rpc_namespaces: ["eth", "net", "web3"]
+xdevs_rpc_cors: ["*"]
+xdevs_rpc_gas_cap: 50000000
+xdevs_rpc_max_logs_range: 10000
+xdevs_rpc_max_batch: 50
+xdevs_rpc_max_concurrent_requests: 0      # 0 = 2 x CPUs
+xdevs_rpc_evm_timeout_ms: 5000
+xdevs_rpc_max_in_flight_per_connection: 32
+xdevs_rpc_rate_limit_per_ip: 0            # behind a proxy every client shares one IP: keep 0
+xdevs_rpc_rate_limit_burst: 0
+
+# ---- [mempool] ----------------------------------------------------------------------------------
+xdevs_mempool_max_txs: 10000
+xdevs_mempool_max_bytes: 67108864
+xdevs_mempool_max_per_sender: 64
+
+# ---- [metrics] ----------------------------------------------------------------------------------
+xdevs_metrics_bind: 127.0.0.1
+xdevs_metrics_port: 9100                  # plan §24.3 (the crate default is 9615)
+
+# ---- [log] ------------------------------------------------------------------------------------
+xdevs_log_level: info
+xdevs_log_format: text                    # the node only supports text so far
+
+# ---- health checks (tasks/wait_healthy.yml) -----------------------------------------------------
+xdevs_min_peers: 3
+xdevs_health_retries: 60                  # x 5 s
+# started (normal) | stopped (emergency restart: install everything, keep the node down)
+xdevs_service_state: started
+xdevs_genesis_launch: false               # first start of a new chain: don't wait for blocks
+# Signing check after a validator restart (tasks/wait_signing.yml). The node exports no
+# per-validator "signed votes" counter yet; when one exists, put its name here and the
+# check requires it to increase. Until then the check uses consensus_height progress plus
+# a scan of the journal for sign-guard / equivocation lines.
+xdevs_sign_check_metric: ""
+xdevs_sign_check_seconds: 20

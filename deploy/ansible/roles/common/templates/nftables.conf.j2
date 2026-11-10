@@ -1,0 +1,92 @@
+#!/usr/sbin/nft -f
+# {{ ansible_managed }} (deploy/ansible/roles/common/templates/nftables.conf.j2)
+#
+# Inbound policy of {{ inventory_hostname }} (plan §24.3). Only this table is replaced on
+# reload. There is deliberately NO "flush ruleset": on Oracle images the iptables-nft
+# tables (including the InstanceServices egress rules that guard the metadata service)
+# live in the same kernel ruleset and must survive.
+
+table inet xdevs_filter
+delete table inet xdevs_filter
+
+table inet xdevs_filter {
+{% set ssh_v4 = firewall_ssh_allowed_cidrs | select('search', '^[0-9.]+(/[0-9]+)?$') | list %}
+{% set ssh_v6 = firewall_ssh_allowed_cidrs | select('search', ':') | list %}
+{% set priv_v4 = firewall_private_cidrs | select('search', '^[0-9.]+(/[0-9]+)?$') | list %}
+{% if ssh_v4 | length > 0 %}
+  set ssh_admin_v4 {
+    type ipv4_addr
+    flags interval
+    elements = { {{ ssh_v4 | join(', ') }} }
+  }
+{% endif %}
+{% if ssh_v6 | length > 0 %}
+  set ssh_admin_v6 {
+    type ipv6_addr
+    flags interval
+    elements = { {{ ssh_v6 | join(', ') }} }
+  }
+{% endif %}
+{% if priv_v4 | length > 0 %}
+  set private_v4 {
+    type ipv4_addr
+    flags interval
+    elements = { {{ priv_v4 | join(', ') }} }
+  }
+{% endif %}
+
+  chain input {
+    type filter hook input priority filter - 10; policy drop;
+
+    ct state established,related accept
+    ct state invalid drop
+    iifname "lo" accept
+
+    # ICMP: ping, path-MTU discovery, IPv6 neighbour discovery.
+    meta l4proto icmp limit rate 20/second accept
+    meta l4proto ipv6-icmp accept
+    # DHCP replies (cloud images renew their lease over DHCP).
+    udp sport 67 udp dport 68 accept
+
+{% for iface in firewall_trusted_interfaces %}
+    iifname "{{ iface }}" tcp dport {{ ssh_port }} accept
+{% endfor %}
+{% if ssh_v4 | length > 0 %}
+    tcp dport {{ ssh_port }} ip saddr @ssh_admin_v4 accept
+{% endif %}
+{% if ssh_v6 | length > 0 %}
+    tcp dport {{ ssh_port }} ip6 saddr @ssh_admin_v6 accept
+{% endif %}
+
+{% if firewall_p2p_public | bool %}
+    # Public P2P: consensus [p2p] and tx gossip [gossip] (plan §24.3).
+    tcp dport { {{ firewall_p2p_tcp_ports | join(', ') }} } accept
+{% if firewall_p2p_udp_ports | length > 0 %}
+    udp dport { {{ firewall_p2p_udp_ports | join(', ') }} } accept
+{% endif %}
+{% elif priv_v4 | length > 0 %}
+    # P2P from the private subnet only.
+    tcp dport { {{ firewall_p2p_tcp_ports | join(', ') }} } ip saddr @private_v4 accept
+{% endif %}
+
+{% if priv_v4 | length > 0 %}
+    # Prometheus /metrics: private subnet only (the local Alloy agent uses loopback/self).
+    tcp dport {{ firewall_metrics_port }} ip saddr @private_v4 accept
+{% if firewall_rpc_private | bool %}
+    # SOAK ONLY: JSON-RPC from the private subnet (soak driver). Never public.
+    tcp dport {{ firewall_rpc_port }} ip saddr @private_v4 accept
+{% endif %}
+{% endif %}
+
+{% for rule in firewall_extra_rules %}
+    {{ rule }}
+{% endfor %}
+    # JSON-RPC 8545/8546 is never opened: it binds 127.0.0.1 and is published through
+    # Cloudflare Tunnel (outbound connection only).
+    limit rate 5/minute log prefix "xdevs-fw-drop: " level info
+  }
+
+  chain forward {
+    type filter hook forward priority filter - 10; policy drop;
+  }
+}

@@ -1,0 +1,135 @@
+---
+# site.yml: converge every host of the testnet (plan §24.2, §24.4).
+#
+#   ansible-playbook site.yml                                  # everything (keys: see below)
+#   ansible-playbook site.yml --limit validator-3              # one host
+#   ansible-playbook site.yml --tags keys --limit validator-3  # install that host's keys only
+#   ansible-playbook site.yml -e xdevs_genesis_launch=true     # FIRST start of a new chain
+#   ansible-playbook site.yml --skip-tags keys                 # CI (.github/workflows/deploy.yml)
+#   ansible-playbook site.yml -e xdevs_service_state=stopped   # emergency restart: install, keep nodes down
+#
+# Validators are converged ONE AT A TIME (serial: 1) with a quorum check before and a health +
+# signing check after each, so a config change can never restart more than one validator at
+# once. Exception: -e xdevs_genesis_launch=true starts all validators together, because a new
+# chain cannot produce blocks until more than 2/3 of the power is up.
+
+- name: Preflight
+  hosts: localhost
+  gather_facts: false
+  tags: [always]
+  tasks:
+    - name: Shared controller checks
+      ansible.builtin.include_tasks: tasks/preflight.yml
+
+- name: Base OS (all hosts)
+  hosts: all:!localhost
+  become: true
+  tags: [common]
+  roles:
+    - common
+
+- name: Validators (one at a time)
+  hosts: validators
+  become: true
+  serial: "{{ '100%' if (xdevs_genesis_launch | default(false) | bool) else 1 }}"
+  any_errors_fatal: true
+  max_fail_percentage: 0
+  pre_tasks:
+    - name: Quorum check before touching this validator
+      ansible.builtin.include_tasks:
+        file: tasks/quorum_check.yml
+        apply:
+          tags: [always]
+      vars:
+        quorum_target: "{{ inventory_hostname }}"
+      when:
+        - not (xdevs_genesis_launch | default(false) | bool)
+        - (xdevs_service_state | default('started')) == 'started'
+      tags: [always]
+  roles:
+    - role: validator_keys
+      tags: [keys]
+    - role: xdevs_node
+      tags: [node]
+    - role: monitoring_agent
+      tags: [monitoring]
+    - role: snapshots
+      tags: [snapshots]
+      when: snapshot_enabled | default(false) | bool
+  post_tasks:
+    - name: Apply pending restarts now (this host only)
+      ansible.builtin.meta: flush_handlers
+      tags: [node, keys]
+    - name: Wait until the validator follows the chain again
+      ansible.builtin.include_role:
+        name: xdevs_node
+        tasks_from: wait_healthy
+        apply:
+          tags: [node, keys]
+      when: (xdevs_service_state | default('started')) == 'started'
+      tags: [node, keys]
+    - name: Wait until it is back in consensus
+      ansible.builtin.include_role:
+        name: xdevs_node
+        tasks_from: wait_signing
+        apply:
+          tags: [node, keys]
+      when:
+        - not (xdevs_genesis_launch | default(false) | bool)
+        - (xdevs_service_state | default('started')) == 'started'
+      tags: [node, keys]
+
+- name: Public RPC node
+  hosts: rpc
+  become: true
+  serial: 1
+  roles:
+    - role: validator_keys
+      tags: [keys]
+    - role: xdevs_node
+      tags: [node]
+    - role: cloudflared
+      tags: [cloudflared]
+    - role: monitoring_agent
+      tags: [monitoring]
+    - role: snapshots
+      tags: [snapshots]
+      when: snapshot_enabled | default(false) | bool
+  post_tasks:
+    - name: Apply pending restarts now
+      ansible.builtin.meta: flush_handlers
+      tags: [node, keys]
+    - name: Wait until the RPC node follows the chain
+      ansible.builtin.include_role:
+        name: xdevs_node
+        tasks_from: wait_healthy
+        apply:
+          tags: [node, keys]
+      when: (xdevs_service_state | default('started')) == 'started'
+      tags: [node, keys]
+
+- name: Bootnodes
+  hosts: bootnodes
+  become: true
+  serial: 1
+  roles:
+    - role: validator_keys
+      tags: [keys]
+    - role: xdevs_node
+      tags: [node]
+    - role: monitoring_agent
+      tags: [monitoring]
+  post_tasks:
+    - name: Apply pending restarts now
+      ansible.builtin.meta: flush_handlers
+      tags: [node, keys]
+    - name: Wait until the bootnode follows the chain
+      ansible.builtin.include_role:
+        name: xdevs_node
+        tasks_from: wait_healthy
+        apply:
+          tags: [node, keys]
+      when: (xdevs_service_state | default('started')) == 'started'
+      vars:
+        xdevs_min_peers: 2
+      tags: [node, keys]

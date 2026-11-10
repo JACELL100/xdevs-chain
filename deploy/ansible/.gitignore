@@ -1,0 +1,8 @@
+# Real inventories and vaults hold host addresses and secrets: never commit them,
+# not even vault-encrypted (this is a public repo). Keep your copies backed up offline.
+inventory/*/hosts.yml
+inventory/*/group_vars/all/vault.yml
+inventory/*/files/
+.vault_pass*
+*.decrypted
+*.retry

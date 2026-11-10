@@ -1,0 +1,6 @@
+---
+# ansible-galaxy collection install -r requirements.yml
+# Tested target: ansible-core 2.18 (controller Python 3.11+), Ubuntu 24.04 LTS hosts.
+collections:
+  - name: ansible.posix
+    version: ">=1.5.0,<3.0.0"

@@ -1,0 +1,107 @@
+---
+# soak-driver.yml: prepare the 24 h soak on the Oracle VMs (docs/runbooks/soak-oracle.md,
+# criteria in docs/runbooks/soak.md). Uses a DEVNET genesis, never the public testnet one.
+#
+#   ansible-playbook soak-driver.yml                           # before the soak
+#   ansible-playbook soak-driver.yml -e soak_cleanup=true      # afterwards: RPC back to 127.0.0.1
+# (A plain site.yml run also puts the RPC back on 127.0.0.1 and closes 8545.)
+#
+# What it does
+#   * validators: (re)binds JSON-RPC on the PRIVATE VCN address and opens it to the private
+#     subnet only (soak.sh host mode queries every node), one validator at a time;
+#   * soak_driver host: installs jq/curl/tmux, the repo's scripts/ to /opt/xdevs-soak/scripts,
+#     xdevs-cli from the release, and xdevs-loadgen from the GHCR image (the release tarball
+#     ships only xdevs + xdevs-cli), and writes /opt/xdevs-soak/env with XDEVS_RPC_URLS.
+
+- name: Validators - RPC on the private subnet for the soak (one at a time)
+  hosts: validators
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    soak_on: "{{ not (soak_cleanup | default(false) | bool) }}"
+    xdevs_rpc_http_bind: "{{ private_ip if soak_on else '127.0.0.1' }}"
+    firewall_rpc_private: "{{ soak_on }}"
+  tasks:
+    - name: Quorum check before restarting this validator
+      ansible.builtin.include_tasks: tasks/quorum_check.yml
+      vars:
+        quorum_target: "{{ inventory_hostname }}"
+    - name: Firewall (8545 from the private subnet only while soaking)
+      ansible.builtin.include_role:
+        name: common
+        tasks_from: firewall
+    - name: Node config
+      ansible.builtin.include_role:
+        name: xdevs_node
+    - name: Restart now
+      ansible.builtin.meta: flush_handlers
+    - name: Healthy again
+      ansible.builtin.include_role:
+        name: xdevs_node
+        tasks_from: wait_healthy
+    - name: Back in consensus
+      ansible.builtin.include_role:
+        name: xdevs_node
+        tasks_from: wait_signing
+
+- name: Soak driver host
+  hosts: soak_driver
+  become: true
+  vars:
+    soak_dir: /opt/xdevs-soak
+    soak_loadgen_image: "{{ xdevs_docker_image | default('ghcr.io/jacell100/xdevs-chain') }}:{{ xdevs_version | regex_replace('^v', '') }}"
+  tasks:
+    - name: Skip on cleanup
+      ansible.builtin.meta: end_play
+      when: soak_cleanup | default(false) | bool
+
+    - name: Packages (podman only to copy xdevs-loadgen out of the image)
+      ansible.builtin.apt:
+        name: [jq, curl, tmux, podman, rsync]
+        state: present
+
+    - name: Soak directory
+      ansible.builtin.file:
+        path: "{{ soak_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: "0755"
+
+    - name: Copy the repo's scripts/ (soak.sh, check.sh, lib.sh)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../scripts/"
+        dest: "{{ soak_dir }}/scripts/"
+        owner: "{{ ansible_user }}"
+        mode: preserve
+
+    - name: Release binaries (xdevs-cli for the fallback load)
+      ansible.builtin.include_role:
+        name: xdevs_node
+        tasks_from: install_binary
+      when: inventory_hostname not in groups['validators']
+
+    - name: Extract xdevs-loadgen from the image
+      ansible.builtin.shell: |
+        set -euo pipefail
+        podman pull -q {{ soak_loadgen_image | quote }}
+        cid=$(podman create {{ soak_loadgen_image | quote }})
+        podman cp "$cid":/usr/local/bin/xdevs-loadgen /usr/local/bin/xdevs-loadgen
+        podman rm "$cid" >/dev/null
+        chmod 0755 /usr/local/bin/xdevs-loadgen
+        /usr/local/bin/xdevs-loadgen --version || /usr/local/bin/xdevs-loadgen --help >/dev/null
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/xdevs-loadgen
+
+    - name: Soak environment (validators' private RPC URLs)
+      ansible.builtin.copy:
+        dest: "{{ soak_dir }}/env"
+        owner: "{{ ansible_user }}"
+        mode: "0644"
+        content: |
+          # source {{ soak_dir }}/env   (docs/runbooks/soak-oracle.md)
+          export XDEVS_RPC_URLS="{% for h in groups['validators'] %}v{{ loop.index }}=http://{{ hostvars[h].private_ip }}:{{ hostvars[h].xdevs_rpc_http_port | default(8545) }}{{ ' ' if not loop.last else '' }}{% endfor %}"
+          export XDEVS_LOADGEN_RPC="http://{{ hostvars[groups['validators'][0]].private_ip }}:8545"
+          export XDEVS_SOAK_HOSTS="{% for h in groups['validators'] %}v{{ loop.index }}={{ hostvars[h].private_ip }}{{ ' ' if not loop.last else '' }}{% endfor %}"
+          export PATH="/usr/local/bin:$PATH"

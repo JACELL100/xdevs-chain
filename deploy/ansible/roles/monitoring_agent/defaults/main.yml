@@ -1,0 +1,32 @@
+---
+# roles/monitoring_agent: Grafana Alloy -> Grafana Cloud (plan §24.4 item 8, §24.7).
+# Grafana Cloud free tier: ~10k active series, 14-day retention. Only the series the
+# dashboard and alerts use are kept (keep-lists below).
+
+grafana_cloud_prometheus_url: ""
+grafana_cloud_prometheus_user: ""
+grafana_cloud_loki_url: ""
+grafana_cloud_loki_user: ""
+grafana_cloud_api_token: ""
+monitoring_logs_enabled: true             # ship the xdevs / cloudflared journal to Loki
+
+xdevs_network: testnet
+xdevs_role: fullnode
+xdevs_metrics_bind: 127.0.0.1
+xdevs_metrics_port: 9100
+
+# xdevs metrics every 15 s: the "no block for 30 s" alert needs it. Host metrics every 60 s.
+monitoring_xdevs_scrape_interval: 15s
+monitoring_host_scrape_interval: 60s
+# Directory scanned by the textfile collector (deploy/scripts/snapshot.sh writes here).
+monitoring_textfile_dir: /var/lib/alloy/textfile
+
+# Host metrics kept (node_exporter names).
+monitoring_host_keep_regex: >-
+  node_cpu_seconds_total|node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|node_memory_SwapFree_bytes|node_memory_SwapTotal_bytes|node_filesystem_avail_bytes|node_filesystem_size_bytes|node_network_receive_bytes_total|node_network_transmit_bytes_total|node_load1|node_timex_offset_seconds|node_timex_sync_status|node_boot_time_seconds|xdevs_snapshot_.*|up
+# xdevs metrics kept: everything with the xdevs_ prefix plus `up`.
+monitoring_xdevs_keep_regex: "xdevs_.*|up"
+
+# Grafana's apt repository (ARM64 + x86_64).
+monitoring_apt_key_url: https://apt.grafana.com/gpg.key
+monitoring_apt_repo: "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main"

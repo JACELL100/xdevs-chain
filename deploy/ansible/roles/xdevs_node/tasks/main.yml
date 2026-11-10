@@ -1,0 +1,115 @@
+---
+- name: Check required settings
+  ansible.builtin.assert:
+    that:
+      - xdevs_version is match('^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$')
+      - xdevs_role in ['validator', 'rpc', 'bootnode', 'fullnode']
+      - xdevs_install_method in ['binary', 'docker']
+      - xdevs_genesis_src | length > 0
+      - xdevs_genesis_sha256 is match('^[0-9a-f]{64}$')
+    fail_msg: >-
+      Set xdevs_version (a release tag like v0.3.0), xdevs_genesis_src and
+      xdevs_genesis_sha256 (64 lowercase hex) in group_vars/all/main.yml.
+  tags: [always]
+
+- name: Directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ xdevs_home }}", owner: "{{ xdevs_user }}", group: "{{ xdevs_user }}", mode: "0750" }
+    - { path: "{{ xdevs_home }}/data", owner: "{{ xdevs_user }}", group: "{{ xdevs_user }}", mode: "0750" }
+    - { path: "{{ xdevs_keys_path }}", owner: "{{ xdevs_user }}", group: "{{ xdevs_user }}", mode: "0700" }
+    - { path: "{{ xdevs_config_dir }}", owner: root, group: "{{ xdevs_user }}", mode: "0750" }
+
+- name: Install the node binary
+  ansible.builtin.include_tasks: install_binary.yml
+  when: xdevs_install_method == 'binary'
+  tags: [binary]
+
+- name: Install the node image
+  ansible.builtin.include_tasks: install_docker.yml
+  when: xdevs_install_method == 'docker'
+  tags: [binary]
+
+# Health checks used by the playbooks (rolling upgrade, quorum checks).
+- name: Install the health check script
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../scripts/check-health.sh"
+    dest: /usr/local/bin/xdevs-check-health
+    mode: "0755"
+
+- name: Hash genesis.json on the controller before it is copied anywhere
+  ansible.builtin.stat:
+    path: "{{ xdevs_genesis_src }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: xdevs_genesis_local
+
+- name: Refuse a genesis that does not match xdevs_genesis_sha256
+  ansible.builtin.assert:
+    that:
+      - xdevs_genesis_local.stat.exists
+      - xdevs_genesis_local.stat.checksum == xdevs_genesis_sha256
+    fail_msg: >-
+      {{ xdevs_genesis_src }} is missing or its SHA-256 is not {{ xdevs_genesis_sha256 }}.
+      A node started with another genesis joins (or creates) a different chain.
+
+- name: Install genesis.json
+  ansible.builtin.copy:
+    src: "{{ xdevs_genesis_src }}"
+    dest: "{{ xdevs_home }}/genesis.json"
+    owner: root
+    group: "{{ xdevs_user }}"
+    mode: "0644"
+  notify: Restart xdevs
+
+- name: Validators must already hold their keys (roles/validator_keys, tag "keys")
+  when: xdevs_role == 'validator'
+  block:
+    - name: Look for the consensus key, password and node key
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ xdevs_consensus_key_file }}"
+        - "{{ xdevs_key_password_file }}"
+        - "{{ xdevs_node_key_file }}"
+      register: xdevs_key_stats
+
+    - name: Fail when a key file is missing
+      ansible.builtin.assert:
+        that: xdevs_key_stats.results | map(attribute='stat.exists') | reject | list | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }} has no consensus key / password / node key under
+          {{ xdevs_keys_path }}. Install them from a workstation with
+          `ansible-playbook site.yml --limit {{ inventory_hostname }} --tags keys`
+          (docs/runbooks/bootstrap-validator.md). They are never generated here.
+
+- name: Render config.toml
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: "{{ xdevs_config_dir }}/config.toml"
+    owner: root
+    group: "{{ xdevs_user }}"
+    mode: "0640"
+  notify: Restart xdevs
+
+- name: Install the systemd unit
+  ansible.builtin.template:
+    src: xdevs.service.j2
+    dest: /etc/systemd/system/xdevs.service
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart xdevs
+
+- name: Enable xdevs and set its state (started; stopped during an emergency restart)
+  ansible.builtin.systemd_service:
+    name: xdevs
+    enabled: true
+    state: "{{ xdevs_service_state }}"
+    daemon_reload: true
