@@ -12,6 +12,7 @@ use std::sync::Arc;
 use xdevs_execution::{next_base_fee, BlockAttributes, BlockExecutor, BuiltBlock, EvmExecutor};
 use xdevs_mempool::{Pool, TxPool};
 use xdevs_primitives::{Address, Block, Bytes, ChainConfig, Header, ReceiptEnvelope, TxHash, B256};
+use xdevs_rpc::ChainEvents;
 use xdevs_state::{history::DEFAULT_STATE_HISTORY_BLOCKS, DbStateProvider};
 use xdevs_storage::DbRead;
 
@@ -46,6 +47,8 @@ pub struct BlockProducer {
     state_history: u64,
     /// Serialises block production (one block at a time).
     lock: Mutex<()>,
+    /// Committed blocks are published here (`eth_subscribe`).
+    events: Option<Arc<ChainEvents>>,
 }
 
 impl std::fmt::Debug for BlockProducer {
@@ -76,7 +79,14 @@ impl BlockProducer {
             extra_data,
             state_history: DEFAULT_STATE_HISTORY_BLOCKS,
             lock: Mutex::new(()),
+            events: None,
         }
+    }
+
+    /// Publish every committed block to `events` (`newHeads` / `logs` subscriptions).
+    pub fn with_events(mut self, events: Arc<ChainEvents>) -> Self {
+        self.events = Some(events);
+        self
     }
 
     /// Keep the state of the last `blocks` blocks readable (default
@@ -104,6 +114,12 @@ impl BlockProducer {
             },
         )?;
         let hash = chain::commit_block(&*self.db, &built, self.state_history)?;
+        crate::events::publish_block(
+            self.events.as_deref(),
+            &built.block,
+            hash,
+            &built.outcome.receipts,
+        );
 
         let rejected = drop_rejected(&self.pool, &built);
         after_commit(&self.pool, &self.cfg, &built.block, &built.outcome.receipts);

@@ -360,3 +360,28 @@ async fn restart_resumes_at_the_committed_head() {
     );
     assert!(chain::ensure_validator_set(&*db, &[]).is_err());
 }
+
+/// A consensus commit publishes the block to `eth_subscribe` once; an idempotent
+/// re-commit (certificate upgrade) does not publish it again.
+#[tokio::test]
+async fn commit_publishes_chain_events_once() {
+    let g = genesis();
+    let n = node(&g);
+    let events = Arc::new(ChainEvents::default());
+    let app = n.app.clone().with_events(events.clone());
+    let mut rx = events.subscribe_blocks();
+    n.pool
+        .add(
+            RecoveredTx::recover(transfer(0, 0, 5)).unwrap(),
+            TxOrigin::Local,
+        )
+        .unwrap();
+    let block = app.propose(1, 0, far()).await.unwrap();
+    app.commit(block.clone(), cert(&block, 3)).await.unwrap();
+    app.commit(block.clone(), cert(&block, 4)).await.unwrap();
+    let ev = rx.try_recv().unwrap();
+    assert_eq!(ev.header.hash, block.hash());
+    assert_eq!(ev.header.inner.number, 1);
+    assert!(ev.logs.is_empty());
+    assert!(rx.try_recv().is_err(), "re-commit must not publish again");
+}

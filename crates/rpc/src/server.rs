@@ -25,8 +25,10 @@ pub(crate) const MAX_REWARD_PERCENTILES: usize = 100;
 
 /// Shared state of every method handler.
 pub struct RpcContext {
-    backend: Arc<dyn RpcBackend>,
-    config: RpcServerConfig,
+    pub(crate) backend: Arc<dyn RpcBackend>,
+    pub(crate) config: RpcServerConfig,
+    /// Global subscription slots ([`RpcServerConfig::max_subscriptions`]).
+    pub(crate) subscriptions: Arc<tokio::sync::Semaphore>,
 }
 
 impl std::fmt::Debug for RpcContext {
@@ -43,7 +45,12 @@ pub fn build_module(
     config: RpcServerConfig,
     backend: Arc<dyn RpcBackend>,
 ) -> anyhow::Result<RpcModule<RpcContext>> {
-    let mut m = RpcModule::new(RpcContext { backend, config });
+    let subscriptions = crate::subscription::subscription_slots(&config);
+    let mut m = RpcModule::new(RpcContext {
+        backend,
+        config,
+        subscriptions,
+    });
 
     macro_rules! method {
         ($name:literal, $handler:path) => {
@@ -86,6 +93,7 @@ pub fn build_module(
     method!("eth_getLogs", eth_get_logs);
     method!("xdevs_getEoaLock", xdevs_get_eoa_lock);
     method!("xdevs_getCommitCertificate", xdevs_get_commit_certificate);
+    crate::subscription::register(&mut m)?;
     Ok(m)
 }
 

@@ -5,6 +5,11 @@
 //! which the node implements on top of storage, state, execution and the mempool.
 //! RPC shapes are the `alloy-rpc-types-eth` types re-exported in [`types`].
 //!
+//! WebSocket clients (same port) can `eth_subscribe` to `newHeads`, `logs` and
+//! `newPendingTransactions` (see [`subscription`]); the node publishes the events through
+//! [`events::ChainEvents`] and hands out receivers via [`RpcBackend::subscribe_blocks`] /
+//! [`RpcBackend::subscribe_pending_txs`].
+//!
 //! Finality tags: `latest`, `safe` and `finalized` all mean the latest committed
 //! block (BFT finality); `pending` = latest state + pool view (nonce only in Phase 1);
 //! `earliest` = block 0.
@@ -15,13 +20,17 @@
 pub mod convert;
 mod cors;
 mod error;
+pub mod events;
 mod server;
+pub mod subscription;
 
 pub use error::RpcBackendError;
+pub use events::{BlockEvent, ChainEvents};
 pub use server::build_module;
 
 use async_trait::async_trait;
 use std::{net::SocketAddr, sync::Arc};
+use tokio::sync::broadcast;
 use xdevs_primitives::{Address, Bytes, B256, U256};
 
 /// RPC types used by [`RpcBackend`] (re-exported from `alloy-rpc-types-eth`, plus the
@@ -203,6 +212,20 @@ pub trait RpcBackend: Send + Sync + 'static {
             "xdevs_getCommitCertificate".into(),
         ))
     }
+
+    /// `eth_subscribe("newHeads" | "logs")`: a receiver of every block committed from
+    /// now on, in commit order (see [`events::ChainEvents::subscribe_blocks`]). The
+    /// default (`None`) answers these subscriptions with -32601.
+    fn subscribe_blocks(&self) -> Option<broadcast::Receiver<Arc<BlockEvent>>> {
+        None
+    }
+
+    /// `eth_subscribe("newPendingTransactions")`: a receiver of the hash of every
+    /// transaction admitted to the mempool from now on. The default (`None`) answers
+    /// the subscription with -32601.
+    fn subscribe_pending_txs(&self) -> Option<broadcast::Receiver<B256>> {
+        None
+    }
 }
 
 /// `eth_getLogs` result cap check: `Err(LimitExceeded)` once `count` matching logs
@@ -237,6 +260,12 @@ pub struct RpcServerConfig {
     pub max_response_body_size: u32,
     /// Max concurrent connections (default 256).
     pub max_connections: u32,
+    /// Max active `eth_subscribe` subscriptions per WebSocket connection (default 20;
+    /// error -32006 above).
+    pub max_subscriptions_per_connection: u32,
+    /// Max active subscriptions over all connections of the server (default 1,000;
+    /// error -32005 above).
+    pub max_subscriptions: u32,
 }
 
 impl Default for RpcServerConfig {
@@ -251,6 +280,8 @@ impl Default for RpcServerConfig {
             max_request_body_size: 5 * 1024 * 1024,
             max_response_body_size: 32 * 1024 * 1024,
             max_connections: 256,
+            max_subscriptions_per_connection: 20,
+            max_subscriptions: 1_000,
         }
     }
 }
@@ -287,20 +318,29 @@ pub async fn start_server(
     config: RpcServerConfig,
     backend: Arc<dyn RpcBackend>,
 ) -> anyhow::Result<RpcServerHandle> {
-    use jsonrpsee::server::{BatchRequestConfig, Server, ServerConfig};
+    use jsonrpsee::{
+        core::middleware::RpcServiceBuilder,
+        server::{BatchRequestConfig, Server, ServerConfig},
+    };
 
     let server_config = ServerConfig::builder()
         .max_request_body_size(config.max_request_body_size)
         .max_response_body_size(config.max_response_body_size)
         .max_connections(config.max_connections)
+        .max_subscriptions_per_connection(config.max_subscriptions_per_connection)
+        .set_id_provider(subscription::HexIdProvider::default())
         .set_batch_request_config(BatchRequestConfig::Limit(config.max_batch))
         .build();
     let cors = cors::CorsLayer::new(cors::CorsPolicy::from_config(&config.cors));
-    let http_middleware = tower::ServiceBuilder::new().layer(cors);
+    let http_middleware = tower::ServiceBuilder::new()
+        .layer(cors)
+        .layer(subscription::TransportLayer);
+    let rpc_middleware = RpcServiceBuilder::new().layer_fn(subscription::NoHttpSubscriptions::new);
 
     let server = Server::builder()
         .set_config(server_config)
         .set_http_middleware(http_middleware)
+        .set_rpc_middleware(rpc_middleware)
         .build(config.http)
         .await
         .map_err(|e| anyhow::anyhow!("failed to bind JSON-RPC server on {}: {e}", config.http))?;

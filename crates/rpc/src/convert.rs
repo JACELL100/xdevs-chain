@@ -5,7 +5,10 @@
 //! hex quantities, `null` for pending positions, `withdrawals: []` on post-Shanghai
 //! headers, `effectiveGasPrice = base fee + effective tip`.
 
-use crate::types::{BlockTransactions, RpcBlock, RpcHeader, RpcLog, RpcReceipt, RpcTransaction};
+use crate::{
+    events::BlockEvent,
+    types::{BlockTransactions, RpcBlock, RpcHeader, RpcLog, RpcReceipt, RpcTransaction},
+};
 use alloy_rpc_types_eth::Withdrawals;
 use xdevs_primitives::{
     reexports::{
@@ -165,6 +168,28 @@ pub fn rpc_logs(
         .enumerate()
         .map(|(i, log)| rpc_log(log.clone(), tx_hash, &meta, first_log_index + i as u64))
         .collect()
+}
+
+/// The [`BlockEvent`] of a committed block: its header exactly as
+/// `eth_getBlockByNumber(n, false)` returns it (`hash`, `size`; no transactions) and all
+/// its logs exactly as `eth_getLogs` returns them. `receipts[i]` belongs to
+/// `block.body[i]`.
+pub fn block_event(block: &Block, hash: B256, receipts: &[ReceiptEnvelope]) -> BlockEvent {
+    let header = rpc_block(block, hash, &[], false).header;
+    let mut logs = Vec::new();
+    let mut log_index = 0u64;
+    for (i, (tx, receipt)) in block.body.iter().zip(receipts).enumerate() {
+        let meta = TxMeta {
+            block_hash: hash,
+            block_number: block.header.number,
+            index: i as u64,
+            base_fee: block.header.base_fee_per_gas,
+            timestamp: block.header.timestamp,
+        };
+        logs.extend(rpc_logs(receipt, *tx.tx_hash(), meta, log_index));
+        log_index += receipt.logs().len() as u64;
+    }
+    BlockEvent { header, logs }
 }
 
 fn rpc_log(log: xdevs_primitives::Log, tx_hash: B256, meta: &TxMeta, log_index: u64) -> RpcLog {
@@ -393,6 +418,32 @@ mod tests {
         assert_eq!(logs[1].log_index, Some(6));
         assert_eq!(logs[0].transaction_hash, Some(tx.hash()));
         assert_eq!(logs[0].block_number, Some(42));
+    }
+
+    #[test]
+    fn block_event_matches_block_and_get_logs_shapes() {
+        let t0 = legacy_tx();
+        let t1 = eip1559_tx(TxKind::Create);
+        let block = Block::new(header(9), vec![t0.tx.clone(), t1.tx.clone()]);
+        let hash = block.hash();
+        let receipts = [receipt_with_logs(2), receipt_with_logs(1)];
+        let ev = block_event(&block, hash, &receipts);
+        assert_eq!(ev.header, rpc_block(&block, hash, &[], false).header);
+        assert_eq!(ev.header.hash, hash);
+        assert!(ev.header.size.is_some());
+        assert_eq!(ev.logs.len(), 3);
+        let at = |i: u64| TxMeta {
+            block_hash: hash,
+            block_number: 9,
+            index: i,
+            base_fee: block.header.base_fee_per_gas,
+            timestamp: block.header.timestamp,
+        };
+        let mut expected = rpc_logs(&receipts[0], t0.hash(), at(0), 0);
+        expected.extend(rpc_logs(&receipts[1], t1.hash(), at(1), 2));
+        assert_eq!(ev.logs, expected);
+        assert_eq!(ev.logs[2].log_index, Some(2));
+        assert_eq!(ev.logs[2].transaction_index, Some(1));
     }
 
     #[test]

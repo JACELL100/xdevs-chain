@@ -31,6 +31,7 @@ use xdevs_primitives::{
     constants::MAX_EXTRA_DATA_SIZE, set_compat_header_fields, Address, Block, Bytes, ChainConfig,
     Encodable2718, Header, Transaction, Typed2718, B256,
 };
+use xdevs_rpc::ChainEvents;
 use xdevs_state::DbStateProvider;
 
 pub use crate::producer::MAX_BLOCK_BYTES;
@@ -95,6 +96,8 @@ struct Inner {
     verdicts: Mutex<HashMap<B256, (u64, Verdict)>>,
     /// Serialises commits (the only chain writer in consensus modes).
     commit_lock: Mutex<()>,
+    /// Committed blocks are published here (`eth_subscribe`); set once.
+    events: std::sync::OnceLock<Arc<ChainEvents>>,
 }
 
 /// The node's [`ConsensusApp`] (see the module docs). Cheap to clone.
@@ -133,8 +136,16 @@ impl ChainApp {
                 app,
                 verdicts: Mutex::new(HashMap::new()),
                 commit_lock: Mutex::new(()),
+                events: std::sync::OnceLock::new(),
             }),
         }
+    }
+
+    /// Publish every newly committed block to `events` (`newHeads` / `logs`
+    /// subscriptions). Only the first call has an effect.
+    pub fn with_events(self, events: Arc<ChainEvents>) -> Self {
+        let _ = self.inner.events.set(events);
+        self
     }
 
     /// Run `f` on a blocking thread.
@@ -383,6 +394,12 @@ impl Inner {
             Some(&cert.to_bytes()),
             self.app.state_history,
         )?;
+        crate::events::publish_block(
+            self.events.get().map(|e| &**e),
+            &block,
+            hash,
+            &outcome.receipts,
+        );
         after_commit(&self.pool, &self.cfg, &block, &outcome.receipts);
         self.verdicts.lock().retain(|_, (n, _)| *n > number);
         tracing::info!(

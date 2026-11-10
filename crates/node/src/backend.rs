@@ -8,6 +8,7 @@
 
 use crate::chain::{self, Db};
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use xdevs_consensus::{CommitCertificate, EngineStatus};
 use xdevs_crypto::decode_and_recover;
 use xdevs_execution::{next_base_fee, CallResult, EvmExecutor, ExecutionError};
@@ -23,7 +24,7 @@ use xdevs_rpc::{
     check_logs_limit,
     convert::{self, ReceiptMeta, TxMeta},
     types::*,
-    BackendResult, RpcBackend, RpcBackendError,
+    BackendResult, BlockEvent, ChainEvents, RpcBackend, RpcBackendError,
 };
 use xdevs_state::{
     history::oldest_available_state, DbStateProvider, HistoricalStateProvider, StateProvider,
@@ -64,6 +65,8 @@ pub struct NodeBackend {
     consensus: Option<EngineStatus>,
     /// Head when the node started (`eth_syncing.startingBlock`).
     starting_block: u64,
+    /// Chain events for `eth_subscribe`; accepted txs are published as pending.
+    events: Option<Arc<ChainEvents>>,
 }
 
 impl std::fmt::Debug for NodeBackend {
@@ -102,7 +105,15 @@ impl NodeBackend {
             gossip: None,
             consensus: None,
             starting_block: 0,
+            events: None,
         }
+    }
+
+    /// Serve `eth_subscribe` from `events` and publish the hash of every
+    /// `eth_sendRawTransaction` tx admitted to the pool.
+    pub fn with_events(mut self, events: Arc<ChainEvents>) -> Self {
+        self.events = Some(events);
+        self
     }
 
     /// Publish accepted `eth_sendRawTransaction` txs on the tx-gossip network and count
@@ -529,11 +540,15 @@ impl RpcBackend for NodeBackend {
         let chain_id = self.cfg.chain_id;
         let pool = self.pool.clone();
         let gossip = self.gossip.clone();
+        let events = self.events.clone();
         tokio::task::spawn_blocking(move || {
             let tx = decode_and_recover(&raw, chain_id)
                 .map_err(|e| RpcBackendError::Rejected(e.to_string()))?;
             let hash = tx.hash();
             pool.add(tx, TxOrigin::External).map_err(pool_err)?;
+            if let Some(events) = events {
+                events.publish_pending_tx(hash);
+            }
             tracing::debug!(target: "xdevs::rpc", %hash, "transaction added to pool");
             if let Some(gossip) = gossip {
                 // Best effort: the tx is in the local pool either way.
@@ -545,6 +560,14 @@ impl RpcBackend for NodeBackend {
         })
         .await
         .map_err(internal)?
+    }
+
+    fn subscribe_blocks(&self) -> Option<broadcast::Receiver<Arc<BlockEvent>>> {
+        self.events.as_ref().map(|e| e.subscribe_blocks())
+    }
+
+    fn subscribe_pending_txs(&self) -> Option<broadcast::Receiver<B256>> {
+        self.events.as_ref().map(|e| e.subscribe_pending_txs())
     }
 
     async fn syncing(&self) -> BackendResult<SyncStatus> {

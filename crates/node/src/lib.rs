@@ -28,6 +28,7 @@ mod backend;
 pub mod chain;
 mod config;
 pub mod consensus;
+mod events;
 mod producer;
 
 pub use app::{ChainApp, ChainAppConfig, MAX_BLOCK_BYTES, PROPOSAL_EXTRA_DATA};
@@ -48,7 +49,7 @@ use xdevs_genesis::Genesis;
 use xdevs_mempool::{FromState, Pool, PoolConfig, PoolParams};
 use xdevs_network::{Keypair, NetworkHandle};
 use xdevs_primitives::{constants::DEV_CHAIN_ID, Bytes, ChainConfig, B256};
-use xdevs_rpc::{RpcServerConfig, RpcServerHandle};
+use xdevs_rpc::{ChainEvents, RpcServerConfig, RpcServerHandle};
 use xdevs_state::DbStateProvider;
 use xdevs_storage::RedbDatabase;
 
@@ -187,13 +188,16 @@ impl Node {
     /// the block producer (dev), then the RPC server(s).
     pub async fn start(self) -> anyhow::Result<NodeHandle> {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        // `eth_subscribe` events: committed blocks and admitted txs.
+        let events = Arc::new(ChainEvents::default());
         let backend = NodeBackend::new(
             self.db.clone(),
             self.pool.clone(),
             self.executor.clone(),
             self.cfg.clone(),
             self.config.rpc.gas_cap,
-        );
+        )
+        .with_events(events.clone());
         let mut handle = NodeHandle {
             http_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
             rpc: Vec::new(),
@@ -218,7 +222,8 @@ impl Node {
                         self.config.dev.fee_recipient,
                         Bytes::from_static(DEV_BLOCK_EXTRA_DATA),
                     )
-                    .with_state_history(self.config.chain.state_history_blocks()?),
+                    .with_state_history(self.config.chain.state_history_blocks()?)
+                    .with_events(events.clone()),
                 );
                 let block_time = self.block_time();
                 tracing::info!(
@@ -238,7 +243,10 @@ impl Node {
                 "dev mode disabled and the genesis has no validators: no blocks will be produced"
             ),
             NodeMode::Validator | NodeMode::FullNode => {
-                if let Err(e) = self.start_consensus(&mut handle, shutdown_rx).await {
+                if let Err(e) = self
+                    .start_consensus(&mut handle, shutdown_rx, events.clone())
+                    .await
+                {
                     handle.shutdown().await;
                     return Err(e);
                 }
@@ -294,6 +302,7 @@ impl Node {
         &self,
         handle: &mut NodeHandle,
         shutdown: watch::Receiver<bool>,
+        events: Arc<ChainEvents>,
     ) -> anyhow::Result<()> {
         let set = self
             .validator_set
@@ -324,7 +333,11 @@ impl Node {
                 self.config.gossip.network.clone(),
                 self.cfg.chain_id,
                 keypair,
-                consensus::gossip_validator(self.pool.clone(), self.cfg.chain_id),
+                events::publishing_gossip_validator(
+                    consensus::gossip_validator(self.pool.clone(), self.cfg.chain_id),
+                    self.pool.clone(),
+                    events.clone(),
+                ),
             )
             .await
             .context("failed to start tx gossip")?;
@@ -355,7 +368,8 @@ impl Node {
                 state_history: self.config.chain.state_history_blocks()?,
                 max_timestamp_drift_secs: self.config.validator.max_timestamp_drift_secs,
             },
-        );
+        )
+        .with_events(events);
         tracing::info!(
             target: "xdevs::node",
             mode = ?self.mode,
