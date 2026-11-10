@@ -1,0 +1,33 @@
+{
+  "name": "@xdevs/indexer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "xDEVS Chain indexer, explorer HTTP API and Guardian Vault alerts (Postgres).",
+  "license": "Apache-2.0",
+  "author": "THE xDEVS",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "migrate": "node --disable-warning=ExperimentalWarning src/main.ts migrate",
+    "cli": "node --disable-warning=ExperimentalWarning src/cli.ts",
+    "test": "node --test --disable-warning=ExperimentalWarning \"test/**/*.test.ts\"",
+    "test:unit": "node --test --disable-warning=ExperimentalWarning test/decode.test.ts test/spam.test.ts test/indexer.test.ts test/api.test.ts test/alerts.test.ts",
+    "test:integration": "node --test --disable-warning=ExperimentalWarning test/integration.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@xdevs/sdk": "file:../../sdk/ts",
+    "pg": "8.23.1",
+    "viem": "2.57.17"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.16",
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "typescript": "6.0.3"
+  }
+}

@@ -115,7 +115,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [sdk/ts, apps/faucet]
+        package: [sdk/ts, apps/faucet, apps/indexer, apps/explorer]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -126,7 +126,18 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: ${{ matrix.package }}/package-lock.json
+          cache-dependency-path: |
+            ${{ matrix.package }}/package-lock.json
+            sdk/ts/package-lock.json
+      # The indexer and explorer depend on the local SDK ("file:../../sdk/ts"); its dist/
+      # is not committed, so build it first.
+      - name: Build @xdevs/sdk
+        if: matrix.package == 'apps/indexer' || matrix.package == 'apps/explorer'
+        working-directory: sdk/ts
+        run: npm ci && npm run build
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm test
+      - name: Build the explorer
+        if: matrix.package == 'apps/explorer'
+        run: npm run build

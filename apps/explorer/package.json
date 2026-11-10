@@ -1,0 +1,33 @@
+{
+  "name": "@xdevs/explorer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "xDEVS Chain block explorer UI (Vite + React, static build for Cloudflare Pages).",
+  "license": "Apache-2.0",
+  "author": "THE xDEVS",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --disable-warning=ExperimentalWarning --import ./test/register-tsx.mjs \"test/**/*.test.ts\"",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@xdevs/sdk": "file:../../sdk/ts",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "viem": "2.57.17"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "6.0.3",
+    "vite": "7.3.8"
+  }
+}
