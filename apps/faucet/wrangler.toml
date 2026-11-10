@@ -1,0 +1,42 @@
+# tXDS faucet — Cloudflare Worker config. NOT DEPLOYED YET.
+# Deploy steps, secrets and incident response: docs/runbooks/faucet.md
+#
+# Secrets (never put these in this file; set with `wrangler secret put <NAME>`):
+#   FAUCET_PRIVATE_KEY    0x + 64 hex. HOT wallet only, holding a small float (see runbook).
+#   TURNSTILE_SECRET_KEY  Turnstile widget secret key.
+# Local dev: copy .dev.vars.example to .dev.vars (gitignored).
+
+name = "xdevs-faucet"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+workers_dev = true
+# routes = [{ pattern = "faucet.testnet.<your-domain>", custom_domain = true }]
+
+[vars]
+RPC_URL = "https://rpc.testnet.<your-domain>"          # public RPC full node (plan §24.2), placeholder
+CHAIN_ID = "717171"                                    # xdevs-testnet-1 (plan §21.1)
+TURNSTILE_SITE_KEY = "0x4AAAAAAA_REPLACE_ME"           # public site key from the Turnstile dashboard
+DRIP_AMOUNT = "100"                                    # tXDS per claim (plan §20.3)
+MIN_FAUCET_BALANCE = "1000"                            # pause drips below this many tXDS
+CORS_ORIGINS = "https://explorer.testnet.<your-domain>,https://wallet.testnet.<your-domain>"
+EXPLORER_TX_URL = "https://explorer.testnet.<your-domain>/tx/{hash}"
+TURNSTILE_EXPECTED_HOSTNAME = ""                       # e.g. "faucet.testnet.<your-domain>"; empty = not checked
+
+# Rate-limit markers (addr:<address>, ip:<ipv4>, ip6:<prefix>/64), 24 h TTL.
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "00000000000000000000000000000000"                # placeholder: `wrangler kv namespace create RATE_LIMIT`
+preview_id = "11111111111111111111111111111111"        # placeholder: `wrangler kv namespace create RATE_LIMIT --preview`
+
+# Single Durable Object that serializes signing so nonces never collide.
+[[durable_objects.bindings]]
+name = "FAUCET_SIGNER"
+class_name = "FaucetSigner"
+
+# SQLite-backed DO class (the only kind available on the Workers Free plan).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FaucetSigner"]
+
+[observability]
+enabled = true

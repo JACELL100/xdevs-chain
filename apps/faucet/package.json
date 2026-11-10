@@ -1,0 +1,24 @@
+{
+  "name": "@xdevs/faucet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "tXDS testnet faucet for xDEVS Chain (Cloudflare Worker + Turnstile). Testnet tokens have no value.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "viem": "2.57.17"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261110.1",
+    "typescript": "5.9.3"
+  }
+}
