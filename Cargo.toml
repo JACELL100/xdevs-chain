@@ -21,6 +21,10 @@ xdevs-genesis = { path = "crates/genesis" }
 xdevs-mempool = { path = "crates/mempool" }
 xdevs-rpc = { path = "crates/rpc" }
 xdevs-node = { path = "crates/node" }
+xdevs-consensus = { path = "crates/consensus" }
+xdevs-network = { path = "crates/network" }
+xdevs-metrics = { path = "crates/metrics" }
+xdevs-testutils = { path = "crates/testutils" }
 
 # --- Ethereum types & EVM --------------------------------------------------
 # alloy-* 2.5.x all depend on alloy-primitives 1.x and alloy-trie 0.9.x;
@@ -76,6 +80,23 @@ zeroize = "1.9.1"
 subtle = "2.6.1"
 # rand 0.8 is what alloy-signer-local / k256 0.13 use (rand_core 0.6).
 rand = "0.8.8"
+
+# --- Consensus (xdevs-consensus only) --------------------------------------
+# Pin exactly: Malachite breaks its API on every minor release
+# (docs/research/phase2-consensus.md §10). Malachite types never leave
+# crates/consensus.
+arc-malachitebft-app-channel = "=0.8.2"   # re-exports app, engine, core types, config, codec, sync, wal
+arc-malachitebft-signing-ed25519 = { version = "=0.8.2", features = ["std", "rand", "serde", "zeroize"] }
+ed25519-consensus = "2.1.0"                # same as Malachite's signing scheme (ZIP-215)
+
+# --- Networking (xdevs-network; must equal Malachite's libp2p) --------------
+libp2p = { version = "=0.56.0", default-features = false, features = [
+    "tokio", "tcp", "quic", "dns", "noise", "yamux", "gossipsub", "identify",
+    "kad", "ping", "request-response", "macros", "ed25519", "metrics",
+] }
+
+# --- Metrics (xdevs-metrics; Malachite's registry type) ---------------------
+prometheus-client = "0.23.1"
 
 # --- Utilities -------------------------------------------------------------
 serde = { version = "1.0.229", features = ["derive"] }

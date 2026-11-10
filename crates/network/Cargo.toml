@@ -1,0 +1,23 @@
+[package]
+name = "xdevs-network"
+description = "xDEVS Chain p2p networking: libp2p 0.56 tx gossip (gossipsub), peer management and the NetworkHandle."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+xdevs-primitives.workspace = true
+# Must stay on Malachite's libp2p (=0.56.0) so only one libp2p stack is compiled.
+libp2p.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt", "macros", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

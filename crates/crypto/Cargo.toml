@@ -29,7 +29,11 @@ ctr.workspace = true
 zeroize.workspace = true
 subtle.workspace = true
 rand.workspace = true
+# Base58 for libp2p peer ids (already in the graph via libp2p-identity).
+bs58 = "0.5.1"
 
 [dev-dependencies]
+# Cross-checks the hand-built peer id against libp2p (same version as libp2p 0.56).
+libp2p-identity = { version = "=0.2.14", features = ["ed25519", "peerid"] }
 proptest.workspace = true
 tempfile.workspace = true

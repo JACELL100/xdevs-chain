@@ -1,0 +1,29 @@
+[package]
+name = "xdevs-consensus"
+description = "xDEVS Chain BFT consensus: validator sets, commit certificates, the ConsensusApp/ConsensusEngine traits and the Malachite adapter."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+xdevs-primitives.workspace = true
+# Malachite (pinned =0.8.2): only ever used inside `src/malachite/`.
+arc-malachitebft-app-channel.workspace = true
+arc-malachitebft-signing-ed25519.workspace = true
+ed25519-consensus.workspace = true
+alloy-rlp.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+sha2.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+ed25519-dalek.workspace = true
+toml.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

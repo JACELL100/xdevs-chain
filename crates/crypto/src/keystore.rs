@@ -324,6 +324,23 @@ pub fn encrypt_key_with_rng<R: RngCore + CryptoRng>(
     params: ScryptParams,
 ) -> Result<Keystore, KeystoreError> {
     let signer = signer_from_bytes(secret).map_err(|_| KeystoreError::InvalidKey)?;
+    let (crypto, id) = encrypt_secret(rng, secret, password.as_ref(), params)?;
+    Ok(Keystore {
+        address: Some(hex::encode(signer.address())),
+        crypto,
+        id,
+        version: KEYSTORE_VERSION,
+    })
+}
+
+/// Encrypt arbitrary secret bytes into a v3 `crypto` section (scrypt + AES-128-CTR +
+/// keccak MAC) and a fresh UUID v4. Shared by the account and the Ed25519 keystores.
+pub(crate) fn encrypt_secret<R: RngCore + CryptoRng>(
+    rng: &mut R,
+    secret: &[u8],
+    password: &[u8],
+    params: ScryptParams,
+) -> Result<(CryptoSection, String), KeystoreError> {
     let mut salt = vec![0u8; 32];
     rng.fill_bytes(&mut salt);
     let mut iv = vec![0u8; 16];
@@ -336,38 +353,34 @@ pub fn encrypt_key_with_rng<R: RngCore + CryptoRng>(
         r: params.r,
         salt,
     };
-    let derived = derive_key(&kdf, password.as_ref())?;
+    let derived = derive_key(&kdf, password)?;
     let mut ciphertext = secret.to_vec();
     aes_ctr(&derived, &iv, &mut ciphertext)?;
     let mac = compute_mac(&derived, &ciphertext).to_vec();
-
-    Ok(Keystore {
-        address: Some(hex::encode(signer.address())),
-        crypto: CryptoSection {
-            cipher: CIPHER.to_string(),
-            cipherparams: CipherParams { iv },
-            ciphertext,
-            kdf,
-            mac,
-        },
-        id: uuid_v4(rng),
-        version: KEYSTORE_VERSION,
-    })
+    let crypto = CryptoSection {
+        cipher: CIPHER.to_string(),
+        cipherparams: CipherParams { iv },
+        ciphertext,
+        kdf,
+        mac,
+    };
+    Ok((crypto, uuid_v4(rng)))
 }
 
-/// Decrypt the raw private key bytes (zeroized on drop). Verifies the MAC in constant time.
-pub fn decrypt_key(
-    keystore: &Keystore,
-    password: impl AsRef<[u8]>,
+/// Decrypt a v3 `crypto` section (version / cipher / KDF bounds / constant-time MAC
+/// checked). The plaintext is zeroized on drop.
+pub(crate) fn decrypt_secret(
+    version: u64,
+    c: &CryptoSection,
+    password: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, KeystoreError> {
-    if keystore.version != KEYSTORE_VERSION {
-        return Err(KeystoreError::UnsupportedVersion(keystore.version));
+    if version != KEYSTORE_VERSION {
+        return Err(KeystoreError::UnsupportedVersion(version));
     }
-    let c = &keystore.crypto;
     if c.cipher != CIPHER {
         return Err(KeystoreError::UnsupportedCipher(c.cipher.clone()));
     }
-    let derived = derive_key(&c.kdf, password.as_ref())?;
+    let derived = derive_key(&c.kdf, password)?;
     let mac = compute_mac(&derived, &c.ciphertext);
     if !bool::from(mac.as_slice().ct_eq(&c.mac)) {
         return Err(KeystoreError::MacMismatch);
@@ -375,6 +388,14 @@ pub fn decrypt_key(
     let mut plain = Zeroizing::new(c.ciphertext.clone());
     aes_ctr(&derived, &c.cipherparams.iv, &mut plain)?;
     Ok(plain)
+}
+
+/// Decrypt the raw private key bytes (zeroized on drop). Verifies the MAC in constant time.
+pub fn decrypt_key(
+    keystore: &Keystore,
+    password: impl AsRef<[u8]>,
+) -> Result<Zeroizing<Vec<u8>>, KeystoreError> {
+    decrypt_secret(keystore.version, &keystore.crypto, password.as_ref())
 }
 
 /// Decrypt a keystore into a signer, checking the optional `address` field.

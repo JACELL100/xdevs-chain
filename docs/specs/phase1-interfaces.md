@@ -21,6 +21,13 @@ report it.
 | `crates/node` | `xdevs-node` | node agent | complete (dev mode) |
 | `bin/xdevs` | `xdevs` | node agent | clap skeleton (`xdevs node --dev`) |
 | `bin/xdevs-cli` | `xdevs-cli` | crypto/cli agent | complete (`keygen`, `address`, `send`, `balance`) |
+| `crates/consensus` | `xdevs-consensus` | WP1 (Phase 2) | day-0 skeleton (traits, types, config) |
+| `crates/network` | `xdevs-network` | WP3 (Phase 2) | day-0 skeleton (`NetworkHandle`, config) |
+| `crates/metrics` | `xdevs-metrics` | WP6 (Phase 2) | day-0 skeleton |
+| `crates/testutils` | `xdevs-testutils` | WP5 (Phase 2) | day-0 skeleton (dev-only) |
+| `bin/xdevs-loadgen` | `xdevs-loadgen` | WP6 (Phase 2) | day-0 skeleton (CLI only) |
+
+Phase 2 crates and additions: see "Phase 2 interfaces (frozen)" at the end of this file.
 
 Dependency direction (arrows = "is used by"):
 
@@ -149,7 +156,8 @@ strings and `0x` hex strings (for genesis / config files).
 ```rust
 pub enum TableId { Headers, HeaderNumbers, Bodies, Transactions, Receipts,
                    PlainAccounts, PlainStorage, Bytecodes, Meta,
-                   AccountHistory, StorageHistory, StateChangeSets }   // ALL, name()
+                   AccountHistory, StorageHistory, StateChangeSets,
+                   CommitCertificates, TrieNodes /* Phase 2 */ }   // ALL, name()
 pub trait Table { const ID: TableId; type Key: Encode + Decode; type Value: Encode + Decode; }
 pub mod tables {  // typed tables (§14.1)
   Headers:       u64            -> Header            (RLP)
@@ -373,7 +381,7 @@ pub struct GenesisAccount { pub balance: U256, pub code: Option<Bytes>,
                             pub storage: BTreeMap<B256, U256>, pub nonce: u64 }
 pub struct Genesis { pub config: ChainConfig, pub timestamp: u64, pub gas_limit: u64,
     pub extra_data: Bytes, pub alloc: BTreeMap<Address, GenesisAccount>,
-    pub validators: Vec<serde_json::Value> /* Phase 2+, ignored */ }
+    pub validators: Vec<GenesisValidator> /* Phase 2: typed, see below */ }
 impl Genesis { fn from_json_str(&str) -> Result<Self, GenesisError>; fn from_file(&Path) -> ...;
     fn validate(&self); fn chain_config(&self) -> ChainConfig /* block_gas_limit = gas_limit */;
     fn dev(chain_id) -> Self; fn dev_with_accounts(chain_id, &[Address], U256) -> Self }
@@ -495,3 +503,180 @@ CLI: `xdevs node [--dev] [--config config.toml] [--genesis genesis.json] [--data
 
 Restart safety: on start, if `Meta[GENESIS_HASH]` exists it must equal the computed genesis
 hash; otherwise write genesis (header, state) in one batch.
+
+---
+
+# Phase 2 interfaces (frozen)
+
+Day-0 interface freeze of `docs/research/phase2-consensus.md` §8. Design: research doc §6.
+Same rules as above, plus: **all Malachite types stay inside `crates/consensus`** (private
+`malachite` module) behind the traits below; nothing else depends on Malachite. Change any
+item in this section only additively and report it.
+
+## Ownership (research doc §8)
+
+| WP | Owns (exclusive write) | Packages |
+|---|---|---|
+| WP1 Consensus engine adapter | `crates/consensus/**` | `xdevs-consensus` |
+| WP2 Chain app and node wiring | `crates/node/**`, `bin/xdevs/**` | `xdevs-node`, `xdevs` |
+| WP3 Tx gossip network | `crates/network/**` | `xdevs-network` |
+| WP4 Genesis, keys, storage, CLI | `crates/genesis/**`, `crates/storage/**`, `crates/crypto/**`, `bin/xdevs-cli/**` | `xdevs-genesis`, `xdevs-storage`, `xdevs-crypto`, `xdevs-cli` |
+| WP5 Harness, e2e, Docker, CI | `crates/testutils/**`, `tests/e2e/**`, `deploy/local/**`, `scripts/**`, `.github/workflows/**` | `xdevs-testutils` (dev-only), e2e tests |
+| WP6 RPC subscriptions, metrics, loadgen | `crates/rpc/**`, `crates/metrics/**`, `bin/xdevs-loadgen/**` | `xdevs-rpc`, `xdevs-metrics`, `xdevs-loadgen` |
+
+Dependency direction: `consensus` uses primitives (+ Malachite); `network` uses primitives
+(+ libp2p); neither depends on storage, state or execution. `node` depends on both and
+implements `ConsensusApp`. `testutils` is used only from `[dev-dependencies]`.
+
+## Pinned versions (workspace `Cargo.toml`, research doc §10)
+
+`arc-malachitebft-app-channel =0.8.2` · `arc-malachitebft-signing-ed25519 =0.8.2`
+(std, rand, serde, zeroize) · `ed25519-consensus 2.1.0` · `libp2p =0.56.0`
+(`default-features = false`; tokio, tcp, quic, dns, noise, yamux, gossipsub, identify, kad,
+ping, request-response, macros, ed25519, metrics) · `prometheus-client 0.23.1`.
+
+Resolved: one libp2p (0.56.0: gossipsub 0.49.5, kad 0.48.0, quic 0.13.1, identity 0.2.14),
+ractor 0.15.13 (transitive only), all `arc-malachitebft-*` at 0.8.2. tokio 1.54.1,
+ed25519-dalek 2.2.0 and rand 0.8.8 are unchanged from Phase 1 (the rand 0.9 / 0.10 copies
+were already in the lockfile). **Never use libp2p 0.57**: it would compile a second stack.
+Verified on windows-gnu: `cargo check` and `cargo test -p xdevs-consensus -p xdevs-network`
+(ring 0.17 builds with MinGW gcc).
+
+## xdevs-consensus (WP1)
+
+```rust
+// app.rs — no Malachite types (refines plan §7.3)
+pub enum Validity { Valid, Invalid }            // from_bool(bool), is_valid()
+pub enum BlockOrigin { Consensus, Sync }        // Sync = already-decided block from ValueSync
+#[async_trait] pub trait ConsensusApp: Send + Sync + 'static {
+    async fn head(&self) -> anyhow::Result<(u64, B256)>;              // engine starts at h+1
+    async fn validator_set(&self, height: u64) -> anyhow::Result<ValidatorSet>;
+    async fn propose(&self, height: u64, round: u32, deadline: Instant) -> anyhow::Result<Block>;
+    async fn validate(&self, height: u64, block: &Block, origin: BlockOrigin) -> anyhow::Result<Validity>;
+    async fn commit(&self, block: Block, cert: CommitCertificate) -> anyhow::Result<()>; // idempotent
+    async fn decided(&self, height: u64) -> anyhow::Result<Option<(Block, CommitCertificate)>>;
+    async fn earliest_height(&self) -> anyhow::Result<u64>;
+    async fn report_evidence(&self, _e: Evidence) -> anyhow::Result<()> { Ok(()) }
+}
+#[async_trait] pub trait ConsensusEngine: Send {
+    async fn run(self, app: Arc<dyn ConsensusApp>, shutdown: watch::Receiver<bool>) -> anyhow::Result<()>;
+}
+
+// types.rs (§6.4–§6.6)
+pub struct ValidatorAddress(pub [u8; 20]);   // sha256(pubkey)[..20]; from_public_key, Display 0x…; RLP
+pub struct ValidatorKey(pub [u8; 32]);       // from_bytes (checks the point), address(),
+                                             // verify(msg, &[u8; 64]) (ed25519-consensus, ZIP-215)
+pub struct Validator { pub address, pub public_key: ValidatorKey, pub voting_power: u64 } // Validator::new(key, power)
+pub struct ValidatorSet;
+    // new(Vec<Validator>) -> Result<_, ValidatorSetError>: sorted by address; rejects empty,
+    // zero power, duplicate, address mismatch, invalid key, overflow.
+    // validators(), len(), total_voting_power(), get(&addr), get_by_index(i),
+    // is_quorum(power) (> 2/3, integer math), quorum_threshold(), select_proposer(h, r) (§6.6)
+pub enum ValidatorSetError { Empty, ZeroPower, Duplicate, AddressMismatch, InvalidKey, PowerOverflow }
+pub enum VoteType { Prevote = 1, Precommit = 2 }
+pub const VOTE_DOMAIN: &[u8] = b"XDEVS/VOTE/1";        // also PROPOSAL_DOMAIN, PARTS_DOMAIN
+pub fn vote_sign_bytes(chain_id, VoteType, height, round: u32, block_hash: Option<B256>) -> Vec<u8>;
+pub fn proposal_sign_bytes(chain_id, height, round: u32, pol_round: Option<u32> /* None = -1 */, block_hash) -> Vec<u8>;
+pub fn parts_sign_bytes(chain_id, height, round: u32, parts_hash: B256 /* keccak(all chunks) */) -> Vec<u8>;
+pub struct CommitSig { pub validator: ValidatorAddress, pub signature: [u8; 64] }    // RLP
+pub struct CommitCertificate { pub height: u64, pub round: u32, pub block_hash: B256,
+                               pub signatures: Vec<CommitSig> /* strictly sorted by validator */ } // RLP
+    // new(..) sorts; to_bytes() / from_bytes() (canonical RLP, stored in CommitCertificates);
+    // sign_bytes(chain_id); verify(chain_id, &set) -> Result<signed_power, CertificateError>;
+    // verify_at(chain_id, height, &set)
+pub enum CertificateError { WrongHeight, NotSorted, UnknownValidator, InvalidSignature, InsufficientPower, Decode }
+pub struct SignedVote { vote_type, height, round, block_hash: Option<B256>, validator, signature: [u8; 64] }
+pub struct ConflictingVotes { pub first: SignedVote, pub second: SignedVote }   // is_valid(chain_id, &set)
+#[non_exhaustive] pub enum Evidence { DoubleVote(ConflictingVotes),
+    DoubleProposal { validator, height, round, block_hashes: (B256, B256) } }   // validator(), height()
+
+// config.rs (§6.10, §7): the node embeds these as [consensus] and [p2p]
+pub struct ConsensusTimeouts { block_time_ms: 2000, timeout_propose_ms: 1000, timeout_propose_delta_ms: 500,
+    timeout_prevote_ms: 500, timeout_prevote_delta_ms: 250, timeout_precommit_ms: 500,
+    timeout_precommit_delta_ms: 250, max_timeout_ms: 10000 }
+    // serde(default); block_time(), validate(), fast_for_tests(block_time_ms)
+pub struct P2pConfig { listen: "/ip4/0.0.0.0/tcp/30333", persistent_peers: Vec<String>,
+                       node_key_file: Option<PathBuf>, discovery: false }   // serde(default)
+pub struct EngineConfig { pub chain_id, pub moniker, pub consensus_dir /* <data_dir>/consensus */,
+                          pub timeouts, pub p2p, pub value_sync: bool }
+    // new(chain_id, data_dir), wal_path(), consensus_db_path() (consensus.redb: SignGuard +
+    // UndecidedBlocks), channel_name("consensus") == "/xdevs/<chain_id>/consensus"
+
+// engine.rs
+pub struct EngineKeys { pub consensus_seed: Option<Zeroizing<[u8; 32]>> /* None = full node */,
+                        pub node_key_seed: Zeroizing<[u8; 32]> }
+    // validator(..), full_node(..), is_validator(), consensus_public_key(); Debug hides secrets
+pub struct MalachiteEngine;   // new(EngineConfig, EngineKeys), config(), keys(); impl ConsensusEngine (run: WP1)
+```
+
+A 32-byte seed gives the same Ed25519 public key in `ed25519-dalek` (keystores, libp2p) and
+in `ed25519-consensus` (Malachite). This is tested.
+
+## xdevs-network (WP3)
+
+```rust
+pub const MAX_TX_SIZE: usize = 128 * 1024;
+pub enum Verdict { Accept, Ignore, Reject }                 // maps to gossipsub MessageAcceptance
+pub type TxValidator = Arc<dyn Fn(&[u8]) -> Verdict + Send + Sync>;   // fast, non-blocking
+pub struct NetworkConfig { listen: "/ip4/0.0.0.0/tcp/30334", bootnodes: Vec<String>, max_peers: 50,
+    max_tx_size: MAX_TX_SIZE, quic: false, discovery: false, channel_capacity: 1024 }
+    // the [gossip] section; serde(default); listen_addr(), bootnode_addrs(), validate()
+pub enum NetworkError { Config(String), Busy, Closed, TooLarge(usize), Libp2p(String) }
+pub async fn start(NetworkConfig, chain_id: u64, Keypair, TxValidator) -> Result<NetworkHandle, NetworkError>;
+pub struct NetworkHandle;
+    // local_peer_id() -> PeerId
+    // publish_tx(&self, Bytes) -> Result<(), NetworkError>    never blocks; Busy when the queue is full
+    // inbound(&self) -> mpsc::Receiver<(PeerId, Bytes)>        each call = a new bounded subscriber
+    // peer_count(&self) -> usize; async shutdown(self)
+pub fn tx_topic(chain_id) -> IdentTopic;   // "/xdevs/<chainId>/tx/1"
+pub fn tx_message_id(&[u8]) -> MessageId;  // keccak256(raw tx)
+pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
+```
+
+## xdevs-genesis additions (WP4)
+
+```rust
+pub struct GenesisValidator { pub name: Option<String>, pub consensus_key: [u8; 32],
+    pub power: u64, pub p2p: Option<String>,
+    pub extra: BTreeMap<String, serde_json::Value> /* operator, stake…: kept verbatim, ignored until Phase 3 */ }
+// JSON: { "name": "val1", "consensusKey": "ed25519:0x<64 hex>", "power": 1, "p2p": "/dns4/val1/tcp/30333/p2p/…" }
+pub const CONSENSUS_KEY_PREFIX: &str = "ed25519:";
+pub fn format_consensus_key(&[u8; 32]) -> String;
+pub fn parse_consensus_key(&str) -> Result<[u8; 32], GenesisError>;
+impl Genesis { fn validator_set(&self) -> Result<Vec<GenesisValidator>, GenesisError>; }
+    // validated (power >= 1, no duplicate keys, no overflow), sorted by consensus key; Err if empty.
+    // The node builds the consensus set:
+    // ValidatorSet::new(set.map(|v| Validator::new(ValidatorKey::from_bytes(v.consensus_key)?, v.power)))
+```
+
+`validators` is not in the header, so the genesis hash does not change (tested). WP4 still
+owns the stored-set check (`Meta["validators"]`, research doc §6.9).
+
+## xdevs-storage additions (WP4)
+
+```rust
+// Additive: SCHEMA_VERSION stays 1; redb creates the missing tables on open (tested on a Phase-1 file).
+CommitCertificates: u64 -> Bytes       // RLP of xdevs_consensus::CommitCertificate, same WriteBatch as the block
+TrieNodes:          Vec<u8> -> Bytes   // RLP trie node (incremental state root, ADR-0004)
+    // key = 0x00 ‖ nibble path                          (account trie)
+    //     | 0x01 ‖ keccak256(address) ‖ nibble path     (storage trie of that account)
+    // one nibble per byte (0x00..=0x0f); prefix-free per trie
+pub const TRIE_NODES_ACCOUNT_TAG: u8 = 0x00;
+pub const TRIE_NODES_STORAGE_TAG: u8 = 0x01;
+pub fn account_trie_key(path: &[u8]) -> Vec<u8>;
+pub fn storage_trie_key(hashed_address: B256, path: &[u8]) -> Vec<u8>;
+pub fn storage_trie_prefix(hashed_address: B256) -> Vec<u8>;   // delete_prefix drops one storage trie
+```
+
+## xdevs-metrics (WP6), xdevs-testutils (WP5), xdevs-loadgen (WP6)
+
+```rust
+// xdevs-metrics: prometheus-client 0.23.1 (Malachite's registry type)
+pub use prometheus_client::registry::Registry;
+pub const METRICS_PREFIX: &str = "xdevs";
+pub struct MetricsConfig { enabled: false, listen: "127.0.0.1:9615" }   // [metrics]; serde(default)
+pub fn new_registry() -> Registry;
+// xdevs-testutils (dev-only; LocalNet arrives with WP5)
+pub async fn wait_until(timeout, every, check: impl FnMut() -> impl Future<Output = bool>) -> bool;
+// xdevs-loadgen: CLI `--rpc URL --senders N --tps N --duration-secs N` (the generator is WP6's)
+```

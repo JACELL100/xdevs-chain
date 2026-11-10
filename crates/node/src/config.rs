@@ -1,5 +1,5 @@
-//! `config.toml` (plan §33.2, Phase-1 subset). Every section and field is optional;
-//! keys outside the subset (`[p2p]`, `[validator]`, `[metrics]`, ...) are ignored.
+//! `config.toml` (plan §33.2, research doc §6.10). Every section and field is optional;
+//! unknown keys and sections (`[metrics]`, ...) are ignored.
 //!
 //! ```toml
 //! [chain]
@@ -8,10 +8,39 @@
 //! pruning = "full"            # full (10,000 blocks of state history) | minimal (128) | archive
 //! # state_history_blocks = 10_000  # optional: overrides the pruning mode's window
 //!
-//! [dev]
+//! [dev]                        # single-node producer; only for a genesis without validators
 //! enabled = true
 //! block_time_ms = 2000
 //! fee_recipient = "0x0000000000000000000000000000000000000000"
+//!
+//! [validator]                  # absent / disabled => full node (genesis with validators)
+//! enabled = true
+//! key_file = "/var/lib/xdevs/keys/consensus.json"   # Ed25519 seed: keystore v3 or hex
+//! password_file = "/var/lib/xdevs/keys/password"    # optional (else $XDEVS_KEY_PASSWORD)
+//! fee_recipient = "0x..."
+//! max_timestamp_drift_secs = 2
+//!
+//! [consensus]                  # plan §11.2 defaults
+//! block_time_ms = 2000
+//! timeout_propose_ms = 1000
+//! timeout_propose_delta_ms = 500
+//! timeout_prevote_ms = 500
+//! timeout_prevote_delta_ms = 250
+//! timeout_precommit_ms = 500
+//! timeout_precommit_delta_ms = 250
+//! max_timeout_ms = 10000
+//!
+//! [p2p]                        # Malachite consensus network
+//! listen = "/ip4/0.0.0.0/tcp/30333"
+//! persistent_peers = ["/dns4/val2/tcp/30333"]
+//! node_key_file = "/var/lib/xdevs/keys/node_key.json"   # omit = ephemeral identity
+//! discovery = false
+//!
+//! [gossip]                     # tx gossip (xdevs-network)
+//! enabled = true
+//! listen = "/ip4/0.0.0.0/tcp/30334"
+//! bootnodes = []
+//! max_peers = 50
 //!
 //! [rpc]
 //! http = "127.0.0.1:8545"
@@ -30,9 +59,13 @@
 //! level = "info"
 //! format = "text"   # text | json
 //! ```
+//!
+//! The run mode follows from the genesis and these sections, see [`NodeConfig::mode`].
 
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
+use xdevs_consensus::{ConsensusTimeouts, P2pConfig};
+use xdevs_network::NetworkConfig;
 use xdevs_primitives::Address;
 
 /// Full node configuration.
@@ -43,6 +76,14 @@ pub struct NodeConfig {
     pub chain: ChainSection,
     /// `[dev]` single-node block producer.
     pub dev: DevSection,
+    /// `[validator]`: sign as a consensus validator (Phase 2).
+    pub validator: ValidatorSection,
+    /// `[consensus]`: block time and round timeouts (Phase 2).
+    pub consensus: ConsensusTimeouts,
+    /// `[p2p]`: Malachite consensus network (Phase 2).
+    pub p2p: P2pConfig,
+    /// `[gossip]`: tx gossip network (Phase 2).
+    pub gossip: GossipSection,
     /// `[rpc]`.
     pub rpc: RpcSection,
     /// `[mempool]`.
@@ -65,6 +106,61 @@ impl NodeConfig {
     /// Serialize to TOML.
     pub fn to_toml_string(&self) -> anyhow::Result<String> {
         Ok(toml::to_string_pretty(self)?)
+    }
+
+    /// How the node runs, given whether the genesis has a validator set:
+    ///
+    /// * genesis **with** validators: [`NodeMode::Validator`] if `[validator] enabled`,
+    ///   else [`NodeMode::FullNode`]. `[dev]` is ignored: such a chain only grows through
+    ///   consensus, so a node can never extend it on its own.
+    /// * genesis **without** validators: [`NodeMode::Dev`] if `[dev] enabled`, else
+    ///   [`NodeMode::RpcOnly`]; `[validator] enabled` is an error.
+    pub fn mode(&self, genesis_has_validators: bool) -> anyhow::Result<NodeMode> {
+        Ok(match (genesis_has_validators, self.validator.enabled) {
+            (true, true) => NodeMode::Validator,
+            (true, false) => NodeMode::FullNode,
+            (false, true) => anyhow::bail!(
+                "[validator] enabled = true, but the genesis has no validators \
+                 (use a network genesis, or [dev] mode for a single-node chain)"
+            ),
+            (false, false) if self.dev.enabled => NodeMode::Dev,
+            (false, false) => NodeMode::RpcOnly,
+        })
+    }
+
+    /// Sanity checks of the sections (run by `Node::new`).
+    pub fn validate(&self) -> anyhow::Result<()> {
+        self.chain.state_history_blocks()?;
+        self.consensus
+            .validate()
+            .map_err(|e| anyhow::anyhow!("invalid [consensus] section: {e}"))?;
+        if self.gossip.enabled {
+            self.gossip
+                .network
+                .validate()
+                .map_err(|e| anyhow::anyhow!("invalid [gossip] section: {e}"))?;
+        }
+        Ok(())
+    }
+}
+
+/// How a node runs (see [`NodeConfig::mode`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NodeMode {
+    /// Phase-1 single-node dev chain: a local producer seals a block every tick.
+    Dev,
+    /// Consensus validator: proposes, re-executes and votes (needs a consensus key).
+    Validator,
+    /// Consensus follower: validates and commits decided blocks, never signs.
+    FullNode,
+    /// No block production at all: serves the stored chain over RPC.
+    RpcOnly,
+}
+
+impl NodeMode {
+    /// `true` for the modes that run the consensus engine.
+    pub const fn runs_consensus(self) -> bool {
+        matches!(self, Self::Validator | Self::FullNode)
     }
 }
 
@@ -135,6 +231,59 @@ impl Default for DevSection {
             enabled: true,
             block_time_ms: None,
             fee_recipient: Address::ZERO,
+        }
+    }
+}
+
+/// `[validator]` section (research doc §6.10).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ValidatorSection {
+    /// Sign proposals and votes with the consensus key.
+    pub enabled: bool,
+    /// Ed25519 consensus key: a keystore v3 JSON around the 32-byte seed, or the seed as
+    /// hex text.
+    pub key_file: Option<PathBuf>,
+    /// File holding the keystore password (else `$XDEVS_KEY_PASSWORD`, else empty).
+    pub password_file: Option<PathBuf>,
+    /// Beneficiary of proposed blocks (receives priority fees).
+    pub fee_recipient: Address,
+    /// Max seconds a live proposal's timestamp may run ahead of the local clock
+    /// (research doc §6.3 rule 3; not applied to synced blocks).
+    pub max_timestamp_drift_secs: u64,
+}
+
+/// Default of [`ValidatorSection::max_timestamp_drift_secs`].
+pub const DEFAULT_MAX_TIMESTAMP_DRIFT_SECS: u64 = 2;
+
+impl Default for ValidatorSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            key_file: None,
+            password_file: None,
+            fee_recipient: Address::ZERO,
+            max_timestamp_drift_secs: DEFAULT_MAX_TIMESTAMP_DRIFT_SECS,
+        }
+    }
+}
+
+/// `[gossip]` section: the tx-gossip swarm ([`NetworkConfig`] plus an on/off switch).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GossipSection {
+    /// Run tx gossip in validator / full-node mode (ignored in the other modes).
+    pub enabled: bool,
+    /// Swarm settings (`listen`, `bootnodes`, `max_peers`, ...).
+    #[serde(flatten)]
+    pub network: NetworkConfig,
+}
+
+impl Default for GossipSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            network: NetworkConfig::default(),
         }
     }
 }
@@ -278,14 +427,85 @@ mod tests {
     }
 
     #[test]
-    fn plan_sections_outside_phase1_are_ignored() {
+    fn unknown_sections_and_keys_are_ignored() {
         let s = "[p2p]
 max_peers = 50
-[validator]
-enabled = true
 [metrics]
 listen = \"x\"";
         assert_eq!(NodeConfig::from_toml_str(s).unwrap(), NodeConfig::default());
+    }
+
+    #[test]
+    fn phase2_sections_parse_and_roundtrip() {
+        let s = r#"
+            [validator]
+            enabled = true
+            key_file = "keys/consensus.json"
+            fee_recipient = "0x00000000000000000000000000000000000000bb"
+
+            [consensus]
+            block_time_ms = 1000
+
+            [p2p]
+            listen = "/ip4/127.0.0.1/tcp/40000"
+            persistent_peers = ["/ip4/127.0.0.1/tcp/40001"]
+
+            [gossip]
+            enabled = false
+            listen = "/ip4/127.0.0.1/tcp/40010"
+            max_peers = 7
+        "#;
+        let c = NodeConfig::from_toml_str(s).unwrap();
+        assert!(c.validator.enabled);
+        assert_eq!(
+            c.validator.key_file,
+            Some(PathBuf::from("keys/consensus.json"))
+        );
+        assert_eq!(c.validator.max_timestamp_drift_secs, 2);
+        assert_eq!(c.consensus.block_time_ms, 1000);
+        assert_eq!(c.consensus.timeout_propose_ms, 1000);
+        assert_eq!(c.p2p.persistent_peers.len(), 1);
+        assert!(!c.gossip.enabled);
+        assert_eq!(c.gossip.network.listen, "/ip4/127.0.0.1/tcp/40010");
+        assert_eq!(c.gossip.network.max_peers, 7);
+        assert_eq!(c.gossip.network.channel_capacity, 1024);
+        c.validate().unwrap();
+        let again = NodeConfig::from_toml_str(&c.to_toml_string().unwrap()).unwrap();
+        assert_eq!(again, c);
+
+        let d = NodeConfig::default();
+        assert!(d.gossip.enabled && !d.validator.enabled);
+        d.validate().unwrap();
+    }
+
+    #[test]
+    fn invalid_phase2_sections_are_rejected() {
+        let c = NodeConfig::from_toml_str("[consensus]\ntimeout_prevote_ms = 0").unwrap();
+        assert!(c.validate().is_err());
+        let c = NodeConfig::from_toml_str("[gossip]\nlisten = \"not an addr\"").unwrap();
+        assert!(c.validate().is_err());
+        // A disabled gossip section is not checked.
+        let c = NodeConfig::from_toml_str("[gossip]\nenabled = false\nlisten = \"x\"").unwrap();
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn run_mode_follows_genesis_and_sections() {
+        let mut c = NodeConfig::default();
+        assert_eq!(c.mode(false).unwrap(), NodeMode::Dev);
+        assert_eq!(
+            c.mode(true).unwrap(),
+            NodeMode::FullNode,
+            "[dev] is ignored"
+        );
+        c.dev.enabled = false;
+        assert_eq!(c.mode(false).unwrap(), NodeMode::RpcOnly);
+        assert_eq!(c.mode(true).unwrap(), NodeMode::FullNode);
+        c.validator.enabled = true;
+        assert_eq!(c.mode(true).unwrap(), NodeMode::Validator);
+        assert!(c.mode(false).is_err());
+        assert!(NodeMode::Validator.runs_consensus() && NodeMode::FullNode.runs_consensus());
+        assert!(!NodeMode::Dev.runs_consensus() && !NodeMode::RpcOnly.runs_consensus());
     }
 
     #[test]

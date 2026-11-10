@@ -14,6 +14,10 @@
 //! [`Genesis::dev`] is the built-in local dev genesis: the 10 well-known Anvil / Hardhat
 //! accounts ([`DEV_ACCOUNTS`]) with 10,000 tXDS each plus the treasury. The same chain is
 //! described by `deploy/configs/dev-genesis.json`.
+//!
+//! Phase 2: `validators` is typed ([`GenesisValidator`], research doc §6.9). The static
+//! validator set is not part of the header, so it does not change the genesis hash;
+//! [`Genesis::validator_set`] returns it validated and in canonical order.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -113,6 +117,66 @@ fn is_zero(v: &u64) -> bool {
     *v == 0
 }
 
+/// One genesis validator (research doc §6.9, plan §21.1):
+///
+/// ```json
+/// { "name": "val1", "consensusKey": "ed25519:0x<32-byte hex>", "power": 1,
+///   "p2p": "/dns4/val1/tcp/30333/p2p/12D3Koo..." }
+/// ```
+///
+/// Other fields (`operator`, staking fields) are kept verbatim in [`Self::extra`] and
+/// ignored until Phase 3.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenesisValidator {
+    /// Human-readable name (logs, `testnet init`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Ed25519 consensus public key, written `"ed25519:0x<64 hex chars>"`.
+    #[serde(with = "consensus_key_serde")]
+    pub consensus_key: [u8; 32],
+    /// Voting power (≥ 1).
+    pub power: u64,
+    /// Consensus p2p multiaddr of the validator (informational in Phase 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p2p: Option<String>,
+    /// Unknown fields, preserved for Phase 3 (`operator`, stake…).
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// Prefix of a serialized consensus key.
+pub const CONSENSUS_KEY_PREFIX: &str = "ed25519:";
+
+/// Format a consensus key as `"ed25519:0x<hex>"`.
+pub fn format_consensus_key(key: &[u8; 32]) -> String {
+    format!(
+        "{CONSENSUS_KEY_PREFIX}0x{}",
+        xdevs_primitives::hex::encode(key)
+    )
+}
+
+/// Parse `"ed25519:0x<64 hex chars>"` (the `0x` is optional).
+pub fn parse_consensus_key(s: &str) -> Result<[u8; 32], GenesisError> {
+    let invalid = || GenesisError::Invalid(format!("invalid consensusKey {s:?}"));
+    let hex = s.strip_prefix(CONSENSUS_KEY_PREFIX).ok_or_else(invalid)?;
+    let bytes = xdevs_primitives::hex::decode(hex).map_err(|_| invalid())?;
+    bytes.try_into().map_err(|_| invalid())
+}
+
+mod consensus_key_serde {
+    use serde::{de::Error, Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(key: &[u8; 32], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&super::format_consensus_key(key))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; 32], D::Error> {
+        let s = String::deserialize(d)?;
+        super::parse_consensus_key(&s).map_err(D::Error::custom)
+    }
+}
+
 const fn d_gas_limit() -> u64 {
     DEFAULT_BLOCK_GAS_LIMIT
 }
@@ -136,9 +200,9 @@ pub struct Genesis {
     /// Initial accounts (deterministic order).
     #[serde(default)]
     pub alloc: BTreeMap<Address, GenesisAccount>,
-    /// Phase-2+ validator entries; kept verbatim, unused in Phase 1.
+    /// Static validator set (Phase 2). Empty for the single-node dev chain.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub validators: Vec<serde_json::Value>,
+    pub validators: Vec<GenesisValidator>,
 }
 
 impl Genesis {
@@ -176,7 +240,34 @@ impl Genesis {
         if bf.initial < bf.minimum {
             return invalid("baseFee.initial must be >= baseFee.minimum");
         }
+        let mut keys = std::collections::BTreeSet::new();
+        let mut total: u64 = 0;
+        for v in &self.validators {
+            if v.power == 0 {
+                return invalid("validator power must be >= 1");
+            }
+            if !keys.insert(v.consensus_key) {
+                return invalid("duplicate validator consensusKey");
+            }
+            total = match total.checked_add(v.power) {
+                Some(t) => t,
+                None => return invalid("total validator power overflows u64"),
+            };
+        }
         Ok(())
+    }
+
+    /// The static validator set (Phase 2: active at every height), validated and sorted
+    /// by consensus key (canonical order). Errors if `validators` is empty or invalid.
+    /// The node converts it into an `xdevs_consensus::ValidatorSet`.
+    pub fn validator_set(&self) -> Result<Vec<GenesisValidator>, GenesisError> {
+        self.validate()?;
+        if self.validators.is_empty() {
+            return Err(GenesisError::Invalid("genesis has no validators".into()));
+        }
+        let mut set = self.validators.clone();
+        set.sort_by_key(|v| v.consensus_key);
+        Ok(set)
     }
 
     /// Effective chain config (`block_gas_limit = gas_limit`).
@@ -304,8 +395,66 @@ mod tests {
         "0x00000000000000000000000000000000000000aa": { "balance": "300000000000000000000000000" },
         "0x0000000000000000000000000000000000001002": { "code": "0x6000", "storage": { "0x0000000000000000000000000000000000000000000000000000000000000001": "0x2a" }, "balance": "0x10", "nonce": "0x1" }
       },
-      "validators": [ { "operator": "0x01", "power": 1 } ]
+      "validators": [
+        { "operator": "0x01", "power": 2, "p2p": "/dns4/val2/tcp/30333",
+          "consensusKey": "ed25519:0x0202020202020202020202020202020202020202020202020202020202020202" },
+        { "name": "val1", "power": 1,
+          "consensusKey": "ed25519:0x0101010101010101010101010101010101010101010101010101010101010101" }
+      ]
     }"#;
+
+    #[test]
+    fn typed_validators() {
+        let g = Genesis::from_json_str(SAMPLE).unwrap();
+        assert_eq!(g.validators.len(), 2);
+        let v = &g.validators[0];
+        assert_eq!(v.consensus_key, [2u8; 32]);
+        assert_eq!(v.power, 2);
+        assert_eq!(v.p2p.as_deref(), Some("/dns4/val2/tcp/30333"));
+        assert_eq!(v.extra["operator"], "0x01");
+        assert_eq!(g.validators[1].name.as_deref(), Some("val1"));
+        // Canonical order: sorted by key.
+        let set = g.validator_set().unwrap();
+        assert_eq!(set[0].consensus_key, [1u8; 32]);
+        assert_eq!(set[1].consensus_key, [2u8; 32]);
+        // The set is not in the header: the genesis hash ignores it.
+        let mut no_vals = g.clone();
+        no_vals.validators.clear();
+        assert_eq!(genesis_block(&g).0.hash(), genesis_block(&no_vals).0.hash());
+        assert!(no_vals.validator_set().is_err());
+        assert!(Genesis::dev(DEV_CHAIN_ID).validator_set().is_err());
+    }
+
+    #[test]
+    fn consensus_key_format() {
+        let k = [0xabu8; 32];
+        let s = format_consensus_key(&k);
+        assert!(s.starts_with("ed25519:0xabab"));
+        assert_eq!(parse_consensus_key(&s).unwrap(), k);
+        assert_eq!(parse_consensus_key(&s.replace("0x", "")).unwrap(), k);
+        for bad in ["0xabab", "ed25519:0x12", "secp256k1:0xab", "ed25519:zz"] {
+            assert!(parse_consensus_key(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_validators() {
+        let g = Genesis::from_json_str(SAMPLE).unwrap();
+        let mut zero = g.clone();
+        zero.validators[0].power = 0;
+        assert!(zero.validate().is_err());
+        let mut dup = g.clone();
+        dup.validators[1].consensus_key = dup.validators[0].consensus_key;
+        assert!(dup.validate().is_err());
+        let mut overflow = g.clone();
+        overflow.validators[0].power = u64::MAX;
+        assert!(overflow.validate().is_err());
+        let missing_key = SAMPLE.replace(
+            r#""consensusKey": "ed25519:0x0101"#,
+            r#""x": "ed25519:0x0101"#,
+        );
+        assert!(Genesis::from_json_str(&missing_key).is_err());
+    }
 
     #[test]
     fn parses_plan_shape() {

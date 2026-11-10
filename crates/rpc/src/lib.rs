@@ -52,6 +52,34 @@ pub mod types {
         /// Account), `null` if the account is not delegated.
         pub delegated_to: Option<xdevs_primitives::Address>,
     }
+
+    /// Result of `xdevs_getCommitCertificate(block)` (Phase 2, research doc §6.5): the
+    /// precommit signatures that finalized the block, plus the canonical RLP (`raw`) a
+    /// client can verify against the validator set.
+    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CommitCertificateInfo {
+        /// Block number.
+        pub height: xdevs_primitives::reexports::alloy_primitives::U64,
+        /// Consensus round of the decision.
+        pub round: xdevs_primitives::reexports::alloy_primitives::U64,
+        /// Block hash the validators precommitted.
+        pub block_hash: xdevs_primitives::B256,
+        /// Signatures, sorted by validator address.
+        pub signatures: Vec<CommitSigInfo>,
+        /// Canonical RLP of the certificate (as stored and served by block sync).
+        pub raw: xdevs_primitives::Bytes,
+    }
+
+    /// One signature of a [`CommitCertificateInfo`].
+    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CommitSigInfo {
+        /// Validator address (20 bytes, `sha256(ed25519 pubkey)[..20]`).
+        pub validator: xdevs_primitives::Bytes,
+        /// Ed25519 signature (64 bytes).
+        pub signature: xdevs_primitives::Bytes,
+    }
 }
 use types::*;
 
@@ -157,6 +185,23 @@ pub trait RpcBackend: Send + Sync + 'static {
     /// The default reports the method as unsupported.
     async fn eoa_lock(&self, _address: Address, _block: BlockId) -> BackendResult<EoaLockInfo> {
         Err(RpcBackendError::Unsupported("xdevs_getEoaLock".into()))
+    }
+
+    /// `net_peerCount`: connected p2p peers (Phase 2). The default reports 0.
+    async fn peer_count(&self) -> BackendResult<u64> {
+        Ok(0)
+    }
+
+    /// `xdevs_getCommitCertificate(block)`: the commit certificate of `block` (`None` for
+    /// an unknown block or one without a certificate, e.g. genesis or dev-mode blocks).
+    /// The default reports the method as unsupported.
+    async fn commit_certificate(
+        &self,
+        _block: BlockId,
+    ) -> BackendResult<Option<CommitCertificateInfo>> {
+        Err(RpcBackendError::Unsupported(
+            "xdevs_getCommitCertificate".into(),
+        ))
     }
 }
 

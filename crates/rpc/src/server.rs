@@ -85,6 +85,7 @@ pub fn build_module(
     method!("eth_getBlockReceipts", eth_get_block_receipts);
     method!("eth_getLogs", eth_get_logs);
     method!("xdevs_getEoaLock", xdevs_get_eoa_lock);
+    method!("xdevs_getCommitCertificate", xdevs_get_commit_certificate);
     Ok(m)
 }
 
@@ -231,8 +232,8 @@ async fn net_listening(_: Params<'static>, _: Arc<RpcContext>) -> RpcResult<bool
     Ok(true)
 }
 
-async fn net_peer_count(_: Params<'static>, _: Arc<RpcContext>) -> RpcResult<U64> {
-    Ok(U64::ZERO)
+async fn net_peer_count(_: Params<'static>, ctx: Arc<RpcContext>) -> RpcResult<U64> {
+    Ok(U64::from(ctx.backend.peer_count().await?))
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +482,15 @@ async fn xdevs_get_eoa_lock(
     let address: Address = seq.next()?;
     let block = normalize_block_id(seq.optional_next()?);
     Ok(ctx.backend.eoa_lock(address, block).await?)
+}
+
+async fn xdevs_get_commit_certificate(
+    params: Params<'static>,
+    ctx: Arc<RpcContext>,
+) -> RpcResult<Option<CommitCertificateInfo>> {
+    let mut seq = params.sequence();
+    let block = normalize_block_id(seq.optional_next()?);
+    Ok(ctx.backend.commit_certificate(block).await?)
 }
 
 #[cfg(test)]

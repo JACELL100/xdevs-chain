@@ -1,0 +1,18 @@
+[package]
+name = "xdevs-metrics"
+description = "xDEVS Chain Prometheus metrics (prometheus-client 0.23, the registry type Malachite uses)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+prometheus-client.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

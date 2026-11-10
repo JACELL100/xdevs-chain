@@ -7,6 +7,8 @@
 //!   use them through [`DbReadExt`] and [`WriteBatch::put`].
 //! * [`MemDb`] — complete in-memory implementation for tests.
 //! * [`RedbDatabase`] — the on-disk `redb` backend used by the node.
+//! * [`put_commit_certificate`] / [`commit_certificate`] — the Phase-2 commit
+//!   certificate helpers (table [`tables::CommitCertificates`]).
 //!
 //! Keys are encoded so that byte order equals logical order (big-endian integers),
 //! which makes range walks (`walk`) iterate blocks/slots in ascending order.
@@ -15,6 +17,7 @@
 #![warn(missing_docs)]
 
 mod batch;
+mod certs;
 mod codec;
 mod error;
 mod mem;
@@ -22,6 +25,10 @@ mod redb_db;
 pub mod tables;
 
 pub use batch::{WriteBatch, WriteOp};
+pub use certs::{
+    commit_certificate, commit_certificates_range, delete_commit_certificate,
+    head_commit_certificate, put_commit_certificate,
+};
 pub use codec::{Decode, Encode};
 pub use error::DbError;
 pub use mem::MemDb;
@@ -131,6 +138,10 @@ pub mod meta_keys {
     /// big-endian): the state after block `start - 1` and after every later block can
     /// be read. Absent = no history (only the latest state).
     pub const STATE_HISTORY_START: &str = "state_history_start";
+    /// Canonical encoding of the static genesis validator set (Phase 2, research doc
+    /// §6.9), written on first start and compared on every restart so a node started
+    /// with a different set refuses to run. See `xdevs_genesis::ensure_validator_set`.
+    pub const VALIDATORS: &str = "validators";
 }
 
 /// Current on-disk schema version. Bump when a table encoding changes.
