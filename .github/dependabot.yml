@@ -1,16 +1,42 @@
 version: 2
+# Major upgrades are done by hand: the Rust crypto/EVM stack (alloy, revm, k256, ed25519-dalek,
+# rand, ...) and Malachite/libp2p must move together, and for 0.x crates a "minor" bump is a
+# breaking change. Dependabot only proposes safe, grouped updates.
 updates:
   - package-ecosystem: cargo
     directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # Pinned with `=` and upgraded together by hand (Malachite pins its libp2p).
+      - dependency-name: "arc-malachitebft-*"
+      - dependency-name: "libp2p*"
+      # Patch updates only (0.x minor bumps break the API).
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
-      alloy:
-        patterns: ["alloy-*"]
-      revm:
-        patterns: ["revm*"]
+      rust-patches:
+        patterns: ["*"]
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directories: ["/sdk/ts", "/apps/faucet", "/apps/docs"]
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      npm:
+        patterns: ["*"]
