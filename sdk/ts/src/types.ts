@@ -211,24 +211,30 @@ export type Validator = Omit<RpcValidator, 'votingPower' | 'totalStake'> & {
 }
 
 // =====================================================================================================
-// xdevs_getCommit (§8.1)
+// xdevs_getCommitCertificate (§8.1)
 // =====================================================================================================
 
 export type CommitSignature = {
-  /** Index into the validator set active at `height`. */
-  validatorIndex: number
+  /** Validator address (20 bytes, `sha256(ed25519 pubkey)[..20]`). */
+  validator: Hex
   /** Ed25519 signature over the precommit (64 bytes). BLS aggregate later. */
   signature: Hex
 }
 
+/** Shape served by the node (research doc §6.5): signatures sorted by validator address. */
 export type RpcCommitCertificate = {
   height: Quantity
-  round: number
+  round: Quantity
   blockHash: Hash
   signatures: CommitSignature[]
+  /** Canonical RLP of the certificate, verifiable against the validator set. */
+  raw: Hex
 }
 
-export type CommitCertificate = Omit<RpcCommitCertificate, 'height'> & { height: bigint }
+export type CommitCertificate = Omit<RpcCommitCertificate, 'height' | 'round'> & {
+  height: bigint
+  round: number
+}
 
 // =====================================================================================================
 // xdevs_epochInfo (§11.5)
@@ -297,7 +303,7 @@ export type XdevsRpcSchema = [
     ReturnType: RpcValidator[]
   },
   {
-    Method: 'xdevs_getCommit'
+    Method: 'xdevs_getCommitCertificate'
     Parameters: [height: Quantity]
     ReturnType: RpcCommitCertificate | null
   },

@@ -15,7 +15,7 @@ export type XdevsMethodInfo = {
  * Not wrapped yet: `xdevs_subscribe("vaultEvents")` (Phase 4, WebSocket only).
  */
 export const XDEVS_RPC_METHODS = {
-  xdevs_getCommit: { phase: 2, spec: '§8.1', description: 'Commit certificate for a height' },
+  xdevs_getCommitCertificate: { phase: 2, spec: '§8.1', description: 'Commit certificate for a height' },
   xdevs_validators: { phase: 3, spec: '§11', description: 'Active validator set, power, uptime' },
   xdevs_epochInfo: { phase: 3, spec: '§11.5', description: 'Current epoch and next transition' },
   xdevs_simulateTransaction: { phase: 4, spec: '§16.4', description: 'Simulate a tx and return asset changes and warnings' },

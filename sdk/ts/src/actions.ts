@@ -206,16 +206,16 @@ export async function getValidators(client: AnyClient, args?: GetValidatorsParam
 }
 
 // -----------------------------------------------------------------------------------------------------
-// xdevs_getCommit — Phase 2 (§8.1)
+// xdevs_getCommitCertificate — Phase 2 (§8.1)
 // -----------------------------------------------------------------------------------------------------
 
 export type GetCommitParameters = { height: bigint | number }
 
 /** BFT commit certificate (2/3+ precommits) for `height`, or `null` if unknown. Node support: **Phase 2**. */
 export async function getCommit(client: AnyClient, { height }: GetCommitParameters): Promise<CommitCertificate | null> {
-  const res = await xdevsRequest(client, 'xdevs_getCommit', [numberToHex(height)])
+  const res = await xdevsRequest(client, 'xdevs_getCommitCertificate', [numberToHex(height)])
   if (!res) return null
-  return { ...res, height: toBigInt(res.height, 'height') }
+  return { ...res, height: toBigInt(res.height, 'height'), round: Number(toBigInt(res.round, 'round')) }
 }
 
 // -----------------------------------------------------------------------------------------------------
@@ -257,7 +257,7 @@ export type XdevsActions = {
   getLocalFee: (args: GetLocalFeeParameters) => Promise<LocalFee>
   /** `xdevs_validators` (Phase 3). */
   getValidators: (args?: GetValidatorsParameters) => Promise<Validator[]>
-  /** `xdevs_getCommit` (Phase 2). */
+  /** `xdevs_getCommitCertificate` (Phase 2). */
   getCommit: (args: GetCommitParameters) => Promise<CommitCertificate | null>
   /** `xdevs_epochInfo` (Phase 3). */
   getEpochInfo: (args?: GetEpochInfoParameters) => Promise<EpochInfo>

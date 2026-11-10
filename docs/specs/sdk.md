@@ -7,7 +7,7 @@ Package root: `sdk/ts/`. ESM, strict TypeScript, viem `^2.21` peer dependency. P
 
 | Export | id | Notes |
 |---|---|---|
-| `xdevsDevnet` | 7117 (`DEV_CHAIN_ID` in `xdevs-primitives`) | `http://127.0.0.1:8545`, `ws://127.0.0.1:8546` |
+| `xdevsDevnet` | 7117 (`DEV_CHAIN_ID` in `xdevs-primitives`) | `http://127.0.0.1:8545`, `ws://127.0.0.1:8545` |
 | `xdevsTestnet` | 717171 = `0xAF173` | **TODO placeholder** id (not registered on chainlist) and URLs under `testnet.xdevs.invalid` |
 
 Both: `nativeCurrency = { name: 'Testnet XDS', symbol: 'tXDS', decimals: 18 }`, `blockTime: 2000`,
@@ -31,7 +31,7 @@ Quantities are hex on the wire and `bigint` in parsed results.
 
 | Action | Method | Params on the wire | Result (parsed) | Phase |
 |---|---|---|---|---|
-| `getCommit({height})` | `xdevs_getCommit` | `[heightHex]` | `{height: bigint, round, blockHash, signatures: {validatorIndex, signature}[]} \| null` | 2 |
+| `getCommit({height})` | `xdevs_getCommitCertificate` | `[heightHex]` | `{height: bigint, round: number, blockHash, signatures: {validator, signature}[], raw} \| null` | 2 |
 | `getValidators()` | `xdevs_validators` | `[block]` | `{operator, consensusKey, status, votingPower: bigint, totalStake: bigint, commissionBps, uptimeBps}[]` | 3 |
 | `getEpochInfo()` | `xdevs_epochInfo` | `[block]` | `{epoch, epochLength, startBlock, nextTransitionBlock: bigint, validatorSetHash}` | 3 |
 | `simulateTransaction(tx)` | `xdevs_simulateTransaction` | `[RpcTransactionRequest, block]` | §16.4 shape, `gasUsed: bigint` | 4 |

@@ -6,7 +6,7 @@ xDEVS Chain is an EVM-equivalent, Proof-of-Stake Layer 1 written in Rust, built 
 
 The native coin is **XDS** (testnet: **tXDS**, 18 decimals; the smallest unit is the "dev"). Names end in `.xdevs` (XNS, the xDEVS Name Service).
 
-> **Status: Phase 1 working, public testnet not live yet.** A single-node dev chain runs locally and works with MetaMask and Foundry. The system and user-safety contracts, the TypeScript SDK and the faucet are built and tested. Multi-node BFT consensus (Phase 2) and the public devnet (Phase 3) are next. Testnet tokens have no value.
+> **Status: Phase 2 (multi-validator BFT network) working locally; public testnet not live yet.** Validators reach BFT consensus with Malachite, survive one validator going down, halt safely with two down and resume, and late nodes sync from genesis. Hardening from a security review (denial-of-service in proposal streaming and RPC) is in progress before any public network. The system and user-safety contracts, the TypeScript SDK and the faucet are built and tested. The public devnet (Phase 3) is next. Testnet tokens have no value.
 
 ## Why xDEVS Chain?
 
@@ -40,32 +40,38 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | Staking, governance, treasury, gas sponsorship (paymasters) | ✅ Contracts built and tested |
 | Guardian freeze (breaks owner-vs-thief recovery stalemates), EOA lock for existing MetaMask addresses | ✅ Contracts built and tested |
 | Node enforcement of the EOA lock ([XIP-0001](docs/specs/xip-0001-eoa-lock.md)) | ✅ Built and tested (dev node: block validity, block building, mempool, RPC) |
-| Multi-node BFT consensus with ~1–2 s finality, public testnet | 📋 Next (Phases 2–3) |
+| Multi-validator BFT consensus (Malachite), block sync, P2P tx gossip, incremental state root | ✅ Built and tested locally (Phase 2) |
+| DoS hardening of consensus streaming, gossip and RPC (from the Phase 2 security review) | 🛠 In progress |
+| Staking-driven validator set, public testnet | 📋 Next (Phase 3) |
 | Transaction simulation and recipient-check RPCs, reference wallet | 📋 Planned (Phase 4) |
 | Encrypted mempool, parallel execution, local fee markets | 📋 Planned (Phase 5) |
 | Light-client bridges | 📋 Planned (Phase 7) |
 
-### Phase 1 node status (what the Rust node does today)
+### Node status (what the Rust node does today)
 
 Works and is covered by tests (unit tests per crate plus in-process end-to-end tests driven only through JSON-RPC):
 
 - `xdevs run --dev`: one node that produces a block every `--block-time` (default 2 s) from its mempool, with EIP-1559 fees (base fee split 80% burned / 20% treasury, tip to `--fee-recipient`).
 - Legacy, EIP-2930, EIP-1559 and EIP-7702 (type 4, set-code) transactions; tx hashes, RLP, receipts root, tx root and state root computed the Ethereum way. Blob (type 3) transactions are rejected. Osaka precompiles, including P256VERIFY (secp256r1, EIP-7951) at `0x100` for passkeys.
 - [XIP-0001](docs/specs/xip-0001-eoa-lock.md) EOA lock, active from genesis on dev chains (`"xip0001Block": 0`): an EIP-7702 account delegated to the xDEVS Smart Account with lock word 1 may only send value-0 calls to itself (one per block, gas ≤ 2,000,000, max fee ≤ 2 × base fee), with word 2 nothing at all, and EIP-7702 authorizations signed by a locked key are skipped. Enforced when executing and building blocks and on mempool admission (re-checked on every new head); `eth_sendRawTransaction` / `eth_estimateGas` return `-32003` with `data.reason` (`XIP0001_SEALED`, `XIP0001_NOT_SELF_CALL`, ...), and `xdevs_getEoaLock(address, block)` reports the lock state.
-- Storage in `redb` with one atomic write per block; restarts resume from the same head and state root.
+- Storage in `redb` with one atomic write per block; restarts resume from the same head and state root. The Ethereum state root is maintained incrementally over persisted trie nodes.
+- Multi-validator networks (Phase 2): Malachite BFT consensus with execute-before-vote, commit certificates (`xdevs_getCommitCertificate`), a double-sign guard, block sync for late joiners, libp2p transaction gossip, validator and full-node modes, and `xdevs-cli testnet init` to generate a local network. Tested: 1 of 4 validators down keeps going, 2 of 4 halts safely and resumes, no forks, restarted validators rejoin.
+- WebSocket subscriptions: `eth_subscribe` `newHeads`, `logs` and `newPendingTransactions`, with per-connection and global limits.
+- Prometheus `/metrics` (`[metrics] enabled = true`): block height, block time, finality latency, transactions, peers, mempool size.
 - JSON-RPC over HTTP (WebSocket transport on the same port): `eth_chainId`, `eth_blockNumber`, `eth_getBalance`, `eth_getTransactionCount`, `eth_getCode`, `eth_getStorageAt`, `eth_call`, `eth_estimateGas`, `eth_sendRawTransaction`, block / transaction / receipt lookups, `eth_getBlockReceipts`, `eth_getLogs`, `eth_gasPrice`, `eth_maxPriorityFeePerGas`, `eth_feeHistory`, `net_*`, `web3_*` and `xdevs_getEoaLock`.
 - State queries at past blocks: the node keeps reverse state diffs for the last 10,000 blocks (`[chain] pruning = "full"`; `"minimal"` keeps 128, `"archive"` keeps all, `state_history_blocks` sets any window), so `cast ... --block N`, `anvil --fork-url` and `forge script` can pin a block while new blocks keep coming. Older blocks return `-32000 historical state not available`.
 - Public-RPC limits from §19.3 of the plan: `eth_getLogs` at most 10,000 blocks per query and 10,000 results (the node stops collecting as soon as the cap is passed), `eth_call` gas cap 50M, batches of at most 50 requests, request/response size limits.
 
 Not done yet:
 
-- Multi-node consensus, peer-to-peer networking and state sync (Phase 2). Without `--dev` the node produces no blocks.
-- `eth_subscribe` (WebSocket subscriptions), filter methods (`eth_newFilter`, `eth_getFilterChanges`, ...), `eth_getProof`, and `debug_` / `trace_` / `txpool_` namespaces.
+- DoS hardening found by the Phase 2 security review: proposal-stream limits per publisher and height window, RPC work isolation from consensus, per-peer gossip rate limits (in progress).
+- Staking-contract-driven validator sets and slashing (Phase 3; Phase 2 uses a static validator set from genesis).
+- Filter methods (`eth_newFilter`, `eth_getFilterChanges`, ...), `eth_getProof`, and `debug_` / `trace_` / `txpool_` namespaces.
 - No pending block: the `pending` tag means `latest`, except that `eth_getTransactionCount` with `pending` counts pool transactions.
-- Block and receipt pruning (all blocks are kept), an incremental state root (the root is recomputed from the full flat state each block, so large states get slow), and JSON log output.
+- Block and receipt pruning (all blocks are kept) and JSON log output.
 - Dev block timestamps are whole seconds and at least parent + 1, so block times under 1 s run ahead of the wall clock.
 - Graceful shutdown on Ctrl-C is tested in-process; it has not been checked by hand with a console Ctrl-C on Windows.
-- XIP-0001 extras that depend on later phases: the `xdevs_simulateTransaction` warning (the method itself is Phase 4) and "do not gossip invalid transactions" (no gossip before Phase 2).
+- XIP-0001 extras that depend on later phases: the `xdevs_simulateTransaction` warning (the method itself is Phase 4).
 
 ### Honest trade-offs
 
@@ -141,7 +147,7 @@ cast block-number --rpc-url http://127.0.0.1:8545
 
 The dev genesis pre-funds the 10 well-known Anvil/Hardhat test accounts (mnemonic `test test test test test test test test test test test junk`) with 10,000 tXDS each. **These keys are public: never use them outside a local dev chain.**
 
-Current Phase 1 limits: state is readable for the last 10,000 blocks by default (older blocks return "historical state not available"), and WebSocket subscriptions (`eth_subscribe`) are not implemented yet. See [Phase 1 node status](#phase-1-node-status-what-the-rust-node-does-today).
+State is readable for the last 10,000 blocks by default (older blocks return "historical state not available"). See [Node status](#node-status-what-the-rust-node-does-today).
 
 ## Run a local 4-validator network
 

@@ -30,7 +30,7 @@ console.log(`${formatXds(balance)} tXDS`)
 
 | Chain | Export | Chain id | RPC |
 |---|---|---|---|
-| Local devnet | `xdevsDevnet` | 7117 | `http://127.0.0.1:8545`, `ws://127.0.0.1:8546` |
+| Local devnet | `xdevsDevnet` | 7117 | `http://127.0.0.1:8545`, `ws://127.0.0.1:8545` |
 | Public testnet | `xdevsTestnet` | 717171 (**placeholder, TODO**) | `https://rpc.testnet.xdevs.invalid` (**placeholder**) |
 
 Until the testnet is live, override its URLs:
@@ -104,7 +104,7 @@ await addXdevsChainToWallet(wallet, xdevsDevnet) // wallet_addEthereumChain (pla
 
 | Action | RPC method | Node phase |
 |---|---|---|
-| `getCommit({ height })` | `xdevs_getCommit` | 2 |
+| `getCommit({ height })` | `xdevs_getCommitCertificate` | 2 |
 | `getValidators()` | `xdevs_validators` | 3 |
 | `getEpochInfo()` | `xdevs_epochInfo` | 3 |
 | `simulateTransaction(tx)` | `xdevs_simulateTransaction` | 4 |

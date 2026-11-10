@@ -136,17 +136,19 @@ describe('xdevs_ actions', () => {
   it('getCommit', async () => {
     const cert = {
       height: '0x2a',
-      round: 0,
+      round: '0x1',
       blockHash: `0x${'11'.repeat(32)}`,
-      signatures: [{ validatorIndex: 0, signature: `0x${'22'.repeat(64)}` }],
+      signatures: [{ validator: `0x${'33'.repeat(20)}`, signature: `0x${'22'.repeat(64)}` }],
+      raw: '0xc0',
     }
     const { client, calls } = mockClient(({ params }) => ((params as string[])[0] === '0x2a' ? cert : null))
     const res = await client.getCommit({ height: 42n })
     assert.equal(res!.height, 42n)
+    assert.equal(res!.round, 1)
     assert.equal(res!.signatures.length, 1)
     assert.equal(await client.getCommit({ height: 7 }), null)
     assert.deepEqual(calls.map((c) => c.params), [['0x2a'], ['0x7']])
-    assert.ok(calls.every((c) => c.method === 'xdevs_getCommit'))
+    assert.ok(calls.every((c) => c.method === 'xdevs_getCommitCertificate'))
   })
 
   it('getEpochInfo', async () => {
@@ -184,7 +186,7 @@ describe('method-not-found handling', () => {
     xdevs_reverseName: (c: ReturnType<typeof mockClient>['client']) => c.reverseXnsName({ address: ALICE }),
     xdevs_localFee: (c: ReturnType<typeof mockClient>['client']) => c.getLocalFee({ contract: USDC }),
     xdevs_validators: (c: ReturnType<typeof mockClient>['client']) => c.getValidators(),
-    xdevs_getCommit: (c: ReturnType<typeof mockClient>['client']) => c.getCommit({ height: 1n }),
+    xdevs_getCommitCertificate: (c: ReturnType<typeof mockClient>['client']) => c.getCommit({ height: 1n }),
     xdevs_epochInfo: (c: ReturnType<typeof mockClient>['client']) => c.getEpochInfo(),
   } satisfies Record<keyof typeof XDEVS_RPC_METHODS, unknown>
 
@@ -210,7 +212,7 @@ describe('method-not-found handling', () => {
     assert.deepEqual(
       Object.fromEntries(Object.entries(XDEVS_RPC_METHODS).map(([m, i]) => [m, i.phase])),
       {
-        xdevs_getCommit: 2,
+        xdevs_getCommitCertificate: 2,
         xdevs_validators: 3,
         xdevs_epochInfo: 3,
         xdevs_simulateTransaction: 4,

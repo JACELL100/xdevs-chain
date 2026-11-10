@@ -19,7 +19,7 @@ describe('chains', () => {
     assert.equal(xdevsDevnet.name, 'xDEVS Chain Devnet')
     assert.deepEqual(xdevsDevnet.nativeCurrency, { name: 'Testnet XDS', symbol: 'tXDS', decimals: 18 })
     assert.deepEqual(xdevsDevnet.rpcUrls.default.http, ['http://127.0.0.1:8545'])
-    assert.deepEqual(xdevsDevnet.rpcUrls.default.webSocket, ['ws://127.0.0.1:8546'])
+    assert.deepEqual(xdevsDevnet.rpcUrls.default.webSocket, ['ws://127.0.0.1:8545'])
     assert.equal(xdevsDevnet.testnet, true)
     assert.equal(xdevsDevnet.blockExplorers, undefined)
   })
