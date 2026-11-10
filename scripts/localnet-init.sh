@@ -38,6 +38,7 @@ fi
 total=$((VALIDATORS + FULL_NODES))
 log "generating $VALIDATORS validators + $FULL_NODES full node(s), chain id $CHAIN_ID, block time $BLOCK_TIME"
 mkdir -p "$OUT"
+summary=$(mktemp)
 force=()
 if [[ -n $(ls -A "$OUT") ]]; then
   force=(--force)
@@ -50,7 +51,10 @@ xdevs-cli testnet init \
   --base-port "$BASE_PORT" \
   --block-time "$BLOCK_TIME" \
   --chain-id "$CHAIN_ID" \
-  "${force[@]}" >"$OUT/testnet-summary.txt"
+  "${force[@]}" >"$summary"
+# Written outside $OUT first: redirecting straight into $OUT would create the file before
+# xdevs-cli runs, and `testnet init` refuses a non-empty directory.
+mv "$summary" "$OUT/testnet-summary.txt"
 
 # Placeholder host -> service name of the node that owns the port.
 sed_args=()
