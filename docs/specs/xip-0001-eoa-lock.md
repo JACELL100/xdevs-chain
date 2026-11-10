@@ -399,10 +399,11 @@ state.
    checking for code / ERC-1271 (some EIP-2612 `permit(v,r,s)` and EIP-3009 implementations) can still be authorized
    by the EOA key off-chain. The protocol cannot see those. Contracts using OpenZeppelin `SignatureChecker` (code
    present ⇒ ERC-1271), Permit2 and USDC-style checks are safe, because the account's ERC-1271 refuses signatures
-   that bypass the vault. **Known instance in this repo:** `XDRC20.permit(owner, spender, value, deadline, v, r, s)`
-   (`contracts/src/periphery/token/XDRC20.sol`, EIP-2612 path, `ECDSA.recover` only). Its bytes-signature variant
-   uses `SignatureChecker` and is safe. Recommendation for the periphery owners: route the `(v,r,s)` path through
-   `SignatureChecker` when `owner.code.length != 0`.
+   that bypass the vault. The former instance in this repo, `XDRC20.permit(owner, spender, value, deadline, v, r, s)`
+   (`contracts/src/periphery/token/XDRC20.sol`), now goes through `SignatureChecker` as well: owners with code are
+   checked by ERC-1271 only (tests: `test_eip2612PermitEoaKeyCannotBypassLocked7702Account` in `XDRC20.t.sol`,
+   `test_permitEoaKeyCannotBypassLocked7702Account` in `Permit2Expiring.t.sol`). Third-party tokens on the chain
+   can still have the raw-`ecrecover` pattern.
 4. **SEALED after a freeze expires by itself** stays SEALED until anyone calls `refreshEoaLock()`, because an expiry
    writes no storage. A legitimate EOA-key owner can trigger it through another signer, a UserOp, or any third party.
    It is never a loss of access (UserOps and signers still work).

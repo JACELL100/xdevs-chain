@@ -18,7 +18,7 @@ Build / test: `cd contracts && FOUNDRY_PROFILE=system forge test` (the `system` 
 | Init order | 1) set balances (Staking = Σ genesis stakes, Treasury = 200M tXDS) 2) `Staking.initialize` 3) `Governance.initialize` 4) `Treasury.initialize` 5) `FeeConfig.initialize`. WXDS needs code only. |
 | Upgrades | **Not proxies.** Upgrades are done by replacing the code at the predeploy address at a fork height (§24.6), keeping the storage layout append-only. This deviates from the "Upgradeable only via Governance + timelock" sentence of §18: code changes are a hard fork (validators must upgrade binaries), while **every parameter change** is still gated by Governance (vote + timelock). |
 | Reentrancy | Native value leaves contracts only through pull functions (`withdrawUnbonded`, `claimRewards`, `Treasury.grant`, `WXDS.withdraw`, `Governance.execute`) using checks-effects-interactions; Staking/Treasury/Governance also use OpenZeppelin `ReentrancyGuardTransient` (EIP-1153 transient storage, so it adds **no storage slot** and needs no initialization). |
-| Solidity | `^0.8.24`, compiled with solc 0.8.38, `evm_version = prague`, optimizer 200 runs, `bytecode_hash = none`, `cbor_metadata = false` (deterministic runtime bytecode). |
+| Solidity | `^0.8.24`, compiled with solc 0.8.38, `evm_version = osaka` (the node's revm spec; runtime bytecode of every contract is byte-identical to a prague build), optimizer 200 runs, `bytecode_hash = none`, `cbor_metadata = false` (deterministic runtime bytecode). |
 
 ---
 
@@ -377,13 +377,18 @@ reached: zero-share delegation, zero-amount full undelegation, removal of a vali
 |---|---|
 | `test/system/Staking.t.sol` | every Staking function and revert path, genesis init, rewards math, commission rules, jail/unjail, tombstone, set refill, signing-set switch after a set change, raw node slots 0–4 |
 | `test/system/StakingFuzz.t.sol` | onlySystem for any caller, delegate/undelegate round trip, reward conservation, top-N sorted + complete, commission bounds, slash amounts |
-| `test/system/StakingInvariant.t.sol` (+ `handlers/StakingHandler.sol`) | accounting identity; total staked == Σ validator stakes and total unbonding == Σ pools; Σ shares == totalShares; rewards solvent (Σ pending ≤ reserved); votes == Σ principal; tombstoned never active/candidate; active set ≤ maxValidators, strictly sorted, statuses/hash consistent; set never emptied while someone is eligible; only SYSTEM_ADDRESS can call system functions |
+| `test/system/StakingInvariant.t.sol` (+ `handlers/StakingHandler.sol`) | accounting identity; total staked == Σ validator stakes and total unbonding == Σ pools; Σ shares == totalShares; rewards solvent (Σ pending ≤ reserved); votes == Σ principal; tombstoned never active/candidate; active set ≤ maxValidators, strictly sorted, statuses/hash consistent; set never emptied while someone is eligible; only SYSTEM_ADDRESS can call system functions; after every run (`afterInvariant`) a settlement block runs `recordParticipation` + `onEpoch`, all unbonding matures and every party withdraws and claims: no unexpected revert, unbonding pools and claimable rewards/commission go to exactly 0, identity and backing still hold |
 | `test/system/Governance.t.sol` | full lifecycle, quorum/threshold, snapshot semantics, timelock, grace/expiry, failing calls, cancel, pause/cooldown, self-admin, end-to-end FeeConfig change / Treasury grant / Staking params |
 | `test/system/GovernanceInvariant.t.sol` (+ `handlers/GovernanceHandler.sol`) | an action never runs before `eta`, never twice, never without queue; votes ≤ snapshot total power |
 | `test/system/TreasuryFeeConfigWXDS.t.sol` | Treasury (incl. balance credit without call), FeeConfig (incl. raw slot layout pin), WXDS (incl. reentrancy) |
 
 The invariant suites were also run with 512 runs × depth 100 (and fuzz at 2,000 runs): all pass. That run found and
-led to fixing a 1-wei reward-rounding overshoot (see §1.4).
+led to fixing a 1-wei reward-rounding overshoot (see §1.4). Later the Staking suite failed on many `--fuzz-seed`
+values with `invariant_accounting: assertion failed: 0 <= 0`. That was a test bug, not an accounting bug: the old
+`afterInvariant` (which Foundry runs after each run, and reports under the first invariant's name) asserted that the
+random sequence had called `participate` or `epoch`, which ~17% of 64-run campaigns violate by chance; Foundry then
+persisted the failing sequence in `cache/invariant/failures/` and replayed it on every later seed. It was replaced by
+the settlement check above; the suite passes on 28 seeds and at 256 runs × depth 100.
 
 ## 7. Known limitations / open items
 

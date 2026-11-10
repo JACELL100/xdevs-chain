@@ -16,7 +16,9 @@ import {IPermit2Expiring} from "./IPermit2Expiring.sol";
 /// @dev Genesis predeploy: no constructor, no immutables, no storage needing initialization. The EIP-712
 ///      domain separator is recomputed from `block.chainid` and `address(this)` on every use.
 ///      Signatures are checked with OZ SignatureChecker: ECDSA for EOAs, ERC-1271 for smart accounts
-///      (the default account type on xDEVS Chain).
+///      (the default account type on xDEVS Chain). OZ >= 5.0 picks ONE path by `owner.code.length`, with no
+///      ECDSA fallback for owners with code, so the EOA key of an EIP-7702-delegated account (code = 0xef0100
+///      designator) cannot sign permits behind the account's EOA lock / Guardian Vault.
 contract Permit2Expiring is IPermit2Expiring {
     using SafeERC20 for IERC20;
 

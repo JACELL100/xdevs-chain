@@ -4,7 +4,6 @@ pragma solidity ^0.8.24;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {Nonces} from "@openzeppelin/contracts/utils/Nonces.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
@@ -136,8 +135,13 @@ contract XDRC20 is ERC20, EIP712, Nonces, IERC20Permit, IXDRC20, IERC165 {
 
     // ------------------------------------------------------------------ permits
 
-    /// @notice Standard EIP-2612 permit (ECDSA). The resulting allowance expires after
-    ///         `defaultApprovalDuration`, exactly like the legacy `approve`.
+    /// @notice Standard EIP-2612 permit. The resulting allowance expires after `defaultApprovalDuration`,
+    ///         exactly like the legacy `approve`.
+    /// @dev `(v, r, s)` is checked with OZ {SignatureChecker} (OZ >= 5.0 semantics): an owner WITHOUT code is
+    ///      verified by ECDSA; an owner WITH code — a contract wallet or an EIP-7702-delegated EOA, whose code is
+    ///      the 0xef0100 designator — is verified ONLY through its ERC-1271 `isValidSignature` (with
+    ///      `abi.encodePacked(r, s, v)`), never by ECDSA. A plain ECDSA check would let a thief holding the EOA
+    ///      key of a 7702 smart account sign token permits behind the account's EOA lock / Guardian Vault.
     function permit(
         address owner,
         address spender,
@@ -151,8 +155,12 @@ contract XDRC20 is ERC20, EIP712, Nonces, IERC20Permit, IXDRC20, IERC165 {
         bytes32 digest = _hashTypedDataV4(
             keccak256(abi.encode(PERMIT_TYPEHASH, owner, spender, value, _useNonce(owner), deadline))
         );
-        address signer = ECDSA.recover(digest, v, r, s);
-        if (signer != owner) revert InvalidPermitSignature(owner);
+        if (
+            owner == address(0)
+                || !SignatureChecker.isValidSignatureNow(owner, digest, abi.encodePacked(r, s, v))
+        ) {
+            revert InvalidPermitSignature(owner);
+        }
         _approveWithExpiry(owner, spender, value, uint64(block.timestamp) + defaultApprovalDuration);
     }
 

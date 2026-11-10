@@ -6,7 +6,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Predeploys} from "../../src/common/Predeploys.sol";
 import {Permit2Expiring} from "../../src/periphery/permit2/Permit2Expiring.sol";
 import {IPermit2Expiring} from "../../src/periphery/permit2/IPermit2Expiring.sol";
-import {MockSmartAccount} from "./XDRC20.t.sol";
+import {MockSmartAccount, LockedAccountMock} from "./XDRC20.t.sol";
 
 contract MockERC20 is ERC20 {
     constructor() ERC20("Mock", "MCK") {}
@@ -325,6 +325,53 @@ contract Permit2ExpiringTest is Permit2Base {
         MockSmartAccount bobAcct = new MockSmartAccount(bob);
         vm.expectRevert(IPermit2Expiring.InvalidSignature.selector);
         p2.permit(address(bobAcct), p, sig);
+    }
+
+    /// A thief with the EOA key of a 7702 smart account whose lock is on cannot sign Permit2 permits: the owner has
+    /// code (0xef0100 designator), so only its ERC-1271 is consulted, and it refuses. Single and batch.
+    function test_permitEoaKeyCannotBypassLocked7702Account() public {
+        uint256 ownerKey = 0x7702;
+        address owner = vm.addr(ownerKey);
+        address impl = address(new LockedAccountMock());
+        vm.signAndAttachDelegation(impl, ownerKey);
+        assertEq(owner.code, abi.encodePacked(hex"ef0100", impl));
+        tokenA.mint(owner, 100 ether);
+        vm.prank(owner); // the standing ERC-20 approval to Permit2 that users give once
+        tokenA.approve(address(p2), type(uint256).max);
+
+        IPermit2Expiring.PermitSingle memory p = _single(address(tokenA), 100 ether, _now() + DAY, 0, 0);
+        bytes memory sig = _signSingle(ownerKey, p);
+        vm.expectRevert(IPermit2Expiring.InvalidSignature.selector);
+        p2.permit(owner, p, sig);
+
+        IPermit2Expiring.PermitDetails[] memory d = new IPermit2Expiring.PermitDetails[](1);
+        d[0] = IPermit2Expiring.PermitDetails(address(tokenA), 100 ether, _now() + DAY, 0);
+        IPermit2Expiring.PermitBatch memory b = IPermit2Expiring.PermitBatch({
+            details: d, spender: spender, sigDeadline: block.timestamp + 1, epoch: 0
+        });
+        sig = _signBatch(ownerKey, b);
+        vm.expectRevert(IPermit2Expiring.InvalidSignature.selector);
+        p2.permit(owner, b, sig);
+
+        (uint160 amt,,) = p2.allowance(owner, address(tokenA), spender);
+        assertEq(amt, 0);
+        vm.prank(spender);
+        vm.expectRevert();
+        p2.transferFrom(owner, spender, 1, address(tokenA));
+        assertEq(tokenA.balanceOf(owner), 100 ether);
+    }
+
+    /// The same 7702 account with an accepting ERC-1271 (lock off) still works, through 1271.
+    function test_permit7702AccountAcceptedVia1271() public {
+        uint256 ownerKey = 0x7702;
+        address owner = vm.addr(ownerKey);
+        vm.signAndAttachDelegation(address(new MockSmartAccount(owner)), ownerKey);
+        IPermit2Expiring.PermitSingle memory p = _single(address(tokenA), 5, _now() + DAY, 0, 0);
+        bytes memory sig = _signSingle(ownerKey, p);
+        vm.expectCall(owner, abi.encodeWithSelector(MockSmartAccount.isValidSignature.selector));
+        p2.permit(owner, p, sig);
+        (uint160 amt,,) = p2.allowance(owner, address(tokenA), spender);
+        assertEq(amt, 5);
     }
 
     function test_invalidateNonces() public {

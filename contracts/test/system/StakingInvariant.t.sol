@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {SystemFixture} from "./utils/SystemFixture.sol";
 import {StakingHandler} from "./handlers/StakingHandler.sol";
 import {IStaking} from "../../src/system/interfaces/IStaking.sol";
+import {Staking} from "../../src/system/Staking.sol";
 
 contract StakingInvariantTest is SystemFixture {
     StakingHandler internal handler;
@@ -123,8 +124,48 @@ contract StakingInvariantTest is SystemFixture {
         assertFalse(handler.ghostNonSystemCallSucceeded());
     }
 
-    function afterInvariant() external view {
-        // Coverage sanity: make sure the interesting paths actually ran.
-        assertGt(handler.calls("participate") + handler.calls("epoch"), 0);
+    /// @dev Runs after EVERY invariant run (Foundry semantics), so it must hold for any single random sequence.
+    ///      It used to assert that the random sequence happened to include `participate` or `epoch`; with 12
+    ///      handler selectors and depth 32 that is false for ~0.3% of runs (~17% of 64-run campaigns). Foundry
+    ///      reported it against the first invariant (`invariant_accounting`, "0 <= 0" = assertGt(0, 0)), shrank
+    ///      it to an empty sequence, persisted it in cache/invariant/failures and replayed it on every later seed.
+    ///      Instead every run now ends with a settlement: the system paths run deterministically, all unbonding
+    ///      matures and every party takes out its liquid funds. Checked end-to-end: every withdrawal and claim
+    ///      succeeds (only "nothing to do" reverts are allowed), the unbonding pools empty completely, nothing
+    ///      is left claimable, and the accounting identity and backing still hold afterwards.
+    function afterInvariant() external {
+        handler.participate(0, type(uint256).max, 100 ether);
+        handler.epoch();
+        vm.warp(block.timestamp + staking.params().unbondingSeconds + 1);
+
+        for (uint256 i; i < handler.actorsLength(); ++i) {
+            address a = handler.actors(i);
+            vm.prank(a);
+            try staking.withdrawUnbonded() {}
+            catch (bytes memory err) {
+                assertEq(bytes4(err), Staking.NothingToWithdraw.selector, "withdraw reverted");
+            }
+            assertEq(staking.unbondingEntries(a).length, 0, "matured entry left");
+        }
+        for (uint256 i; i < handler.pairsLength(); ++i) {
+            address v = handler.pairValidator(i);
+            address d = handler.pairDelegator(i);
+            vm.prank(d);
+            try staking.claimRewards(v) {}
+            catch (bytes memory err) {
+                assertEq(bytes4(err), Staking.NothingToClaim.selector, "claim reverted");
+            }
+            assertEq(staking.pendingRewards(v, d), 0, "rewards left after claim");
+        }
+
+        assertEq(staking.totalUnbonding(), 0, "unbonding left");
+        for (uint256 i; i < handler.validatorsLength(); ++i) {
+            IStaking.ValidatorInfo memory info = staking.getValidator(handler.validators(i));
+            assertEq(info.unbondingStake, 0, "pool stake left");
+            assertEq(info.unbondingShares, 0, "pool shares left");
+            assertEq(info.commissionAccrued, 0, "commission left");
+        }
+        invariant_accounting();
+        assertGe(address(staking).balance, staking.totalBonded() + staking.totalSlashed(), "bonded backed");
     }
 }

@@ -22,6 +22,14 @@ contract MockSmartAccount is IERC1271 {
     }
 }
 
+/// Stand-in for an EIP-7702-delegated XdevsSmartAccount whose EOA lock / Guardian Vault is on: its ERC-1271
+/// refuses every off-chain signature (the real account only accepts hashes pre-approved on-chain).
+contract LockedAccountMock is IERC1271 {
+    function isValidSignature(bytes32, bytes calldata) external pure returns (bytes4) {
+        return 0xffffffff;
+    }
+}
+
 contract XDRC20Test is Test {
     XDRC20 internal token;
     uint256 internal aliceKey = 0xA11CE;
@@ -307,6 +315,103 @@ contract XDRC20Test is Test {
         vm.prank(spender);
         token.transferFrom(address(acct), bob, 50);
         assertEq(token.balanceOf(bob), 50);
+    }
+
+    // ---------------------------------------------------------------- permits: code owners (ERC-1271 / 7702)
+
+    function _permitSig(uint256 key, address owner, uint256 value, uint256 nonce, uint256 deadline)
+        internal
+        view
+        returns (uint8 v, bytes32 r, bytes32 s)
+    {
+        return _sign(key, keccak256(abi.encode(PERMIT_TYPEHASH, owner, spender, value, nonce, deadline)));
+    }
+
+    /// @dev EOA with a known key, delegated (EIP-7702) to `impl`, holding 100 tokens.
+    function _delegatedOwner(uint256 key, address impl) internal returns (address owner) {
+        owner = vm.addr(key);
+        vm.signAndAttachDelegation(impl, key);
+        assertEq(owner.code, abi.encodePacked(hex"ef0100", impl));
+        vm.prank(alice);
+        token.transfer(owner, 100);
+    }
+
+    function test_eip2612PermitBadSignatureReverts() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        (uint8 v, bytes32 r, bytes32 s) = _permitSig(0xB0B, alice, 77, 0, deadline); // wrong key
+        vm.expectRevert(abi.encodeWithSelector(IXDRC20.InvalidPermitSignature.selector, alice));
+        token.permit(alice, spender, 77, deadline, v, r, s);
+        vm.expectRevert(abi.encodeWithSelector(IXDRC20.InvalidPermitSignature.selector, alice));
+        token.permit(alice, spender, 77, deadline, 0, r, s); // malformed v
+        vm.expectRevert(abi.encodeWithSelector(IXDRC20.InvalidPermitSignature.selector, address(0)));
+        token.permit(address(0), spender, 77, deadline, v, r, s);
+    }
+
+    /// A contract wallet (no private key) can now use the standard permit through ERC-1271.
+    function test_eip2612PermitContractWalletUses1271() public {
+        MockSmartAccount acct = new MockSmartAccount(alice);
+        vm.prank(alice);
+        token.transfer(address(acct), 100);
+        uint256 deadline = block.timestamp + 1 hours;
+        (uint8 v, bytes32 r, bytes32 s) = _permitSig(aliceKey, address(acct), 50, 0, deadline);
+        vm.expectCall(address(acct), abi.encodeWithSelector(IERC1271.isValidSignature.selector));
+        token.permit(address(acct), spender, 50, deadline, v, r, s);
+        assertEq(token.allowance(address(acct), spender), 50);
+        assertEq(token.nonces(address(acct)), 1);
+        vm.prank(spender);
+        token.transferFrom(address(acct), bob, 50);
+        assertEq(token.balanceOf(bob), 50);
+
+        // A signature the wallet does not accept is rejected.
+        (v, r, s) = _permitSig(0xB0B, address(acct), 50, 1, deadline);
+        vm.expectRevert(abi.encodeWithSelector(IXDRC20.InvalidPermitSignature.selector, address(acct)));
+        token.permit(address(acct), spender, 50, deadline, v, r, s);
+    }
+
+    /// The bypass this fixes: a thief holding the EOA key of a 7702 smart account with its lock on signs a
+    /// permit. The ECDSA signature IS valid for the owner address, but the owner has code, so only the
+    /// account's ERC-1271 decides - and it refuses. Nothing can be drained.
+    function test_eip2612PermitEoaKeyCannotBypassLocked7702Account() public {
+        uint256 ownerKey = 0x7702;
+        address owner = _delegatedOwner(ownerKey, address(new LockedAccountMock()));
+        uint256 deadline = block.timestamp + 1 hours;
+        (uint8 v, bytes32 r, bytes32 s) = _permitSig(ownerKey, owner, 100, 0, deadline);
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                token.DOMAIN_SEPARATOR(),
+                keccak256(abi.encode(PERMIT_TYPEHASH, owner, spender, 100, 0, deadline))
+            )
+        );
+        assertEq(ecrecover(digest, v, r, s), owner, "plain ECDSA would have accepted");
+
+        vm.expectRevert(abi.encodeWithSelector(IXDRC20.InvalidPermitSignature.selector, owner));
+        token.permit(owner, spender, 100, deadline, v, r, s);
+        assertEq(token.allowance(owner, spender), 0);
+        vm.prank(spender);
+        vm.expectRevert();
+        token.transferFrom(owner, spender, 100);
+        assertEq(token.balanceOf(owner), 100);
+
+        // Same for the bytes-signature variant.
+        uint64 exp = _now() + 1 days;
+        bytes memory sig = _permitWithExpirySig(ownerKey, owner, 100, exp, 0);
+        vm.expectRevert(abi.encodeWithSelector(IXDRC20.InvalidPermitSignature.selector, owner));
+        token.permitWithExpiry(owner, spender, 100, exp, block.timestamp + 1 hours, sig);
+        assertEq(token.allowance(owner, spender), 0);
+    }
+
+    /// A 7702 account whose ERC-1271 accepts the EOA key (lock off) still gets permits - through 1271.
+    function test_eip2612Permit7702AccountAcceptedVia1271() public {
+        uint256 ownerKey = 0x7702;
+        address owner = vm.addr(ownerKey);
+        address owner_ = _delegatedOwner(ownerKey, address(new MockSmartAccount(owner)));
+        assertEq(owner_, owner);
+        uint256 deadline = block.timestamp + 1 hours;
+        (uint8 v, bytes32 r, bytes32 s) = _permitSig(ownerKey, owner, 40, 0, deadline);
+        vm.expectCall(owner, abi.encodeWithSelector(IERC1271.isValidSignature.selector));
+        token.permit(owner, spender, 40, deadline, v, r, s);
+        assertEq(token.allowance(owner, spender), 40);
     }
 
     function test_permitWithExpiryValidatesExpiry() public {

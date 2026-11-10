@@ -388,8 +388,8 @@ owner-vs-thief recovery stalemate and the single-guardian veto → guardian free
      at 1 gwei; ×2 with 1 s blocks), mostly burned / to the Treasury. It stops as soon as the guardians freeze or a
      recovery completes (SEALED) — or the funds are moved out;
    * **raw-`ecrecover` permits**: tokens whose EIP-2612 / EIP-3009 code checks a plain ECDSA signature of the owner
-     address without ERC-1271 can still be authorized off-chain with the EOA key (e.g. `XDRC20.permit(v,r,s)` in
-     `src/periphery`; the bytes-signature variant, Permit2 and OZ `SignatureChecker`-based tokens are safe);
+     address without ERC-1271 can still be authorized off-chain with the EOA key (third-party tokens; in this repo
+     XDRC-20 `permit` / `permitWithExpiry`, Permit2Expiring and OZ `SignatureChecker`-based tokens are safe);
    * without guardians, a stolen EOA key cannot be revoked (only a recovery revokes it): the lock then limits the thief
      to the vault policy indefinitely. Factory accounts (no private key) remain the strongest option.
 4. **Whitelists are trust.** A whitelisted contract can be called instantly with any calldata; e.g. a whitelisted DEX

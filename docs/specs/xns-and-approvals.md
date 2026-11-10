@@ -18,7 +18,7 @@ cd contracts && FOUNDRY_PROFILE=periphery forge test
 | `XDRC20Bridged` | CREATE2 from the factory | deployed only by `CanonicalTokenFactory` | constructor |
 | `CanonicalTokenFactory` | any | normal deployment (owned by governance) | constructor |
 
-Runtime sizes: XNSRegistry 15.7 KB, Permit2Expiring 6.5 KB, XDRC20 6.0 KB. All are below EIP-170.
+Runtime sizes: XNSRegistry 15.7 KB, Permit2Expiring 6.5 KB, XDRC20 6.1 KB. All are below EIP-170.
 
 ### 1.1 Genesis instructions for the Rust builder
 
@@ -141,7 +141,7 @@ function allowanceExpiry(address owner, address spender) external view returns (
 function revokeAll() external;
 function approvalEpoch(address owner) external view returns (uint32);
 function permitWithExpiry(address owner, address spender, uint256 value, uint64 expiry,
-                          uint256 deadline, bytes signature) external;   // ECDSA or ERC-1271
+                          uint256 deadline, bytes signature) external;   // ECDSA (no code) or ERC-1271 (code)
 function defaultApprovalDuration() external view returns (uint64);
 function maxApprovalDuration() external view returns (uint64);
 function supportsInterface(bytes4) external view returns (bool);         // IXDRC20 + ERC-165
@@ -156,6 +156,7 @@ function supportsInterface(bytes4) external view returns (bool);         // IXDR
   - `PermitWithExpiry(address owner,address spender,uint256 value,uint64 expiry,uint256 nonce,uint256 deadline)`
 
   Both share `nonces(owner)`.
+- Signature checks (both permits): an owner **without code** is verified by ECDSA. An owner **with code** — a contract wallet, or an EIP-7702-delegated EOA whose code is the `0xef0100 ‖ impl` designator — is verified **only** through its ERC-1271 `isValidSignature`, never by ECDSA (OZ `SignatureChecker`, v5 semantics: one path chosen by `owner.code.length`, no fallback). The `(v, r, s)` of the standard `permit` is passed to ERC-1271 as `abi.encodePacked(r, s, v)`. This matters for xDEVS smart accounts: while the EOA lock / Guardian Vault is on, the account's ERC-1271 refuses off-chain signatures, so a thief holding the EOA key cannot sign a token permit to drain it. Consequences: a contract wallet can use the standard `permit` too, and a 7702 account delegated to code without ERC-1271 cannot use permits at all (it can still `approve` directly). Any invalid signature reverts with `InvalidPermitSignature(owner)`.
 - Constructor arguments: `(name, symbol, recipient, initialSupply, defaultDuration, maxDuration)`. It requires `0 < defaultDuration ≤ maxDuration`. The recommended values are 30 days and 365 days.
 
 ### 3.1 Compatibility trade-off of the legacy `approve`
@@ -209,7 +210,7 @@ Rules:
 - `allowance()` returns `amount = 0` once the allowance has expired, and `(0, 0, nonce)` after `revokeAll`. Uniswap returns the raw amount instead.
 - Permit nonces are per (owner, token, spender), must match exactly, and are checked to never wrap. `revokeAll` and `lockdown` never reset nonces, so an already-used signature can never be replayed.
 - `revokeAll()` bumps `epochOf(owner)`. Every permit carries the `epoch` it was signed for, so this kills every allowance and every signed-but-unsubmitted permit at once.
-- Signatures are checked with OZ `SignatureChecker`: ECDSA for EOAs, ERC-1271 for smart accounts and 7702-delegated accounts.
+- Signatures are checked with OZ `SignatureChecker`: ECDSA for EOAs, ERC-1271 for smart accounts and 7702-delegated accounts. An owner with code is checked through ERC-1271 only (no ECDSA fallback), so the EOA key of a locked 7702 smart account cannot sign Permit2 permits (§3).
 
 EIP-712:
 
@@ -253,6 +254,7 @@ Test files: `XNSRegistry.t.sol`, `XNSRegistry.invariant.t.sol`, `XDRC20.t.sol` (
   - an expired allowance cannot be spent but a live one can;
   - revokeAll over N tokens × M spenders zeroes everything.
 - Permits: replay (nonce), wrong chain id, wrong contract, tampered fields, deadline, ERC-1271 smart account, stale epoch after revokeAll, and nonces not reset by revokeAll.
+- Code owners (XDRC-20 `permit`, `permitWithExpiry`, Permit2 single and batch): an EOA permit works; a contract wallet is checked through ERC-1271 (also for the `(v, r, s)` permit); an EIP-7702-delegated EOA (`vm.signAndAttachDelegation`) whose ERC-1271 refuses — standing in for a smart account with its EOA lock on — cannot be drained with a permit signed by its EOA key, even though that signature is valid ECDSA for the owner address; the same account with an accepting ERC-1271 still gets permits.
 
 ## 6. Limitations and open issues
 
