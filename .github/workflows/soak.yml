@@ -138,7 +138,7 @@ jobs:
             tar -C soak-artifacts -czf soak-artifacts/logs.tar.gz logs && rm -rf soak-artifacts/logs
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: soak-${{ github.run_id }}
