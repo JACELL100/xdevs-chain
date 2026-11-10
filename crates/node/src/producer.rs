@@ -2,14 +2,18 @@
 //!
 //! Per tick: take the best pool txs for the next base fee, build the block on the
 //! latest committed state, commit it in one atomic batch, then update the pool.
+//!
+//! [`build_next_block`] (build + execute without committing) is shared with the
+//! consensus proposer (`ChainApp::propose`).
 
 use crate::chain::{self, Db};
 use parking_lot::Mutex;
 use std::sync::Arc;
-use xdevs_execution::{next_base_fee, BlockAttributes, BlockExecutor, EvmExecutor};
+use xdevs_execution::{next_base_fee, BlockAttributes, BlockExecutor, BuiltBlock, EvmExecutor};
 use xdevs_mempool::{Pool, TxPool};
-use xdevs_primitives::{Address, Bytes, ChainConfig, TxHash, B256};
+use xdevs_primitives::{Address, Block, Bytes, ChainConfig, Header, ReceiptEnvelope, TxHash, B256};
 use xdevs_state::{history::DEFAULT_STATE_HISTORY_BLOCKS, DbStateProvider};
+use xdevs_storage::DbRead;
 
 /// Summary of a produced block.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,32 +91,22 @@ impl BlockProducer {
     /// blocking thread.
     pub fn produce(&self, now_secs: u64) -> anyhow::Result<ProducedBlock> {
         let _guard = self.lock.lock();
-        let built = {
-            let snapshot = self.db.snapshot()?;
-            let (_, parent) = chain::latest_header(&*snapshot)?;
-            let base_fee = next_base_fee(&parent, &self.cfg);
-            let candidates = self.pool.best_txs(base_fee, self.cfg.block_gas_limit);
-            let attrs = BlockAttributes {
-                timestamp: now_secs.max(parent.timestamp + 1),
+        let (_, built) = build_next_block(
+            &*self.db.snapshot()?,
+            &self.pool,
+            &self.executor,
+            &self.cfg,
+            &NextBlock {
+                now_secs,
                 beneficiary: self.fee_recipient,
-                prev_randao: parent.hash_slow(),
                 extra_data: self.extra_data.clone(),
-                gas_limit: self.cfg.block_gas_limit,
-            };
-            let state = DbStateProvider::new(&*snapshot);
-            self.executor.build(&parent, attrs, candidates, &state)?
-        };
+                with_txs: true,
+            },
+        )?;
         let hash = chain::commit_block(&*self.db, &built, self.state_history)?;
 
-        let rejected: Vec<TxHash> = built.rejected.iter().map(|(h, _)| *h).collect();
-        for (h, e) in &built.rejected {
-            tracing::debug!(target: "xdevs::producer", tx = %h, error = %e, "dropping invalid tx");
-        }
-        self.pool.remove(&rejected);
-        self.pool
-            .on_block_committed(&built.block, &built.outcome.receipts);
-        self.pool
-            .set_base_fee(next_base_fee(&built.block.header, &self.cfg));
+        let rejected = drop_rejected(&self.pool, &built);
+        after_commit(&self.pool, &self.cfg, &built.block, &built.outcome.receipts);
 
         let header = &built.block.header;
         Ok(ProducedBlock {
@@ -122,9 +116,85 @@ impl BlockProducer {
             tx_hashes: built.block.tx_hashes().collect(),
             gas_used: header.gas_used,
             base_fee: header.base_fee_per_gas.unwrap_or_default(),
-            rejected: rejected.len(),
+            rejected,
         })
     }
+}
+
+/// Max encoded size of a block's transactions (research doc §6.3 rule 4; Phase-2
+/// constant). The builder stops adding candidates before it; validators reject above it.
+pub const MAX_BLOCK_BYTES: usize = 4 * 1024 * 1024;
+
+/// What to put into the next block besides transactions.
+#[derive(Clone, Debug)]
+pub(crate) struct NextBlock {
+    /// Wall-clock seconds (the timestamp is `max(now, parent + 1)`).
+    pub now_secs: u64,
+    /// Receives the priority fees.
+    pub beneficiary: Address,
+    /// `extraData` (≤ 32 bytes).
+    pub extra_data: Bytes,
+    /// `false` = an empty block (fallback when a full build would miss a deadline).
+    pub with_txs: bool,
+}
+
+/// Build AND execute the next block on the latest committed state of `snapshot`
+/// without committing it (dev producer and consensus proposer). Returns the parent
+/// header and the built block: base fee `next_base_fee(parent)`, `prev_randao` = parent
+/// hash, gas limit from `cfg`, the best pool txs up to [`MAX_BLOCK_BYTES`].
+pub(crate) fn build_next_block(
+    snapshot: &dyn DbRead,
+    pool: &Pool,
+    executor: &EvmExecutor,
+    cfg: &ChainConfig,
+    next: &NextBlock,
+) -> anyhow::Result<(Header, BuiltBlock)> {
+    let (_, parent) = chain::latest_header(snapshot)?;
+    let base_fee = next_base_fee(&parent, cfg);
+    let mut candidates = if next.with_txs {
+        pool.best_txs(base_fee, cfg.block_gas_limit)
+    } else {
+        Vec::new()
+    };
+    let mut bytes = 0usize;
+    if let Some(cut) = candidates.iter().position(|tx| {
+        bytes += tx.encoded_len();
+        bytes > MAX_BLOCK_BYTES
+    }) {
+        candidates.truncate(cut);
+    }
+    let attrs = BlockAttributes {
+        timestamp: next.now_secs.max(parent.timestamp + 1),
+        beneficiary: next.beneficiary,
+        prev_randao: parent.hash_slow(),
+        extra_data: next.extra_data.clone(),
+        gas_limit: cfg.block_gas_limit,
+    };
+    let state = DbStateProvider::new(snapshot);
+    let built = executor.build(&parent, attrs, candidates, &state)?;
+    Ok((parent, built))
+}
+
+/// Drop the candidates the builder found invalid from the pool; returns how many.
+pub(crate) fn drop_rejected(pool: &Pool, built: &BuiltBlock) -> usize {
+    let rejected: Vec<TxHash> = built.rejected.iter().map(|(h, _)| *h).collect();
+    for (h, e) in &built.rejected {
+        tracing::debug!(target: "xdevs::producer", tx = %h, error = %e, "dropping invalid tx");
+    }
+    pool.remove(&rejected);
+    rejected.len()
+}
+
+/// Pool maintenance after a block was committed: drop included / stale txs and move the
+/// admission base fee to the next block's.
+pub(crate) fn after_commit(
+    pool: &Pool,
+    cfg: &ChainConfig,
+    block: &Block,
+    receipts: &[ReceiptEnvelope],
+) {
+    pool.on_block_committed(block, receipts);
+    pool.set_base_fee(next_base_fee(&block.header, cfg));
 }
 
 /// Current Unix time in seconds (only used for header timestamps).

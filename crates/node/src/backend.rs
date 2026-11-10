@@ -8,9 +8,12 @@
 
 use crate::chain::{self, Db};
 use std::sync::Arc;
+use xdevs_consensus::{CommitCertificate, EngineStatus};
 use xdevs_crypto::decode_and_recover;
 use xdevs_execution::{next_base_fee, CallResult, EvmExecutor, ExecutionError};
 use xdevs_mempool::{Pool, PoolError, TxOrigin, TxPool};
+use xdevs_network::NetworkHandle;
+use xdevs_primitives::reexports::alloy_primitives::U64;
 use xdevs_primitives::{
     xip0001::{Xip0001Error, LOCK_SLOT},
     Address, Block, Bytes, ChainConfig, Header, ReceiptEnvelope, RecoveredTx, Transaction,
@@ -44,6 +47,10 @@ fn db<T>(r: Result<T, DbError>) -> BackendResult<T> {
 
 type Snapshot<'a> = dyn DbRead + Send + Sync + 'a;
 
+/// A node is reported as syncing (`eth_syncing`) while peers are at least this many
+/// blocks ahead of its head.
+pub const SYNC_LAG_THRESHOLD: u64 = 2;
+
 /// The node's RPC backend.
 pub struct NodeBackend {
     db: Db,
@@ -51,6 +58,12 @@ pub struct NodeBackend {
     executor: Arc<EvmExecutor>,
     cfg: ChainConfig,
     gas_cap: u64,
+    /// Tx gossip (validator / full-node mode): accepted txs are published.
+    gossip: Option<Arc<NetworkHandle>>,
+    /// Consensus engine status (validator / full-node mode).
+    consensus: Option<EngineStatus>,
+    /// Head when the node started (`eth_syncing.startingBlock`).
+    starting_block: u64,
 }
 
 impl std::fmt::Debug for NodeBackend {
@@ -86,7 +99,25 @@ impl NodeBackend {
             executor,
             cfg,
             gas_cap,
+            gossip: None,
+            consensus: None,
+            starting_block: 0,
         }
+    }
+
+    /// Publish accepted `eth_sendRawTransaction` txs on the tx-gossip network and count
+    /// its peers in `net_peerCount`.
+    pub fn with_gossip(mut self, gossip: Arc<NetworkHandle>) -> Self {
+        self.gossip = Some(gossip);
+        self
+    }
+
+    /// Serve `eth_syncing` and `net_peerCount` from a running consensus engine;
+    /// `starting_block` = head at start-up.
+    pub fn with_consensus(mut self, status: EngineStatus, starting_block: u64) -> Self {
+        self.consensus = Some(status);
+        self.starting_block = starting_block;
+        self
     }
 
     /// Run `f` on a blocking thread with a consistent database snapshot.
@@ -497,16 +528,80 @@ impl RpcBackend for NodeBackend {
     async fn send_raw_transaction(&self, raw: Bytes) -> BackendResult<B256> {
         let chain_id = self.cfg.chain_id;
         let pool = self.pool.clone();
+        let gossip = self.gossip.clone();
         tokio::task::spawn_blocking(move || {
             let tx = decode_and_recover(&raw, chain_id)
                 .map_err(|e| RpcBackendError::Rejected(e.to_string()))?;
             let hash = tx.hash();
             pool.add(tx, TxOrigin::External).map_err(pool_err)?;
             tracing::debug!(target: "xdevs::rpc", %hash, "transaction added to pool");
+            if let Some(gossip) = gossip {
+                // Best effort: the tx is in the local pool either way.
+                if let Err(e) = gossip.publish_tx(raw) {
+                    tracing::warn!(target: "xdevs::rpc", %hash, error = %e, "tx gossip publish failed");
+                }
+            }
             Ok(hash)
         })
         .await
         .map_err(internal)?
+    }
+
+    async fn syncing(&self) -> BackendResult<SyncStatus> {
+        let Some(status) = &self.consensus else {
+            return Ok(SyncStatus::None);
+        };
+        let head = self.block_number().await?;
+        // Peers voting at height h have decided h - 1.
+        let highest = status.highest_seen_height().saturating_sub(1);
+        if highest < head.saturating_add(SYNC_LAG_THRESHOLD) {
+            return Ok(SyncStatus::None);
+        }
+        Ok(SyncStatus::Info(Box::new(SyncInfo {
+            starting_block: U256::from(self.starting_block.min(head)),
+            current_block: U256::from(head),
+            highest_block: U256::from(highest),
+            warp_chunks_amount: None,
+            warp_chunks_processed: None,
+            stages: None,
+        })))
+    }
+
+    async fn peer_count(&self) -> BackendResult<u64> {
+        let gossip = self.gossip.as_ref().map_or(0, |g| g.peer_count());
+        let consensus = self.consensus.as_ref().map_or(0, |s| s.peer_count());
+        Ok((gossip + consensus) as u64)
+    }
+
+    async fn commit_certificate(
+        &self,
+        block: BlockId,
+    ) -> BackendResult<Option<CommitCertificateInfo>> {
+        self.read(move |s, _| {
+            let Some(number) = resolve_block_id(s, block)? else {
+                return Ok(None);
+            };
+            let Some(raw) = db(chain::commit_certificate(s, number))? else {
+                return Ok(None);
+            };
+            let cert = CommitCertificate::from_bytes(&raw)
+                .map_err(|e| internal(format!("stored certificate of block {number}: {e:?}")))?;
+            Ok(Some(CommitCertificateInfo {
+                height: U64::from(cert.height),
+                round: U64::from(cert.round),
+                block_hash: cert.block_hash,
+                signatures: cert
+                    .signatures
+                    .iter()
+                    .map(|sig| CommitSigInfo {
+                        validator: Bytes::copy_from_slice(&sig.validator.0),
+                        signature: Bytes::copy_from_slice(&sig.signature),
+                    })
+                    .collect(),
+                raw,
+            }))
+        })
+        .await
     }
 
     async fn block_by_number(

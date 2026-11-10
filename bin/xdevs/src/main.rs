@@ -3,9 +3,14 @@
 //! ```text
 //! xdevs init --dev [--data-dir .xdevs] [--force]      # write dev genesis.json + config.toml
 //! xdevs run --dev [--block-time 2s] [--http 127.0.0.1:8545] [--data-dir .xdevs]
-//! xdevs run --config .xdevs/config.toml
+//! xdevs run --config .xdevs/config.toml               # dev, validator or full node
 //! ```
 //! (`xdevs node` is an alias of `xdevs run`.)
+//!
+//! The run mode follows from the genesis and the config (`NodeConfig::mode`): a genesis
+//! with validators runs consensus (validator with `[validator] enabled = true`, else full
+//! node); a genesis without validators runs the dev producer. A halted consensus engine
+//! makes `xdevs run` exit with an error (it is never restarted in-process).
 
 use anyhow::{bail, Context};
 use clap::{Parser, Subcommand};
@@ -15,6 +20,8 @@ use std::{
     time::Duration,
 };
 use xdevs_genesis::Genesis;
+#[cfg(test)]
+use xdevs_node::NodeMode;
 use xdevs_node::{Node, NodeConfig};
 use xdevs_primitives::{constants::DEV_CHAIN_ID, Address};
 
@@ -46,7 +53,7 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// Run a node (single-node dev chain in Phase 1).
+    /// Run a node: dev chain, consensus validator or full node.
     #[command(alias = "node")]
     Run(RunArgs),
 }
@@ -71,7 +78,7 @@ struct RunArgs {
     /// JSON-RPC listen address (HTTP + WS).
     #[arg(long)]
     http: Option<SocketAddr>,
-    /// Beneficiary of produced blocks (receives priority fees).
+    /// Beneficiary of produced / proposed blocks (receives priority fees).
     #[arg(long)]
     fee_recipient: Option<Address>,
     /// Log filter (e.g. `info`, `debug`, `xdevs::producer=debug`); `RUST_LOG` wins.
@@ -175,6 +182,7 @@ fn build_config(args: RunArgs) -> anyhow::Result<(NodeConfig, Option<String>)> {
     }
     if let Some(fr) = args.fee_recipient {
         cfg.dev.fee_recipient = fr;
+        cfg.validator.fee_recipient = fr;
     }
     Ok((cfg, args.log))
 }
@@ -204,6 +212,7 @@ async fn main() -> anyhow::Result<()> {
             let node = Node::new(cfg)?;
             tracing::info!(
                 chain_id = node.chain_config().chain_id,
+                mode = ?node.mode(),
                 rpc = %node.config().rpc.http,
                 "chain loaded"
             );
@@ -253,6 +262,51 @@ mod tests {
         assert_eq!(cfg.dev.block_time_ms, Some(200));
         assert_eq!(cfg.chain.data_dir, dir.path().join(DB_DIR));
         assert!(Cli::try_parse_from(["xdevs", "node", "--dev"]).is_ok());
+    }
+
+    #[test]
+    fn run_config_selects_validator_and_full_node_modes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut genesis = Genesis::dev(DEV_CHAIN_ID);
+        let seed = [7u8; 32];
+        genesis.validators = vec![xdevs_genesis::GenesisValidator {
+            name: Some("val1".into()),
+            consensus_key: xdevs_crypto::Ed25519Seed::from_bytes(&seed).public_key(),
+            power: 1,
+            p2p: None,
+            extra: Default::default(),
+        }];
+        let genesis_path = dir.path().join(GENESIS_FILE);
+        std::fs::write(&genesis_path, genesis.to_json_string()).unwrap();
+        let key = dir.path().join("consensus.key");
+        std::fs::write(&key, xdevs_primitives::hex::encode(seed)).unwrap();
+        let config_path = dir.path().join("val1.toml");
+        let toml = format!(
+            "[chain]
+genesis = {g:?}
+data_dir = {d:?}
+[validator]
+enabled = true
+key_file = {k:?}
+",
+            g = genesis_path,
+            d = dir.path().join("data"),
+            k = key,
+        );
+        std::fs::write(&config_path, toml).unwrap();
+        let cli = Cli::try_parse_from(["xdevs", "run", "--config", config_path.to_str().unwrap()])
+            .unwrap();
+        let Command::Run(args) = cli.command else {
+            panic!("expected run")
+        };
+        let (cfg, _) = build_config(args).unwrap();
+        assert!(cfg.validator.enabled);
+        let node = Node::new(cfg.clone()).unwrap();
+        assert_eq!(node.mode(), NodeMode::Validator);
+        drop(node);
+        let mut full = cfg;
+        full.validator.enabled = false;
+        assert_eq!(Node::new(full).unwrap().mode(), NodeMode::FullNode);
     }
 
     #[test]

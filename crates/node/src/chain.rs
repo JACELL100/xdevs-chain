@@ -6,16 +6,19 @@
 
 use anyhow::{bail, Context};
 use std::sync::Arc;
-use xdevs_execution::BuiltBlock;
-use xdevs_genesis::{genesis_block, Genesis};
+use xdevs_execution::{BuiltBlock, ExecutionOutcome};
+use xdevs_genesis::{genesis_block, Genesis, GenesisValidator};
 use xdevs_primitives::{
-    Address, Block, ChainConfig, Header, ReceiptEnvelope, RecoveredTx, TxEnvelope, TxLocation, B256,
+    Address, Block, Bytes, ChainConfig, Header, ReceiptEnvelope, RecoveredTx, TxEnvelope,
+    TxLocation, B256,
 };
 use xdevs_state::{
     history::{record_block_history, set_history_start},
     write_state_diff, DbStateProvider, StateDiff, StateProvider,
 };
-use xdevs_storage::{meta_keys, tables, Database, DbError, DbRead, DbReadExt, WriteBatch};
+use xdevs_storage::{
+    meta_keys, put_commit_certificate, tables, Database, DbError, DbRead, DbReadExt, WriteBatch,
+};
 
 /// Shared handle to the node database.
 pub type Db = Arc<dyn Database>;
@@ -152,13 +155,97 @@ pub fn commit_block(
     built: &BuiltBlock,
     state_history: u64,
 ) -> anyhow::Result<B256> {
-    let header = &built.block.header;
-    let diff = &built.outcome.state_diff;
-    let (mut batch, hash) = block_batch(header, &built.block.body, &built.outcome.receipts, diff);
+    commit_executed_block(db, &built.block, &built.outcome, None, state_history)
+}
+
+/// Commit an executed block and, for consensus blocks, its commit certificate (RLP) in
+/// **one** [`WriteBatch`]: header, body, tx index, receipts, state diff, state history,
+/// certificate and the head pointer (research doc §6.5). Same rules as [`commit_block`].
+pub fn commit_executed_block(
+    db: &dyn Database,
+    block: &Block,
+    outcome: &ExecutionOutcome,
+    certificate: Option<&[u8]>,
+    state_history: u64,
+) -> anyhow::Result<B256> {
+    let header = &block.header;
+    let diff = &outcome.state_diff;
+    let (mut batch, hash) = block_batch(header, &block.body, &outcome.receipts, diff);
+    if let Some(cert) = certificate {
+        put_commit_certificate(&mut batch, header.number, cert);
+    }
     record_block_history(&mut batch, db, header.number, diff, state_history)
         .context("record state history")?;
     db.write(batch)?;
     Ok(hash)
+}
+
+/// Replace the stored commit certificate of block `height` (certificate upgrade at
+/// `Finalized`).
+pub fn write_commit_certificate(
+    db: &dyn Database,
+    height: u64,
+    certificate: &[u8],
+) -> anyhow::Result<()> {
+    let mut batch = WriteBatch::new();
+    put_commit_certificate(&mut batch, height, certificate);
+    db.write(batch)?;
+    Ok(())
+}
+
+/// Stored commit certificate of block `height` (RLP), if any.
+pub fn commit_certificate<R: DbRead + ?Sized>(
+    db: &R,
+    height: u64,
+) -> Result<Option<Bytes>, DbError> {
+    xdevs_storage::commit_certificate(db, height)
+}
+
+/// Canonical encoding of a static validator set (research doc §6.9), stored in
+/// `Meta["validators"]`: for each validator sorted by consensus key,
+/// `consensus_key (32 B) ‖ power (u64, big-endian)`.
+pub fn encode_validator_set(validators: &[GenesisValidator]) -> Vec<u8> {
+    let mut sorted: Vec<_> = validators.iter().collect();
+    sorted.sort_by_key(|v| v.consensus_key);
+    let mut out = Vec::with_capacity(sorted.len() * 40);
+    for v in sorted {
+        out.extend_from_slice(&v.consensus_key);
+        out.extend_from_slice(&v.power.to_be_bytes());
+    }
+    out
+}
+
+/// Check that the database was created with the genesis validator set `validators`
+/// (empty = a dev chain without validators): write it on first use, refuse a different
+/// set afterwards. The set is not part of the genesis hash, so this is the only guard
+/// against starting a node on an existing data dir with another validator set.
+pub fn ensure_validator_set(
+    db: &dyn Database,
+    validators: &[GenesisValidator],
+) -> anyhow::Result<()> {
+    let key = meta_key(meta_keys::VALIDATORS);
+    let stored = db.get::<tables::Meta>(&key)?;
+    if validators.is_empty() {
+        if stored.is_some_and(|s| !s.is_empty()) {
+            bail!(
+                "database was created with a validator set but the configured genesis has                  none; use the original genesis or another data dir"
+            );
+        }
+        return Ok(());
+    }
+    let encoded = encode_validator_set(validators);
+    match stored {
+        Some(stored) if stored == encoded => Ok(()),
+        Some(_) => bail!(
+            "database was created with a different genesis validator set; use the              original genesis or another data dir"
+        ),
+        None => {
+            let mut batch = WriteBatch::new();
+            batch.put::<tables::Meta>(&key, &encoded);
+            db.write(batch)?;
+            Ok(())
+        }
+    }
 }
 
 /// Initialise an empty database with `genesis`, or check that an existing database

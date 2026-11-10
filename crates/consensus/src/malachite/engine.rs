@@ -9,12 +9,13 @@ use super::streaming::{make_parts, stream_messages, CompleteStream, PartStreams,
 use super::{linear_timeouts, private_key, PrivateKey};
 use crate::app::{BlockOrigin, ConsensusApp};
 use crate::config::EngineConfig;
-use crate::engine::EngineKeys;
+use crate::engine::{EngineKeys, EngineStatus};
 use crate::types::{
     parts_sign_bytes, ConflictingVotes, Evidence, SignedVote, ValidatorAddress, ValidatorKey,
     VoteType,
 };
 use anyhow::{anyhow, bail, Context as _};
+use arc_malachitebft_app_channel::app::engine::util::events::{Event, RxEvent};
 use arc_malachitebft_app_channel::app::{
     config::{
         ChannelNames, ConsensusConfig, GossipSubConfig, NodeConfig, ProtocolNames, PubSubProtocol,
@@ -30,7 +31,8 @@ use arc_malachitebft_app_channel::app::{
 };
 use arc_malachitebft_app_channel::{
     start_engine, AppMsg, Channels, ConsensusContext, EngineHandle, NetworkContext,
-    NetworkIdentity, NetworkMsg, RequestContext, Signer as _, SyncContext, WalContext,
+    NetworkIdentity, NetworkMsg, NetworkRequest, RequestContext, Signer as _, SyncContext,
+    WalContext,
 };
 use arc_malachitebft_sync::RawDecidedValue;
 use std::collections::BTreeMap;
@@ -259,6 +261,7 @@ pub(crate) async fn run(
     keys: EngineKeys,
     app: Arc<dyn ConsensusApp>,
     mut shutdown: watch::Receiver<bool>,
+    status: EngineStatus,
 ) -> anyhow::Result<()> {
     let node_cfg = node_config(&config)?;
     if *shutdown.borrow() {
@@ -290,8 +293,16 @@ pub(crate) async fn run(
     let Channels {
         consensus: rx,
         network,
+        events,
+        net_requests,
         ..
     } = started.channels;
+    status.set_running(true);
+    let monitor = tokio::spawn(monitor_status(
+        status.clone(),
+        events.subscribe(),
+        net_requests,
+    ));
     let mut host = Host {
         chain_id: config.chain_id,
         app,
@@ -313,10 +324,46 @@ pub(crate) async fn run(
     if let Err(e) = &result {
         error!(target: LOG, "consensus engine failed: {e:#}");
     }
+    monitor.abort();
+    status.set_running(false);
+    status.set_peer_count(0);
     drop(host);
     stop(started.handle).await;
     info!(target: LOG, moniker = %config.moniker, "consensus engine stopped");
     result
+}
+
+/// Keep [`EngineStatus`] current: heights from engine events, the peer count from a
+/// network state dump every second. Aborted when the engine stops.
+async fn monitor_status(
+    status: EngineStatus,
+    mut events: RxEvent<XdevsContext>,
+    net: mpsc::Sender<NetworkRequest>,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut events_open = true;
+    loop {
+        tokio::select! {
+            ev = events.recv(), if events_open => match ev {
+                Ok(Event::StartedHeight(h, _)) => status.set_height(h.0),
+                Ok(Event::Received(msg)) => status.observe_height(msg.height().0),
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => events_open = false,
+            },
+            _ = tick.tick() => {
+                let dump = tokio::time::timeout(
+                    Duration::from_millis(500),
+                    NetworkRequest::dump_state(&net),
+                )
+                .await;
+                if let Ok(Ok(Some(dump))) = dump {
+                    status.set_peer_count(dump.peers.len());
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

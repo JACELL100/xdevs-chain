@@ -5,8 +5,69 @@ use crate::{
     app::{ConsensusApp, ConsensusEngine},
     config::EngineConfig,
 };
-use std::{fmt, sync::Arc};
+use std::{
+    fmt,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
+};
 use zeroize::Zeroizing;
+
+/// Live status of a running engine, for the node's RPC (`eth_syncing`, `net_peerCount`).
+/// Cheap to clone; every clone sees the same values. All zero / `false` until
+/// [`ConsensusEngine::run`] starts the engine.
+#[derive(Clone, Debug, Default)]
+pub struct EngineStatus(Arc<StatusInner>);
+
+#[derive(Debug, Default)]
+struct StatusInner {
+    running: AtomicBool,
+    height: AtomicU64,
+    highest_seen: AtomicU64,
+    peers: AtomicUsize,
+}
+
+impl EngineStatus {
+    /// `true` while the engine runs.
+    pub fn is_running(&self) -> bool {
+        self.0.running.load(Ordering::Relaxed)
+    }
+
+    /// The height consensus is working on (head + 1 once started).
+    pub fn height(&self) -> u64 {
+        self.0.height.load(Ordering::Relaxed)
+    }
+
+    /// Highest height of any consensus message (vote or proposal) received from a peer.
+    /// Peers voting at `h` have decided `h - 1`. Not signature-checked: informational
+    /// (sync progress), never used for safety.
+    pub fn highest_seen_height(&self) -> u64 {
+        self.0.highest_seen.load(Ordering::Relaxed)
+    }
+
+    /// Connected consensus-network peers.
+    pub fn peer_count(&self) -> usize {
+        self.0.peers.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn set_running(&self, running: bool) {
+        self.0.running.store(running, Ordering::Relaxed);
+    }
+
+    pub(crate) fn set_height(&self, height: u64) {
+        self.0.height.store(height, Ordering::Relaxed);
+        self.observe_height(height);
+    }
+
+    pub(crate) fn observe_height(&self, height: u64) {
+        self.0.highest_seen.fetch_max(height, Ordering::Relaxed);
+    }
+
+    pub(crate) fn set_peer_count(&self, peers: usize) {
+        self.0.peers.store(peers, Ordering::Relaxed);
+    }
+}
 
 /// Secret keys of a node. Debug output never shows key material.
 pub struct EngineKeys {
@@ -59,12 +120,22 @@ impl fmt::Debug for EngineKeys {
 pub struct MalachiteEngine {
     config: EngineConfig,
     keys: EngineKeys,
+    status: EngineStatus,
 }
 
 impl MalachiteEngine {
     /// An engine with `config` and `keys`; nothing starts until [`ConsensusEngine::run`].
     pub fn new(config: EngineConfig, keys: EngineKeys) -> Self {
-        Self { config, keys }
+        Self {
+            config,
+            keys,
+            status: EngineStatus::default(),
+        }
+    }
+
+    /// Live status handle (clone it before [`ConsensusEngine::run`] consumes the engine).
+    pub fn status(&self) -> EngineStatus {
+        self.status.clone()
     }
 
     /// The engine configuration.
@@ -85,7 +156,7 @@ impl ConsensusEngine for MalachiteEngine {
         app: Arc<dyn ConsensusApp>,
         shutdown: tokio::sync::watch::Receiver<bool>,
     ) -> anyhow::Result<()> {
-        crate::malachite::engine::run(self.config, self.keys, app, shutdown).await
+        crate::malachite::engine::run(self.config, self.keys, app, shutdown, self.status).await
     }
 }
 

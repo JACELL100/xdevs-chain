@@ -20,3 +20,4 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+xdevs-crypto.workspace = true

@@ -34,5 +34,7 @@ zeroize.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# RPC client of the 4-validator integration test (already built for xdevs-rpc tests).
+jsonrpsee = { workspace = true, features = ["http-client"] }
 # Signs test commit certificates (same scheme as Malachite / xdevs-consensus).
 ed25519-consensus.workspace = true
