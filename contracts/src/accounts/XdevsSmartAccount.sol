@@ -5,11 +5,7 @@ import {IAccount} from "account-abstraction/interfaces/IAccount.sol";
 import {IAccountExecute} from "account-abstraction/interfaces/IAccountExecute.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
-import {
-    _packValidationData,
-    SIG_VALIDATION_FAILED,
-    SIG_VALIDATION_SUCCESS
-} from "account-abstraction/core/Helpers.sol";
+import {_packValidationData, SIG_VALIDATION_FAILED} from "account-abstraction/core/Helpers.sol";
 
 import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
@@ -21,8 +17,9 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 import {SignatureVerifier} from "./base/SignatureVerifier.sol";
 import {VaultDispatcher} from "./base/VaultDispatcher.sol";
 import {SessionExecutor} from "./base/SessionExecutor.sol";
+import {GuardianFreeze} from "./base/GuardianFreeze.sol";
 import {IGuardianVault} from "./interfaces/IGuardianVault.sol";
-import {IAccountExtension} from "./interfaces/IXdevsSmartAccount.sol";
+import {IAccountExtension, IGuardianFreeze} from "./interfaces/IXdevsSmartAccount.sol";
 import {AccountConstants} from "./libraries/AccountConstants.sol";
 import {AccountStorage} from "./libraries/AccountStorage.sol";
 import {Call} from "./libraries/AccountTypes.sol";
@@ -45,6 +42,7 @@ contract XdevsSmartAccount is
     SignatureVerifier,
     VaultDispatcher,
     SessionExecutor,
+    GuardianFreeze,
     IAccount,
     IAccountExecute,
     IERC1271,
@@ -90,7 +88,9 @@ contract XdevsSmartAccount is
     ///      `0x03 || sessionKey (20 bytes) || r || s || v`, only valid when `callData` is
     ///      `executeUserOp.selector || abi.encode(Call[])` and every call is permitted for the key; the session's
     ///      validity window is returned in `validationData` and caps are enforced at execution. With the vault
-    ///      enabled, prefunds are charged to the daily gas budget.
+    ///      enabled, prefunds are charged to the daily gas budget. While the account is frozen every signature gets
+    ///      `validAfter = frozenUntil - 1` (the EntryPoint rejects the op until the freeze ends) — no TIMESTAMP in
+    ///      validation (ERC-7562).
     function validateUserOp(
         PackedUserOperation calldata userOp,
         bytes32 userOpHash,
@@ -125,9 +125,17 @@ contract XdevsSmartAccount is
             Call[] memory calls = abi.decode(userOp.callData[4:], (Call[]));
             (bool ok, uint48 validAfter, uint48 validUntil) = _checkSessionCalls(key, calls);
             if (!ok) return SIG_VALIDATION_FAILED;
-            return _packValidationData(false, validUntil, validAfter);
+            uint48 frozenAfter = _frozenValidAfter();
+            return _packValidationData(false, validUntil, validAfter > frozenAfter ? validAfter : frozenAfter);
         }
-        return _verifyOwnerSignature(userOpHash, sig) ? SIG_VALIDATION_SUCCESS : SIG_VALIDATION_FAILED;
+        if (!_verifyOwnerSignature(userOpHash, sig)) return SIG_VALIDATION_FAILED;
+        return _packValidationData(false, 0, _frozenValidAfter());
+    }
+
+    /// @dev EntryPoint `validAfter` is exclusive: the op is valid only once `block.timestamp >= frozenUntil`.
+    function _frozenValidAfter() private view returns (uint48) {
+        uint64 until = AccountStorage.recovery().frozenUntil;
+        return until == 0 ? 0 : uint48(until - 1);
     }
 
     /// @inheritdoc IAccountExecute
@@ -196,6 +204,7 @@ contract XdevsSmartAccount is
             || selector == IGuardianVault.cancel.selector
             || selector == IAccountExtension.cancelRecovery.selector
             || selector == IAccountExtension.revokeHash.selector
+            || selector == IAccountExtension.enableEoaLock.selector
             || selector == VaultDispatcher.pokeGasBudget.selector;
     }
 
@@ -221,8 +230,11 @@ contract XdevsSmartAccount is
     /// @inheritdoc IERC1271
     /// @dev Accepts a hash pre-approved on-chain (`approveHash`, delayed by the vault). Otherwise — only if the vault
     ///      is disabled or `allowInstantSignatures` is set — an owner signature over `replaySafeHash(hash)`, or
-    ///      (EIP-7702 compatibility) a raw 65-byte signature of the account's own EOA key over `hash`.
+    ///      (EIP-7702 compatibility) a raw 65-byte signature of the account's own (non-revoked) EOA key over `hash`.
+    ///      Nothing is valid while the account is frozen. TIMESTAMP is only read if the account was ever frozen.
     function isValidSignature(bytes32 hash, bytes calldata signature) external view returns (bytes4) {
+        uint64 frozenUntil = AccountStorage.recovery().frozenUntil;
+        if (frozenUntil != 0 && block.timestamp < frozenUntil) return 0xffffffff;
         AccountStorage.Vault storage $ = AccountStorage.vault();
         if ($.approvedHashes[hash]) return IERC1271.isValidSignature.selector;
         if ($.policy.enabled && !$.policy.allowInstantSignatures) return 0xffffffff;
@@ -231,7 +243,7 @@ contract XdevsSmartAccount is
         }
         if (signature.length == 65) {
             (address rec, ECDSA.RecoverError err,) = ECDSA.tryRecoverCalldata(hash, signature);
-            if (err == ECDSA.RecoverError.NoError && rec == address(this)) {
+            if (err == ECDSA.RecoverError.NoError && rec == address(this) && _eoaKeyActive()) {
                 return IERC1271.isValidSignature.selector;
             }
         }
@@ -269,7 +281,8 @@ contract XdevsSmartAccount is
             || interfaceId == type(IAccountExecute).interfaceId || interfaceId == type(IERC1271).interfaceId
             || interfaceId == type(IERC721Receiver).interfaceId
             || interfaceId == type(IERC1155Receiver).interfaceId
-            || interfaceId == type(IGuardianVault).interfaceId;
+            || interfaceId == type(IGuardianVault).interfaceId
+            || interfaceId == type(IGuardianFreeze).interfaceId;
     }
 
     /// @notice Every other selector is served by the extension (DELEGATECALL, same storage, same msg.sender).

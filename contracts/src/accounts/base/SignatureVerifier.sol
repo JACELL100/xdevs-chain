@@ -34,11 +34,11 @@ abstract contract SignatureVerifier is AccountCore {
     }
 
     /// @dev The account address itself is an implicit secp256k1 signer: for an EIP-7702 delegated EOA this is the
-    ///      EOA key (all-powerful at the protocol level anyway); for a CREATE2 proxy nobody holds such a key.
+    ///      EOA key; for a CREATE2 proxy nobody holds such a key. A social recovery revokes it (`_eoaKeyActive`).
     function _verifyEcdsa(bytes32 hash, bytes calldata sig) internal view returns (bool) {
         (address rec, ECDSA.RecoverError err,) = ECDSA.tryRecoverCalldata(hash, sig);
         if (err != ECDSA.RecoverError.NoError) return false;
-        return rec == address(this) || _isEcdsaSigner(rec);
+        return rec == address(this) ? _eoaKeyActive() : _isEcdsaSigner(rec);
     }
 
     function _verifyPasskey(bytes32 hash, bytes calldata payload) internal view returns (bool) {

@@ -14,6 +14,9 @@ library AccountStorage {
     /// @custom:storage-location erc7201:xdevs.account.core
     struct Core {
         bool initialized;
+        /// @dev Set by a social recovery: the account address's own secp256k1 key (the EOA key of an EIP-7702
+        ///      account) is no longer an implicit signer, unless the new signer set lists it explicitly.
+        bool eoaKeyRevoked;
     }
 
     // -------------------------------------------------------------------------------------------- signers ----
@@ -75,8 +78,21 @@ library AccountStorage {
         uint8 threshold;
         uint64 delay;
         uint64 nonce;
+        /// @dev Guardian freeze: frozen iff `block.timestamp < frozenUntil` (packs into the threshold/delay slot).
+        uint64 frozenUntil;
+        /// @dev Recovery proposals AND guardian votes (freeze / unfreeze / cancel; tagged ids, see AccountCore).
         mapping(bytes32 id => Proposal) proposals;
         mapping(bytes32 id => mapping(address guardian => bool)) approvedBy;
+        /// @dev Start / effective end of the last freeze (cooldown bookkeeping; reset by a recovery).
+        uint64 freezeStart;
+        uint64 freezeEnd;
+        /// @dev Configured freeze duration; 0 = DEFAULT_FREEZE_DURATION.
+        uint64 freezeDuration;
+        /// @dev Bumped on every guardian-set change: invalidates freeze / unfreeze / cancel votes (the recovery
+        ///      nonce cannot be used: signers bump it with `cancelRecovery`).
+        uint32 guardianEpoch;
+        /// @dev Bumped on every freeze start / end: votes are single-use.
+        uint32 freezeNonce;
     }
 
     // ------------------------------------------------------------------------------------------- sessions ----

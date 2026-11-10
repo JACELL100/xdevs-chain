@@ -200,7 +200,7 @@ contract GuardianVaultTest is AccountTestBase {
     // Cancel / execute rules
     // ------------------------------------------------------------------------------------------------------------
 
-    function test_cancel_byOwnerOrGuardian_only() public {
+    function test_cancel_byOwnerOrGuardianThreshold_only() public {
         uint256 id1 = _exec(friend, 2 ether, "");
         uint256 id2 = _exec(friend, 3 ether, "");
 
@@ -213,7 +213,19 @@ contract GuardianVaultTest is AccountTestBase {
         vm.prank(owner);
         acct.cancel(id1);
 
+        // One guardian alone only votes (2-of-3 threshold): the action stays queued.
         vm.prank(guardian3);
+        acct.cancel(id2);
+        (, uint8 status,,) = acct.getAction(id2);
+        assertEq(status, 1, "still queued after a single guardian vote");
+        (, uint8 votes) = acct.guardianVotes(2, id2);
+        assertEq(votes, 1);
+        vm.prank(guardian3);
+        vm.expectRevert(IAccountEvents.AlreadyApproved.selector);
+        acct.cancel(id2);
+        vm.expectEmit(address(acct));
+        emit IGuardianVault.VaultActionCancelled(id2, guardian1);
+        vm.prank(guardian1);
         acct.cancel(id2);
 
         vm.warp(block.timestamp + 7 days);
@@ -411,14 +423,22 @@ contract GuardianVaultTest is AccountTestBase {
         uint256 lastId = acct.lastActionId();
         vm.stopPrank();
 
-        // 3. Within the 24 h window a guardian (or the real owner on another device) cancels everything.
+        // 3. Within the 24 h window the guardian threshold (2-of-3; or the real owner on another device) cancels
+        //    everything. A single guardian could not: one rogue guardian has no veto.
         vm.warp(block.timestamp + 6 hours);
-        vm.startPrank(guardian1);
-        for (uint256 id = drainId; id <= lastId; ++id) {
-            (, uint8 status,,) = acct.getAction(id);
-            if (status == 1) acct.cancel(id);
+        address[2] memory cancellers = [guardian1, guardian3];
+        for (uint256 g; g < 2; ++g) {
+            vm.startPrank(cancellers[g]);
+            for (uint256 id = drainId; id <= lastId; ++id) {
+                (, uint8 status,,) = acct.getAction(id);
+                if (status == 1) acct.cancel(id);
+            }
+            vm.stopPrank();
+            if (g == 0) {
+                (, uint8 st,,) = acct.getAction(drainId);
+                assertEq(st, 1, "one guardian alone cannot cancel");
+            }
         }
-        vm.stopPrank();
 
         // 4. After the delay nothing can be executed.
         vm.warp(block.timestamp + 2 days);
@@ -477,17 +497,39 @@ contract GuardianVaultFuzzTest is AccountTestBase {
         assertEq(friend.balance, ok ? amount : 0);
     }
 
-    /// @dev Once cancelled, an action can never execute, whoever cancels and whenever execution is tried.
+    /// @dev Once cancelled (by the owner alone or by any 2 of the 3 guardians), an action can never execute, whoever
+    ///      cancels and whenever execution is tried.
     function testFuzz_cancelledNeverExecutes(uint256 cancelAt, uint256 execAt, uint8 who) public {
         vm.prank(owner);
         uint256 id = acct.execute(friend, 2 ether, "");
         vm.warp(block.timestamp + bound(cancelAt, 0, 24 hours + 13 days));
-        address[4] memory cancellers = [owner, guardian1, guardian2, guardian3];
-        vm.prank(cancellers[who % 4]);
-        acct.cancel(id);
+        address[3] memory guardians = [guardian1, guardian2, guardian3];
+        uint256 w = who % 4;
+        if (w == 3) {
+            vm.prank(owner);
+            acct.cancel(id);
+        } else {
+            vm.prank(guardians[w]);
+            acct.cancel(id);
+            vm.prank(guardians[(w + 1) % 3]);
+            acct.cancel(id);
+        }
         vm.warp(block.timestamp + bound(execAt, 0, 30 days));
         (bool ok,) = address(acct).call(abi.encodeWithSignature("execute(uint256)", id));
         assertFalse(ok);
         assertEq(friend.balance, 0);
+    }
+
+    /// @dev A single guardian (below the 2-of-3 threshold) can never cancel, whenever it tries.
+    function testFuzz_singleGuardianCannotCancel(uint256 at, uint8 who) public {
+        vm.prank(owner);
+        uint256 id = acct.execute(friend, 2 ether, "");
+        vm.warp(block.timestamp + bound(at, 0, 24 hours - 1));
+        address[3] memory guardians = [guardian1, guardian2, guardian3];
+        vm.prank(guardians[who % 3]);
+        acct.cancel(id);
+        vm.warp(block.timestamp + 24 hours);
+        acct.execute(id);
+        assertEq(friend.balance, 2 ether);
     }
 }

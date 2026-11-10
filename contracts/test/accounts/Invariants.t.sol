@@ -6,6 +6,7 @@ import {StdCheats} from "forge-std/StdCheats.sol";
 import {StdUtils} from "forge-std/StdUtils.sol";
 
 import {AccountTestBase, IXAccount} from "./utils/AccountTestBase.sol";
+import {AccountConstants} from "../../src/accounts/libraries/AccountConstants.sol";
 import {
     Call,
     InitParams,
@@ -50,11 +51,14 @@ contract VaultHandler is CommonBase, StdCheats, StdUtils {
     uint256 public executeAfterMismatches;
     uint256 public successfulExecutions;
     uint256 public successfulCancels;
+    uint256 public singleGuardianCancels;
+    address public immutable guardian2;
 
     constructor(
         IXAccount acct_,
         address owner_,
         address guardian_,
+        address guardian2_,
         address recipient_,
         VaultPolicy memory initial
     ) {
@@ -62,6 +66,7 @@ contract VaultHandler is CommonBase, StdCheats, StdUtils {
         owner = owner_;
         guardian = guardian_;
         recipient = recipient_;
+        guardian2 = guardian2_;
         expected = initial;
         ghostDelay = initial.delay;
     }
@@ -106,14 +111,25 @@ contract VaultHandler is CommonBase, StdCheats, StdUtils {
         _record(id, 0, true);
     }
 
+    /// @dev Owner cancels alone; guardians need 2-of-3 (a single guardian vote must never cancel).
     function cancel(uint256 idSeed, bool byGuardian) external {
         if (ids.length == 0) return;
         uint256 id = ids[idSeed % ids.length];
         vm.prank(byGuardian ? guardian : owner);
         try acct.cancel(id) {
+            (, uint8 status,,) = acct.getAction(id);
+            if (byGuardian) {
+                // First guardian vote: must not have cancelled; the second guardian completes the threshold.
+                if (status == 2) ++singleGuardianCancels;
+                vm.prank(guardian2);
+                try acct.cancel(id) {} catch {}
+                (, status,,) = acct.getAction(id);
+            }
             Ghost storage g = ghosts[id];
-            if (!g.executed) g.cancelled = true;
-            ++successfulCancels;
+            if (!g.executed && status == 2) {
+                g.cancelled = true;
+                ++successfulCancels;
+            }
         } catch {}
     }
 
@@ -164,7 +180,7 @@ contract VaultInvariantTest is AccountTestBase {
         super.setUp();
         acct = _createAccount(_params(_one(_ecdsaSigner(owner)), true), 0);
         vm.deal(address(acct), 1_000_000 ether);
-        handler = new VaultHandler(acct, owner, guardian1, recipient, acct.vaultPolicy());
+        handler = new VaultHandler(acct, owner, guardian1, guardian2, recipient, acct.vaultPolicy());
         targetContract(address(handler));
     }
 
@@ -178,6 +194,11 @@ contract VaultInvariantTest is AccountTestBase {
     function invariant_cancelledNeverExecutes() public view {
         assertEq(handler.cancelledExecutions(), 0);
         assertEq(handler.doubleExecutions(), 0);
+    }
+
+    /// @notice A single guardian below the threshold can never cancel.
+    function invariant_singleGuardianNeverCancels() public view {
+        assertEq(handler.singleGuardianCancels(), 0);
     }
 
     /// @notice Policy changes never take effect before their delay: the on-chain policy always equals the last
@@ -402,5 +423,166 @@ contract RecoveryInvariantTest is AccountTestBase {
         uint256 last = handler.lastRecovered();
         address expectedSigner = last == type(uint256).max ? owner : (last == 0 ? newOwner1 : newOwner2);
         assertEq(s[0].x, bytes32(uint256(uint160(expectedSigner))));
+    }
+}
+
+// ================================================================================================================
+// Guardian freeze: nothing executes while frozen, bounded duration, threshold only
+// ================================================================================================================
+
+contract FreezeHandler is CommonBase, StdCheats, StdUtils {
+    IXAccount public immutable acct;
+    address public immutable owner;
+    address public immutable sessionKey;
+    address public immutable recipient;
+    address[3] internal guardians;
+
+    uint256 public frozenSuccesses; // any owner / session / queued execution that succeeded while frozen
+    uint256 public singleGuardianFreezes; // a freeze that took effect with fewer votes than the threshold
+    uint256 public freezes;
+    uint256 public lastFreezeStart;
+    uint256 public queuedIds;
+    mapping(uint256 => uint256) internal queued;
+
+    constructor(
+        IXAccount acct_,
+        address owner_,
+        address sessionKey_,
+        address recipient_,
+        address[3] memory g
+    ) {
+        acct = acct_;
+        owner = owner_;
+        sessionKey = sessionKey_;
+        recipient = recipient_;
+        guardians = g;
+    }
+
+    function voteFreeze(uint256 gSeed) external {
+        (, uint8 votesBefore) = acct.guardianVotes(0, 0);
+        bool wasFrozen = acct.isFrozen();
+        vm.prank(guardians[gSeed % 3]);
+        try acct.freeze() {} catch {}
+        if (!wasFrozen && acct.isFrozen()) {
+            ++freezes;
+            lastFreezeStart = block.timestamp;
+            if (votesBefore + 1 < 2) ++singleGuardianFreezes;
+        }
+    }
+
+    /// @dev Biases the campaign towards actually freezing.
+    function voteFreezeTwo(uint256 gSeed) external {
+        this.voteFreeze(gSeed);
+        this.voteFreeze(gSeed + 1);
+    }
+
+    function voteUnfreeze(uint256 gSeed) external {
+        vm.prank(guardians[gSeed % 3]);
+        try acct.unfreeze() {} catch {}
+    }
+
+    function ownerSpend(uint256 amount) external {
+        amount = bound(amount, 0, 3 ether);
+        bool frozen = acct.isFrozen();
+        vm.prank(owner);
+        try acct.execute(recipient, amount, "") returns (uint256 id) {
+            if (frozen) ++frozenSuccesses;
+            if (id != 0) queued[queuedIds++] = id;
+        } catch {}
+    }
+
+    function ownerCancelRecovery() external {
+        bool frozen = acct.isFrozen();
+        vm.prank(owner);
+        try acct.cancelRecovery() {
+            if (frozen) ++frozenSuccesses;
+        } catch {}
+    }
+
+    function ownerCancel(uint256 seed) external {
+        if (queuedIds == 0) return;
+        bool frozen = acct.isFrozen();
+        vm.prank(owner);
+        try acct.cancel(queued[seed % queuedIds]) {
+            if (frozen) ++frozenSuccesses;
+        } catch {}
+    }
+
+    function executeQueued(uint256 seed) external {
+        if (queuedIds == 0) return;
+        bool frozen = acct.isFrozen();
+        try acct.execute(queued[seed % queuedIds]) {
+            if (frozen) ++frozenSuccesses;
+        } catch {}
+    }
+
+    function sessionSpend(uint256 amount) external {
+        Call[] memory calls = new Call[](1);
+        calls[0] = Call(recipient, bound(amount, 0, 0.5 ether), "");
+        bool frozen = acct.isFrozen();
+        vm.prank(sessionKey);
+        try acct.executeWithSession(calls) {
+            if (frozen) ++frozenSuccesses;
+        } catch {}
+    }
+
+    /// @dev Guardians recover to the same owner key (keeps the handler's owner usable afterwards).
+    function recover(uint256 gSeed, bool execute_) external {
+        Signer[] memory ns = new Signer[](1);
+        ns[0] = Signer(SignerType.ECDSA, bytes32(uint256(uint160(owner))), bytes32(0));
+        vm.prank(guardians[gSeed % 3]);
+        try acct.approveRecovery(ns) {} catch {}
+        if (execute_) {
+            try acct.executeRecovery(ns) {} catch {}
+        }
+    }
+
+    function warp(uint256 dt) external {
+        vm.warp(block.timestamp + bound(dt, 0, 20 days));
+    }
+}
+
+contract FreezeInvariantTest is AccountTestBase {
+    FreezeHandler internal handler;
+    IXAccount internal acct;
+
+    function setUp() public override {
+        super.setUp();
+        acct = _vaultAccount();
+        vm.deal(address(acct), 1_000_000 ether);
+        address key = makeAddr("session");
+        SessionKeyConfig memory cfg;
+        cfg.key = key;
+        cfg.validUntil = uint48(block.timestamp + 3650 days);
+        cfg.nativeCap = 1_000 ether;
+        cfg.permissions = new SessionPermission[](1);
+        cfg.permissions[0] = SessionPermission(makeAddr("recipient"), bytes4(0));
+        cfg.tokenCaps = new SessionTokenCap[](0);
+        vm.prank(owner);
+        acct.addSessionKey(cfg);
+        handler =
+            new FreezeHandler(acct, owner, key, makeAddr("recipient"), [guardian1, guardian2, guardian3]);
+        targetContract(address(handler));
+    }
+
+    /// @notice While frozen nothing executes (owner, session key, queued actions, recovery cancels).
+    function invariant_nothingExecutesWhileFrozen() public view {
+        assertEq(handler.frozenSuccesses(), 0);
+    }
+
+    /// @notice A freeze never outlives MAX_FREEZE_DURATION.
+    function invariant_freezeBounded() public view {
+        (uint64 frozenUntil,,) = acct.freezeState();
+        if (frozenUntil != 0) {
+            assertLe(frozenUntil, handler.lastFreezeStart() + AccountConstants.MAX_FREEZE_DURATION);
+        }
+        if (acct.isFrozen()) {
+            assertLt(block.timestamp, handler.lastFreezeStart() + AccountConstants.MAX_FREEZE_DURATION);
+        }
+    }
+
+    /// @notice A single guardian below the threshold can never freeze.
+    function invariant_singleGuardianNeverFreezes() public view {
+        assertEq(handler.singleGuardianFreezes(), 0);
     }
 }

@@ -14,7 +14,11 @@ import {Predeploys} from "../../../src/common/Predeploys.sol";
 import {XdevsSmartAccount} from "../../../src/accounts/XdevsSmartAccount.sol";
 import {SmartAccountFactory} from "../../../src/accounts/SmartAccountFactory.sol";
 import {XdevsPaymaster} from "../../../src/accounts/paymaster/XdevsPaymaster.sol";
-import {IAccountExtension, IAccountEvents} from "../../../src/accounts/interfaces/IXdevsSmartAccount.sol";
+import {
+    IAccountExtension,
+    IAccountEvents,
+    IGuardianFreeze
+} from "../../../src/accounts/interfaces/IXdevsSmartAccount.sol";
 import {AccountConstants} from "../../../src/accounts/libraries/AccountConstants.sol";
 import {
     Call,
@@ -27,10 +31,10 @@ import {
     SessionPermission,
     SessionTokenCap
 } from "../../../src/accounts/libraries/AccountTypes.sol";
-import {P256VerifierMock, MockERC20, MockERC721, Counter} from "./Mocks.sol";
+import {MockERC20, MockERC721, Counter} from "./Mocks.sol";
 
 /// @notice Combined ABI of the account core + extension, used by tests to call everything on the account address.
-interface IXAccount is IAccountExtension, IAccountEvents {
+interface IXAccount is IAccountExtension, IGuardianFreeze, IAccountEvents {
     function execute(address target, uint256 value, bytes calldata data) external returns (uint256);
     function executeBatch(Call[] calldata calls) external returns (uint256);
     function executeWithSession(Call[] calldata calls) external;
@@ -46,7 +50,8 @@ interface IXAccount is IAccountExtension, IAccountEvents {
 }
 
 /// @notice Shared fixture: mirrors the genesis layout (runtime code etched at the predeploy addresses, no
-///         constructor at the final address), installs the canonical v0.9 EntryPoint and a P-256 verifier at 0x100.
+///         constructor at the final address) and installs the canonical v0.9 EntryPoint. P-256 verification uses
+///         the EVM's native EIP-7951 precompile (Osaka).
 abstract contract AccountTestBase is Test {
     uint256 internal constant P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551;
 
@@ -81,8 +86,8 @@ abstract contract AccountTestBase is Test {
         );
         ep = IEntryPoint(AccountConstants.ENTRY_POINT);
 
-        // P256VERIFY precompile stand-in.
-        vm.etch(Predeploys.P256_VERIFY, address(new P256VerifierMock()).code);
+        // P256VERIFY (EIP-7951) at 0x100 is native under `evm_version = "osaka"`, exactly as on the node (revm Osaka).
+        require(_hasNativeP256(), "P256VERIFY (EIP-7951) missing at 0x100: run with evm_version = osaka");
 
         // Genesis-style predeploys: runtime code only, empty storage.
         vm.etch(Predeploys.SMART_ACCOUNT_IMPL, address(new XdevsSmartAccount()).code);
@@ -101,6 +106,15 @@ abstract contract AccountTestBase is Test {
         usd = new MockERC20();
         nft = new MockERC721();
         counter = new Counter();
+    }
+
+    function _hasNativeP256() internal returns (bool) {
+        uint256 pk = 7;
+        (uint256 x, uint256 y) = vm.publicKeyP256(pk);
+        bytes32 h = keccak256("probe");
+        (bytes32 r, bytes32 s) = vm.signP256(pk, h);
+        (bool ok, bytes memory ret) = Predeploys.P256_VERIFY.staticcall(abi.encode(h, r, s, x, y));
+        return ok && ret.length == 32 && abi.decode(ret, (uint256)) == 1;
     }
 
     // ------------------------------------------------------------------------------------------------------------

@@ -25,9 +25,11 @@ import {Call} from "../libraries/AccountTypes.sol";
 ///      | any other call with calldata                     | target whitelisted                                    |
 ///      | native value to a non-whitelisted target         | batch total <= nativeThreshold and within dailyLimit  |
 ///
-///      Queued actions can be cancelled by the owner (any signer) or a guardian until executed, and executed by
-///      anyone in `[executeAfter, executeAfter + VAULT_EXECUTION_WINDOW]`. A social recovery bumps the action epoch,
-///      invalidating everything queued before it. Policy changes are themselves self-calls and therefore queued.
+///      Queued actions can be cancelled until executed by the owner (any signer, alone, unless the account is
+///      frozen) or by the guardian threshold (each guardian's `cancel(id)` is a vote, so one rogue guardian cannot
+///      veto), and executed by anyone in `[executeAfter, executeAfter + VAULT_EXECUTION_WINDOW]` (not while frozen).
+///      A social recovery bumps the action epoch, invalidating everything queued before it. Policy changes are
+///      themselves self-calls and therefore queued. While the account is frozen nothing is executed or queued.
 abstract contract VaultDispatcher is AccountCore, IGuardianVault {
     /// @dev Self-call selectors executed instantly even with the vault enabled.
     function _isInstantSelfSelector(bytes4 selector) internal pure virtual returns (bool);
@@ -38,9 +40,17 @@ abstract contract VaultDispatcher is AccountCore, IGuardianVault {
 
     /// @inheritdoc IGuardianVault
     function cancel(uint256 id) external {
-        _requireOwnerOrGuardian();
         AccountStorage.QueuedAction storage a = AccountStorage.vault().actions[id];
         if (a.status != AccountStorage.ActionStatus.Queued) revert ActionNotQueued(id);
+        bool owner = _isOwnerCaller();
+        if (!owner || _isFrozen()) {
+            // Guardian path (also for a frozen signer who happens to be a guardian): threshold vote.
+            if (!AccountStorage.isGuardian(msg.sender)) {
+                if (owner) revert AccountIsFrozen();
+                revert Unauthorized();
+            }
+            if (!_guardianVote(_voteId(VOTE_CANCEL, id))) return;
+        }
         a.status = AccountStorage.ActionStatus.Cancelled;
         delete a.calls;
         emit VaultActionCancelled(id, msg.sender);
@@ -48,6 +58,7 @@ abstract contract VaultDispatcher is AccountCore, IGuardianVault {
 
     /// @inheritdoc IGuardianVault
     function execute(uint256 id) external {
+        _requireNotFrozen();
         AccountStorage.Vault storage $ = AccountStorage.vault();
         AccountStorage.QueuedAction storage a = $.actions[id];
         if (a.status != AccountStorage.ActionStatus.Queued) revert ActionNotQueued(id);
@@ -93,6 +104,7 @@ abstract contract VaultDispatcher is AccountCore, IGuardianVault {
     /// @dev Executes `calls` instantly or queues them according to the policy. Session executions can never be
     ///      queued: they revert instead. Returns the queued action id (0 when executed instantly).
     function _dispatch(Call[] memory calls, bool isSession) internal returns (uint256) {
+        _requireNotFrozen();
         AccountStorage.Vault storage $ = AccountStorage.vault();
         _rollGasBudget($);
         if (!$.policy.enabled) {

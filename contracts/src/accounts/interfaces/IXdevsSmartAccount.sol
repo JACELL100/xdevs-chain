@@ -34,6 +34,15 @@ interface IAccountEvents {
     event RecoveryReady(bytes32 indexed id, uint64 readyAt);
     event RecoveryExecuted(bytes32 indexed id);
     event RecoveryCancelled(uint64 newNonce);
+    // guardian freeze / votes
+    event GuardianVoted(bytes32 indexed voteId, address indexed guardian, uint8 votes);
+    event AccountFrozen(uint64 frozenUntil);
+    event AccountUnfrozen();
+    event FreezeDurationUpdated(uint64 duration);
+    // XIP-0001 EOA lock
+    /// @dev `state`: 0 unlocked, 1 locked, 2 sealed (XIP-0001 lock word).
+    event EoaLockUpdated(uint256 state);
+    event EoaKeyRevoked();
     // sessions
     event SessionKeyAdded(
         address indexed key, uint64 nonce, uint48 validAfter, uint48 validUntil, uint128 nativeCap
@@ -63,6 +72,14 @@ interface IAccountEvents {
     error AlreadyApproved();
     error RecoveryNotReady();
     error InvalidGuardians();
+    // freeze
+    error AccountIsFrozen();
+    error NotFrozen();
+    error FreezeCooldown(uint64 until);
+    // EOA lock
+    error NotDelegatedEoa();
+    error VaultDisabled();
+    error EoaKeyInactive();
     // sessions
     error InvalidSession();
     error SessionNotActive(address key);
@@ -72,6 +89,25 @@ interface IAccountEvents {
     // upgrades / extension
     error NotProxy();
     error InvalidImplementation();
+}
+
+/// @title IGuardianFreeze
+/// @notice Guardian freeze of an xDEVS smart account (served by the account core).
+interface IGuardianFreeze {
+    /// @notice Guardian vote to freeze the account; takes effect at the recovery threshold. Frozen for
+    ///         `max(freezeDuration, recoveryDelay + 3 days)` (<= 60 days): no signer / session key action, no queued
+    ///         execution, no ERC-1271, no recovery cancel. On an EIP-7702 account the XIP-0001 lock word is SEALED.
+    ///         Refused during the anti-hostage cooldown (unfrozen for as long as the previous freeze lasted).
+    function freeze() external;
+    /// @notice Guardian vote to lift a freeze early (threshold). A completed recovery also unfreezes.
+    function unfreeze() external;
+    function isFrozen() external view returns (bool);
+    function freezeState()
+        external
+        view
+        returns (uint64 frozenUntil, uint64 freezeDuration, uint64 nextFreezeAllowedAt);
+    /// @notice Current guardian votes of a kind (0 freeze, 1 unfreeze, 2 cancel of `actionId`).
+    function guardianVotes(uint8 kind, uint256 actionId) external view returns (bytes32 voteId, uint8 votes);
 }
 
 /// @title IAccountExtension
@@ -128,6 +164,17 @@ interface IAccountExtension {
         external
         view
         returns (bytes32 id, uint8 approvals, uint64 readyAt);
+
+    // guardian freeze configuration (freeze / unfreeze: IGuardianFreeze, served by the core)
+    function setFreezeDuration(uint64 duration) external;
+
+    // XIP-0001 EOA lock (EIP-7702 accounts)
+    function enableEoaLock() external;
+    function disableEoaLock() external;
+    function isEoaLocked() external view returns (bool);
+    function eoaLockState() external view returns (uint256);
+    function refreshEoaLock() external;
+    function isEoaKeyActive() external view returns (bool);
 
     // sessions
     function addSessionKey(SessionKeyConfig calldata cfg) external;

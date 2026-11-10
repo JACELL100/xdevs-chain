@@ -32,10 +32,11 @@ interface IAccountExecuteSelf {
 ///      factory, every state-changing function fails its authorization (the factory has no signers / guardians and
 ///      its code is non-empty), so the factory's own (unused) storage cannot be meaningfully modified.
 ///
-///      Delay semantics (vault enabled): `removeSigner`, `setGuardians`, `setRecoveryDelay`, `setPolicy`,
-///      `setVaultPolicy`, `setWhitelisted`, `setTokenLimit`, `approveHash` and `upgradeToAndCall` are `delayedSelf`:
-///      an owner calling them gets a queued vault action instead. Adding keys / sessions and every revocation /
-///      cancellation stay instant.
+///      Delay semantics (vault enabled): `removeSigner`, `setGuardians`, `setRecoveryDelay`, `setFreezeDuration`,
+///      `setPolicy`, `setVaultPolicy`, `setWhitelisted`, `setTokenLimit`, `approveHash`, `disableEoaLock` and
+///      `upgradeToAndCall` are `delayedSelf`: an owner calling them gets a queued vault action instead. Adding keys /
+///      sessions, enabling the EOA lock and every revocation / cancellation stay instant. While the account is frozen
+///      no owner function works at all (`_requireOwner`).
 abstract contract AccountExtension is AccountCore, IAccountExtension {
     bytes32 private constant INIT_TYPEHASH =
         keccak256("XdevsAccountInit(uint256 chainId,address account,bytes32 params)");
@@ -86,6 +87,9 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
         AccountStorage.Core storage $ = AccountStorage.core();
         if ($.initialized) revert AlreadyInitialized();
         $.initialized = true;
+        // The EOA lock can only be enabled after initialization: a non-zero value here is garbage left by a previous
+        // EIP-7702 delegate, which must not lock the EOA by surprise.
+        _writeEoaLock(0);
 
         _replaceSigners(p.signers);
         _setGuardians(p.guardians, p.guardianThreshold);
@@ -125,8 +129,10 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
 
     /// @notice Adds a signer (e.g. a new device). Instant: an extra key does not increase a thief's power, and a
     ///         social recovery replaces the whole signer set.
+    ///         Listing the account address itself re-activates a revoked EIP-7702 EOA key (lock word SEALED -> LOCKED).
     function addSigner(Signer calldata s) external onlyOwner {
         _addSigner(s);
+        _syncEoaLock();
     }
 
     /// @notice Removes a signer. Delayed by the vault (a thief must not be able to lock the owner out instantly).
@@ -142,6 +148,7 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
         delete $.indexPlusOne[id];
         delete $.signers[id];
         emit SignerRemoved(id);
+        _syncEoaLock();
     }
 
     function _addSigner(Signer memory s) private {
@@ -348,6 +355,9 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
 
     /// @notice Executes a recovery whose threshold was reached and whose delay elapsed. Callable by anyone.
     ///         Replaces the signer set, revokes all session keys and invalidates every queued vault action.
+    ///         Also revokes the account address's own key (the EOA key of an EIP-7702 account) unless `newSigners`
+    ///         lists it explicitly — sealing a 7702 account at the protocol level (XIP-0001) — and ends a guardian
+    ///         freeze (resetting the freeze cooldown).
     function executeRecovery(Signer[] calldata newSigners) external {
         AccountStorage.Recovery storage $ = AccountStorage.recovery();
         bytes32 id = _recoveryId($, newSigners);
@@ -360,6 +370,14 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
         }
         emit RecoveryExecuted(id);
         _replaceSigners(newSigners);
+        AccountStorage.core().eoaKeyRevoked = true;
+        emit EoaKeyRevoked();
+        if ($.frozenUntil != 0) _endFreeze($);
+        $.freezeStart = 0;
+        $.freezeEnd = 0;
+        // 7702 account whose EOA key was revoked => SEALED (even if it was not locked). A kept key (listed in
+        // `newSigners`) keeps the previous lock state.
+        _syncEoaLock();
         _revokeAllSessions();
         AccountStorage.Vault storage v = AccountStorage.vault();
         unchecked {
@@ -368,7 +386,7 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
         emit VaultEpochBumped(v.epoch);
     }
 
-    /// @notice Owner cancels every pending recovery proposal (nonce bump).
+    /// @notice Owner cancels every pending recovery proposal (nonce bump). Impossible while frozen.
     function cancelRecovery() external onlyOwner {
         AccountStorage.Recovery storage $ = AccountStorage.recovery();
         unchecked {
@@ -440,6 +458,7 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
         $.threshold = threshold;
         unchecked {
             ++$.nonce; // invalidate approvals collected under the previous guardian set
+            ++$.guardianEpoch; // ... and freeze / unfreeze / cancel votes
         }
         emit GuardiansUpdated(guardians, threshold);
     }
@@ -451,6 +470,66 @@ abstract contract AccountExtension is AccountCore, IAccountExtension {
         }
         AccountStorage.recovery().delay = delay;
         emit RecoveryDelayUpdated(delay);
+    }
+
+    // ============================================================================================================
+    // Guardian freeze configuration (freeze / unfreeze themselves are in the core: base/GuardianFreeze.sol)
+    // ============================================================================================================
+
+    /// @notice Sets the freeze duration (0 = 30 days; bounds [3 d, 60 d]). Delayed by the vault. A freeze always
+    ///         lasts at least `recoveryDelay + 3 days`.
+    function setFreezeDuration(uint64 duration) external delayedSelf {
+        if (duration == 0) duration = AccountConstants.DEFAULT_FREEZE_DURATION;
+        if (
+            duration < AccountConstants.MIN_FREEZE_DURATION || duration > AccountConstants.MAX_FREEZE_DURATION
+        ) {
+            revert InvalidParameter();
+        }
+        AccountStorage.recovery().freezeDuration = duration;
+        emit FreezeDurationUpdated(duration);
+    }
+
+    // ============================================================================================================
+    // XIP-0001 EOA lock (EIP-7702 accounts only; enforced by the node, see docs/specs/xip-0001-eoa-lock.md)
+    // ============================================================================================================
+
+    /// @notice Locks the EOA key at the protocol level (XIP-0001): once set, the node only accepts transactions from
+    ///         this address that are value-0 calls to itself, i.e. that enter this account's code, where the Guardian
+    ///         Vault applies to the EOA key like to any signer (no plain transfers, no direct calls, no
+    ///         re-delegation). The account itself upgrades the word to SEALED (no transaction at all) while frozen or
+    ///         after a recovery revoked the EOA key. Instant; owner only; requires an EIP-7702 delegation to the
+    ///         implementation (meaningless for factory accounts, which have no private key) and an enabled vault.
+    function enableEoaLock() external onlyOwner {
+        if (!_isDelegatedEoa()) revert NotDelegatedEoa();
+        if (!AccountStorage.vault().policy.enabled) revert VaultDisabled();
+        _writeEoaLock(_lockedWord());
+    }
+
+    /// @notice Lifts the EOA lock. Delayed by the vault (a thief holding the EOA key cannot lift it instantly).
+    ///         Refused while the EOA key is revoked: the lock is what prevents a revoked key from re-delegating.
+    function disableEoaLock() external delayedSelf {
+        if (!_eoaKeyActive()) revert EoaKeyInactive();
+        _writeEoaLock(0);
+    }
+
+    /// @notice Permissionless: re-derives LOCKED / SEALED (e.g. back to LOCKED after a freeze expired by itself).
+    function refreshEoaLock() external {
+        _syncEoaLock();
+    }
+
+    /// @notice True iff the node applies XIP-0001 to this account (delegated to the implementation + word != 0).
+    function isEoaLocked() external view returns (bool) {
+        return _isDelegatedEoa() && _eoaLockWord() != 0;
+    }
+
+    /// @notice Raw XIP-0001 lock word: 0 unlocked, 1 locked, 2 sealed.
+    function eoaLockState() external view returns (uint256) {
+        return _eoaLockWord();
+    }
+
+    /// @notice Whether the account address's own key (EIP-7702 EOA key) still has owner authority.
+    function isEoaKeyActive() external view returns (bool) {
+        return _eoaKeyActive();
     }
 
     // ============================================================================================================

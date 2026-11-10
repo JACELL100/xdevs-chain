@@ -29,6 +29,31 @@ library AccountConstants {
     uint64 internal constant MIN_RECOVERY_DELAY = 1 hours;
     uint64 internal constant MAX_RECOVERY_DELAY = 30 days;
 
+    /// @notice Guardian freeze (see `AccountExtension.freeze`). A freeze lasts `max(freezeDuration, recoveryDelay +
+    ///         FREEZE_RECOVERY_GRACE)` and never more than `MAX_FREEZE_DURATION`; after it ends, a new freeze is only
+    ///         possible once the account has been unfrozen for as long as it was frozen (anti-hostage cooldown).
+    uint64 internal constant DEFAULT_FREEZE_DURATION = 30 days;
+    uint64 internal constant MIN_FREEZE_DURATION = 3 days;
+    uint64 internal constant MAX_FREEZE_DURATION = 60 days;
+    /// @dev A recovery approved right after the freeze always matures (and can be executed) while still frozen.
+    ///      MAX_RECOVERY_DELAY + FREEZE_RECOVERY_GRACE <= MAX_FREEZE_DURATION.
+    uint64 internal constant FREEZE_RECOVERY_GRACE = 3 days;
+
+    /// @notice XIP-0001 "EOA lock" word of an EIP-7702 delegated EOA: `bytes32(uint256(keccak256(
+    ///         "xdevs.account.eoaLock")) - 1)`. A plain storage slot (not ERC-7201-masked, not inside a struct) so
+    ///         the node can read it without any ABI knowledge. Values: 0 = unlocked, `EOA_LOCKED` (1) = the EOA may
+    ///         only send value-0 transactions to itself, `EOA_SEALED` (2) = the EOA may send no transaction at all
+    ///         (written while the account is frozen or after a recovery revoked the EOA key). Any other non-zero
+    ///         value (garbage from a previous delegate) is treated as LOCKED by the node.
+    /// @dev The node applies the rules iff the code is exactly `0xef0100 || 0x…1005` (docs/specs/xip-0001-eoa-lock.md).
+    bytes32 internal constant EOA_LOCK_SLOT =
+        0xfd81d7eef3094fecca95e5e53fe72709c7315b39f65e414992ead9c855e841ce;
+    uint256 internal constant EOA_LOCKED = 1;
+    uint256 internal constant EOA_SEALED = 2;
+    /// @notice keccak256(0xef0100 || 0x…1005): code hash of an EOA delegated to the account implementation.
+    bytes32 internal constant EIP7702_DESIGNATOR_HASH =
+        0x4879b5ba5d3e15615c1dc61bbc61a36231da1b95582299c433c2edbee1ad7333;
+
     uint256 internal constant MAX_SIGNERS = 16;
     uint256 internal constant MAX_GUARDIANS = 16;
     uint256 internal constant MAX_WHITELIST = 64;

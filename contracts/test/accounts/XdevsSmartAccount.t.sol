@@ -255,8 +255,26 @@ contract XdevsSmartAccountTest is AccountTestBase {
         IXAccount acct = _createAccount(_params(_one(_passkeySigner()), false), 0);
         bytes32 h = keccak256("msg");
         bytes memory sig = _passkeySig(acct.replaySafeHash(h));
-        vm.etch(Predeploys.P256_VERIFY, "");
+        // Simulate a chain without the precompile (a call to an empty account succeeds with no return data).
+        // `vm.etch` cannot target a real precompile, so mock its empty answer instead.
+        vm.mockCall(Predeploys.P256_VERIFY, bytes(""), bytes(""));
         assertEq(acct.isValidSignature(h, sig), bytes4(0xffffffff));
+    }
+
+    /// @dev Under `evm_version = "osaka"` 0x100 is the native EIP-7951 precompile, exactly as on the node (revm
+    ///      Osaka): no code at 0x100, valid -> uint256(1), invalid -> empty output, no stand-in anywhere.
+    function test_p256Precompile_nativeUnderOsaka() public view {
+        assertEq(Predeploys.P256_VERIFY.code.length, 0);
+        uint256 pk = 42;
+        (uint256 x, uint256 y) = vm.publicKeyP256(pk);
+        bytes32 h = keccak256("passkey");
+        (bytes32 r, bytes32 s) = vm.signP256(pk, h);
+        (bool ok, bytes memory ret) = Predeploys.P256_VERIFY.staticcall(abi.encode(h, r, s, x, y));
+        assertTrue(ok);
+        assertEq(abi.decode(ret, (uint256)), 1);
+        (ok, ret) = Predeploys.P256_VERIFY.staticcall(abi.encode(keccak256("other"), r, s, x, y));
+        assertTrue(ok);
+        assertEq(ret.length, 0);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -362,7 +380,9 @@ contract XdevsSmartAccountTest is AccountTestBase {
         acct.upgradeToAndCall(address(v2), "");
         uint256 id = acct.lastActionId();
         vm.prank(guardian2);
-        acct.cancel(id);
+        acct.cancel(id); // vote 1 of 2
+        vm.prank(guardian3);
+        acct.cancel(id); // threshold reached -> cancelled
         vm.warp(block.timestamp + 30 days);
         vm.expectRevert(abi.encodeWithSelector(IAccountEvents.ActionNotQueued.selector, id));
         acct.execute(id);
