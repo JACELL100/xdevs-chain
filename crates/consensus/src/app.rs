@@ -37,7 +37,10 @@ impl Validity {
 pub enum BlockOrigin {
     /// A live proposal for the current height (the timeliness check applies).
     Consensus,
-    /// An already-decided block received through block sync (ValueSync).
+    /// An already-decided block received through block sync (ValueSync), or a
+    /// re-proposal of a value that already has a polka (`pol_round` set): more than 2/3
+    /// already prevoted it, so the subjective timeliness (clock) check must not apply.
+    /// Every other rule does.
     Sync,
 }
 

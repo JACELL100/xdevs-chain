@@ -6,7 +6,8 @@
 //! * [`signer`] — Ed25519 `Signer` / `Verifier`; the signer checks the SignGuard first.
 //! * [`store`] — `consensus.redb`: SignGuard state and undecided blocks (§6.7).
 //! * [`streaming`] — proposal parts and their reassembly with per-peer budgets.
-//! * [`engine`] — config mapping, engine start / stop and the `AppMsg` loop (§6.3).
+//! * [`engine`] — config mapping, engine start / stop, stream admission and the `AppMsg`
+//!   loop (§6.3).
 
 pub(crate) mod codec;
 pub(crate) mod context;
@@ -14,6 +15,9 @@ pub(crate) mod engine;
 pub(crate) mod signer;
 pub(crate) mod store;
 pub(crate) mod streaming;
+
+#[cfg(test)]
+mod byzantine_tests;
 
 pub(crate) use arc_malachitebft_app_channel::app::types::core::LinearTimeouts;
 pub(crate) use arc_malachitebft_signing_ed25519::{Ed25519, PrivateKey, PublicKey, Signature};

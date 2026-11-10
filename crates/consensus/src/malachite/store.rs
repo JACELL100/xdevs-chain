@@ -12,7 +12,7 @@
 //!
 //! Every write commits with `Durability::Immediate` (fsync).
 
-use super::codec::{decode_block, encode_block};
+use super::codec::{body_matches_header, decode_block, encode_block};
 use crate::types::ValidatorAddress;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use redb::{Database, Durability, ReadableDatabase, ReadableTable, TableDefinition};
@@ -217,28 +217,62 @@ impl ConsensusStore {
 
     // -- Undecided blocks ---------------------------------------------------
 
-    /// Store a proposed or synced block under `(height, hash)`.
+    /// Store a proposed or synced block under `(height, hash)`. Refuses a block whose
+    /// hash is not `hash` or whose body does not match its header (the header hash
+    /// would not identify it). An entry already held is kept only if it is a valid
+    /// encoding of a matching block; anything else (written by an older version) is
+    /// replaced.
     pub fn put_block(&self, height: u64, hash: B256, block: &Block) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            block.hash() == hash && body_matches_header(block),
+            "consensus.redb: refusing to store block {hash} at height {height}: its body does not match its header"
+        );
         let mut tx = self.db.begin_write().map_err(err)?;
         tx.set_durability(Durability::Immediate).map_err(err)?;
         {
             let mut t = tx.open_table(UNDECIDED_BLOCKS).map_err(err)?;
             let key = block_key(height, hash);
-            if t.get(&key[..]).map_err(err)?.is_none() {
+            let keep = match t.get(&key[..]).map_err(err)? {
+                Some(v) => decode_block(v.value()).is_ok_and(|b| b.hash() == hash),
+                None => false,
+            };
+            if !keep {
                 t.insert(&key[..], &encode_block(block)[..]).map_err(err)?;
             }
         }
         tx.commit().map_err(err)
     }
 
-    /// The block stored under `(height, hash)`.
+    /// The block stored under `(height, hash)`. An entry that does not decode to a
+    /// matching block counts as absent (it is never served or committed).
     pub fn get_block(&self, height: u64, hash: B256) -> anyhow::Result<Option<Block>> {
         let tx = self.db.begin_read().map_err(err)?;
         let t = tx.open_table(UNDECIDED_BLOCKS).map_err(err)?;
         let Some(v) = t.get(&block_key(height, hash)[..]).map_err(err)? else {
             return Ok(None);
         };
-        decode_block(v.value()).map(Some).map_err(err)
+        match decode_block(v.value()) {
+            Ok(b) if b.hash() == hash => Ok(Some(b)),
+            Ok(_) => {
+                tracing::warn!(target: "xdevs::consensus", height, %hash, "stored block has another hash; ignored");
+                Ok(None)
+            }
+            Err(e) => {
+                tracing::warn!(target: "xdevs::consensus", height, %hash, "stored block is invalid ({e}); ignored");
+                Ok(None)
+            }
+        }
+    }
+
+    /// Write raw bytes under a block key (tests: an entry from a buggy older version).
+    #[cfg(test)]
+    pub fn put_raw_block(&self, height: u64, hash: B256, bytes: &[u8]) -> anyhow::Result<()> {
+        let tx = self.db.begin_write().map_err(err)?;
+        {
+            let mut t = tx.open_table(UNDECIDED_BLOCKS).map_err(err)?;
+            t.insert(&block_key(height, hash)[..], bytes).map_err(err)?;
+        }
+        tx.commit().map_err(err)
     }
 
     /// Record (or update) the metadata of a proposal for `(height, round, hash)`.
@@ -282,19 +316,6 @@ impl ConsensusStore {
             out.push((round, B256::from_slice(&k[12..]), meta));
         }
         Ok(out)
-    }
-
-    /// `true` if a proposal is stored for `height` (streams for future heights are
-    /// kept until their height starts; see `Host::height_params`).
-    pub fn has_proposal_at(&self, height: u64) -> anyhow::Result<bool> {
-        let tx = self.db.begin_read().map_err(err)?;
-        let t = tx.open_table(UNDECIDED_PROPOSALS).map_err(err)?;
-        let start = height.to_be_bytes();
-        let next = t.range(&start[..]..).map_err(err)?.next();
-        Ok(match next.transpose().map_err(err)? {
-            Some((k, _)) => k.value().starts_with(&start),
-            None => false,
-        })
     }
 
     /// Drop every block and proposal at heights `<= height` (at `Finalized`).
@@ -405,18 +426,49 @@ mod tests {
         assert_eq!(at2.len(), 2);
         assert_eq!((at2[0].0, at2[1].0), (0, 2));
         assert_eq!(at2[0].1, b2.hash());
-        assert!(s.has_proposal_at(3).unwrap());
-        assert!(!s.has_proposal_at(4).unwrap());
+        assert!(s.proposals_at_height(4).unwrap().is_empty());
         s.prune(2).unwrap();
-        assert!(!s.has_proposal_at(2).unwrap());
-        assert!(!s.has_proposal_at(0).unwrap());
-        assert!(s.has_proposal_at(3).unwrap());
         assert_eq!(s.get_block(2, b2.hash()).unwrap(), None);
         assert!(s.proposals_at_height(1).unwrap().is_empty());
         assert!(s.proposals_at_height(2).unwrap().is_empty());
         assert_eq!(s.proposals_at_height(3).unwrap().len(), 2);
         s.prune(u64::MAX).unwrap();
         assert!(s.proposals_at_height(3).unwrap().is_empty());
-        assert!(!s.has_proposal_at(3).unwrap());
+    }
+
+    /// Finding 5: a block whose body does not match its header is never stored, and a
+    /// bad entry already held (older version) is replaced by the real block.
+    #[test]
+    fn put_block_refuses_and_replaces_mismatched_bodies() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = ConsensusStore::open(&dir.path().join("c.redb")).unwrap();
+        let good = Block::new(
+            Header {
+                number: 4,
+                ..Default::default()
+            },
+            vec![],
+        );
+        let hash = good.hash();
+        // Same header (same hash), but the header's root does not match: refused.
+        let mut bad_header = good.header.clone();
+        bad_header.transactions_root = B256::repeat_byte(7);
+        let bad = Block::new(bad_header, vec![]);
+        assert!(s.put_block(4, bad.hash(), &bad).is_err());
+        assert!(
+            s.put_block(4, B256::ZERO, &good).is_err(),
+            "hash must match"
+        );
+        assert_eq!(s.get_block(4, bad.hash()).unwrap(), None);
+
+        // A poisoned entry (from an older version) under the good hash ...
+        s.put_raw_block(4, hash, &encode_block(&bad)).unwrap();
+        assert_eq!(s.get_block(4, hash).unwrap(), None, "never served");
+        // ... is replaced by the real block.
+        s.put_block(4, hash, &good).unwrap();
+        assert_eq!(s.get_block(4, hash).unwrap(), Some(good.clone()));
+        // A valid entry is kept (first write wins only among valid blocks).
+        s.put_block(4, hash, &good).unwrap();
+        assert_eq!(s.get_block(4, hash).unwrap(), Some(good));
     }
 }

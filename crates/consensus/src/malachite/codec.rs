@@ -9,6 +9,7 @@
 //! RLP list `[header, [tx_2718, ...]]`.
 
 use super::context::{BlockValue, Height, Proposal, ProposalPart, Vote, XdevsContext};
+use super::streaming::MAX_STREAM_ID_LEN;
 use super::Signature;
 use crate::types::ValidatorAddress;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
@@ -78,11 +79,20 @@ fn round_enc(r: Round) -> u64 {
     (r.as_i64() + 1) as u64
 }
 
+/// A round that may be `Nil` (POL / valid rounds).
 fn round_dec(v: u64) -> Result<Round, CodecError> {
     match v {
         0 => Ok(Round::Nil),
         v if v <= u64::from(u32::MAX) + 1 => Ok(Round::new((v - 1) as u32)),
         _ => Err(CodecError::new("round out of range")),
+    }
+}
+
+/// The round of a vote, proposal, part stream or certificate: never `Nil` on the wire.
+fn round_dec_some(v: u64) -> Result<Round, CodecError> {
+    match round_dec(v)? {
+        Round::Nil => Err(CodecError::new("nil round")),
+        r => Ok(r),
     }
 }
 
@@ -158,7 +168,7 @@ impl WVote {
         Ok(Vote {
             vote_type: vt_dec(self.vote_type)?,
             height: Height(self.height),
-            round: round_dec(self.round)?,
+            round: round_dec_some(self.round)?,
             value: nil_dec(&self.value)?,
             validator_address: self.validator,
         })
@@ -225,7 +235,7 @@ impl WSignedProposal {
         Ok(SignedMessage::new(
             Proposal {
                 height: Height(w.height),
-                round: round_dec(w.round)?,
+                round: round_dec_some(w.round)?,
                 value: BlockValue::new(w.value),
                 pol_round: round_dec(w.pol_round)?,
                 validator_address: w.validator,
@@ -281,7 +291,7 @@ fn part_from_wire(w: WTagged) -> Result<ProposalPart, CodecError> {
             let i: WInit = alloy_rlp::decode_exact(&w.body)?;
             Ok(ProposalPart::Init {
                 height: Height(i.height),
-                round: round_dec(i.round)?,
+                round: round_dec_some(i.round)?,
                 pol_round: round_dec(i.pol_round)?,
                 proposer: i.proposer,
             })
@@ -339,7 +349,7 @@ impl WPolka {
     fn into_cert(self) -> Result<PolkaCertificate<XdevsContext>, CodecError> {
         Ok(PolkaCertificate {
             height: Height(self.height),
-            round: round_dec(self.round)?,
+            round: round_dec_some(self.round)?,
             value_id: self.value_id,
             polka_signatures: self
                 .signatures
@@ -391,7 +401,7 @@ impl WRoundCert {
     fn into_cert(self) -> Result<RoundCertificate<XdevsContext>, CodecError> {
         Ok(RoundCertificate {
             height: Height(self.height),
-            round: round_dec(self.round)?,
+            round: round_dec_some(self.round)?,
             cert_type: match self.cert_type {
                 0 => RoundCertificateType::Skip,
                 1 => RoundCertificateType::Precommit,
@@ -562,6 +572,9 @@ impl Codec<StreamMessage<ProposalPart>> for XdevsCodec {
 
     fn decode(&self, bytes: RawBytes) -> Result<StreamMessage<ProposalPart>, CodecError> {
         let w: WStream = dec(&bytes)?;
+        if w.stream_id.len() > MAX_STREAM_ID_LEN {
+            return Err(CodecError::new("stream id too long"));
+        }
         let content = match w.content.tag {
             0 => StreamContent::Data(part_from_wire(alloy_rlp::decode_exact(&w.content.body)?)?),
             1 if w.content.body.is_empty() => StreamContent::Fin,
@@ -621,7 +634,7 @@ impl Codec<ProposedValue<XdevsContext>> for XdevsCodec {
         let w: WProposedValue = dec(&bytes)?;
         Ok(ProposedValue {
             height: Height(w.height),
-            round: round_dec(w.round)?,
+            round: round_dec_some(w.round)?,
             valid_round: round_dec(w.valid_round)?,
             proposer: w.proposer,
             value: BlockValue::new(w.value),
@@ -718,7 +731,7 @@ fn cert_to_wire(c: &ExtendedCommitCertificate<XdevsContext>) -> Result<WCommitCe
 fn cert_from_wire(w: WCommitCert) -> Result<ExtendedCommitCertificate<XdevsContext>, CodecError> {
     Ok(ExtendedCommitCertificate {
         height: Height(w.height),
-        round: round_dec(w.round)?,
+        round: round_dec_some(w.round)?,
         value_id: w.value_id,
         commit_signatures: w
             .signatures
@@ -852,7 +865,10 @@ pub(crate) fn encode_block(block: &Block) -> Vec<u8> {
     })
 }
 
-/// Inverse of [`encode_block`]; rejects trailing bytes and non-canonical txs.
+/// Inverse of [`encode_block`]; rejects trailing bytes, non-canonical txs and a body
+/// that does not match the header's `transactions_root`. The block hash is the header
+/// hash, so only with this check does `(height, hash)` identify one block: a block
+/// that passes can be stored and served under its hash.
 pub(crate) fn decode_block(bytes: &[u8]) -> Result<Block, CodecError> {
     let w: WBlock = alloy_rlp::decode_exact(bytes)?;
     let body = w
@@ -868,7 +884,16 @@ pub(crate) fn decode_block(bytes: &[u8]) -> Result<Block, CodecError> {
             Ok(tx)
         })
         .collect::<Result<_, _>>()?;
-    Ok(Block::new(w.header, body))
+    let block = Block::new(w.header, body);
+    if !body_matches_header(&block) {
+        return Err(CodecError::new("transactions root does not match the body"));
+    }
+    Ok(block)
+}
+
+/// `header.transactions_root` commits to the body.
+pub(crate) fn body_matches_header(block: &Block) -> bool {
+    block.header.transactions_root == block.compute_transactions_root()
 }
 
 #[cfg(test)]
@@ -1083,5 +1108,92 @@ mod tests {
         assert_eq!(back.hash(), block.hash());
         assert_eq!(back, block);
         assert!(decode_block(&bytes[..bytes.len() - 1]).is_err());
+    }
+
+    /// Finding 5: a body that does not match the header's transactions root is refused
+    /// at decode, so it can never be stored under the header's hash.
+    #[test]
+    fn rejects_a_body_that_does_not_match_the_header() {
+        let header = Header {
+            number: 3,
+            transactions_root: B256::repeat_byte(1),
+            ..Default::default()
+        };
+        let block = Block::new(header, vec![]);
+        assert!(!body_matches_header(&block));
+        let err = decode_block(&encode_block(&block)).unwrap_err();
+        assert!(err.to_string().contains("transactions root"), "{err}");
+    }
+
+    /// Finding 10: `Round::Nil` is refused wherever a real round is required.
+    #[test]
+    fn rejects_nil_rounds_on_the_wire() {
+        let c = codec();
+        let (keys, _) = test_set(1);
+        let mut v = signed_vote(&keys[0], MVoteType::Prevote, NilOrVal::Nil);
+        v.message.round = Round::Nil;
+        let m = SignedConsensusMsg::Vote(v.clone());
+        let bytes = Codec::<SignedConsensusMsg<XdevsContext>>::encode(&c, &m).unwrap();
+        assert!(Codec::<SignedConsensusMsg<XdevsContext>>::decode(&c, bytes).is_err());
+        let l = LivenessMsg::Vote(v);
+        let bytes = Codec::<LivenessMsg<XdevsContext>>::encode(&c, &l).unwrap();
+        assert!(Codec::<LivenessMsg<XdevsContext>>::decode(&c, bytes).is_err());
+
+        let p = SignedMessage::new(
+            Proposal {
+                height: Height(9),
+                round: Round::Nil,
+                value: BlockValue::new(B256::repeat_byte(4)),
+                pol_round: Round::Nil,
+                validator_address: ValidatorAddress([1; 20]),
+            },
+            keys[0].sign(b"p"),
+        );
+        let m = SignedConsensusMsg::Proposal(p);
+        let bytes = Codec::<SignedConsensusMsg<XdevsContext>>::encode(&c, &m).unwrap();
+        assert!(Codec::<SignedConsensusMsg<XdevsContext>>::decode(&c, bytes).is_err());
+
+        let init = |round| ProposalPart::Init {
+            height: Height(1),
+            round,
+            pol_round: Round::Nil,
+            proposer: ValidatorAddress([5; 20]),
+        };
+        let bytes = Codec::<ProposalPart>::encode(&c, &init(Round::Nil)).unwrap();
+        assert!(Codec::<ProposalPart>::decode(&c, bytes).is_err());
+        // A nil POL round stays fine.
+        assert_eq!(rt(&init(Round::new(0))), init(Round::new(0)));
+
+        let pv = ProposedValue::<XdevsContext> {
+            height: Height(4),
+            round: Round::Nil,
+            valid_round: Round::Nil,
+            proposer: ValidatorAddress([6; 20]),
+            value: BlockValue::new(B256::repeat_byte(6)),
+            validity: Validity::Valid,
+        };
+        let bytes = Codec::<ProposedValue<XdevsContext>>::encode(&c, &pv).unwrap();
+        assert!(Codec::<ProposedValue<XdevsContext>>::decode(&c, bytes).is_err());
+        assert!(round_dec_some(0).is_err());
+        assert_eq!(round_dec_some(1).unwrap(), Round::new(0));
+    }
+
+    /// Finding 4: stream ids are capped.
+    #[test]
+    fn rejects_long_stream_ids() {
+        let c = codec();
+        let ok = StreamMessage::<ProposalPart>::new(
+            StreamId::new(RawBytes::from(vec![1u8; MAX_STREAM_ID_LEN])),
+            0,
+            StreamContent::Fin,
+        );
+        assert_eq!(rt(&ok), ok);
+        let long = StreamMessage::<ProposalPart>::new(
+            StreamId::new(RawBytes::from(vec![1u8; MAX_STREAM_ID_LEN + 1])),
+            0,
+            StreamContent::Fin,
+        );
+        let bytes = Codec::<StreamMessage<ProposalPart>>::encode(&c, &long).unwrap();
+        assert!(Codec::<StreamMessage<ProposalPart>>::decode(&c, bytes).is_err());
     }
 }
