@@ -54,6 +54,10 @@ cors = ["*"]
 gas_cap = 50_000_000
 max_logs_range = 10_000
 max_batch = 50
+max_concurrent_requests = 0        # 0 = 2 x CPUs
+evm_timeout_ms = 5000
+max_in_flight_per_connection = 32
+rate_limit_per_ip = 0              # 0 = off
 
 [mempool]
 max_txs = 10_000
@@ -115,6 +119,9 @@ Block time and Tendermint round timeouts. Each `*_delta_ms` is added per extra r
 | `listen` | `/ip4/0.0.0.0/tcp/30334` | Listen multiaddr |
 | `bootnodes` | `[]` | Peers dialled at start (usually ending in `/p2p/<peer id>`) |
 | `max_peers` | `50` | Max connected peers |
+| `max_inbound_peers` | `max_peers` minus max(`max_peers`/5, bootnodes, 1) | Max peers that dialled us; the rest stays free for our own dials (bootnodes) |
+| `tx_rate_per_peer` | `1000` | Inbound txs per second one peer may send (0 = no limit). Every tx counts; an ignored one (e.g. unfunded sender) costs 4. Over the budget txs are dropped unvalidated; a peer that keeps flooding is banned for 10 minutes |
+| `tx_burst_per_peer` | `4000` | Burst size of that per-peer budget |
 | `max_tx_size` | 128 KiB max | Largest gossiped transaction |
 | `quic` | `false` | Also listen on QUIC (off until a Linux soak) |
 | `discovery` | `false` | Kademlia discovery |
@@ -130,6 +137,11 @@ Block time and Tendermint round timeouts. Each `*_delta_ms` is added per extra r
 | `gas_cap` | `50000000` | Gas cap of `eth_call` / `eth_estimateGas` |
 | `max_logs_range` | `10000` | Max `eth_getLogs` block range |
 | `max_batch` | `50` | Max JSON-RPC batch size |
+| `max_concurrent_requests` | `0` (= 2 x CPUs) | Requests doing blocking work (state reads, EVM) at once over all connections; others wait up to 10 s, then get -32005. Consensus runs on its own threads and never waits for these |
+| `evm_timeout_ms` | `5000` | EVM time limit of `eth_call` / `eth_estimateGas` ("execution aborted (timeout = 5s)"); 0 = none. A call is also stopped when its client disconnects |
+| `max_in_flight_per_connection` | `32` | Calls running at once per connection; more fail at once with -32005 (0 = no cap) |
+| `rate_limit_per_ip` | `0` (off) | Calls per second per client IP (token bucket, -32005 above). Behind a proxy or tunnel every client has the proxy's IP: rate-limit at the proxy instead |
+| `rate_limit_burst` | `0` (= 2 x rate) | Bucket size of the per-IP limit |
 
 ### `[mempool]`
 

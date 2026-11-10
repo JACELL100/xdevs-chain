@@ -127,7 +127,9 @@ pub fn gossip_verdict(result: &Result<(), PoolError>) -> Verdict {
 }
 
 /// The tx-gossip validator: decode, recover, admit to the pool (inbound gossip →
-/// validated pool admission).
+/// validated pool admission). Runs on the network's validation thread, after the
+/// per-peer rate limit; the pool rejects unfunded senders and bad nonces from a state
+/// read before taking its write lock.
 pub fn gossip_validator(pool: Arc<Pool>, chain_id: u64) -> TxValidator {
     Arc::new(move |raw: &[u8]| {
         let tx = match decode_and_recover(raw, chain_id) {

@@ -17,6 +17,9 @@ pub(crate) enum Command {
     /// Test hook: the gossipsub score of a peer.
     #[cfg(test)]
     PeerScore(PeerId, tokio::sync::oneshot::Sender<Option<f64>>),
+    /// Test hook: set a peer's application-specific gossipsub score (P5).
+    #[cfg(test)]
+    SetAppScore(PeerId, f64),
     /// Stop the swarm task.
     Shutdown,
 }
@@ -30,8 +33,12 @@ pub struct GossipStats {
     pub ignored: AtomicU64,
     /// Inbound txs rejected (not forwarded, sender penalised).
     pub rejected: AtomicU64,
-    /// Peers banned for a graylisted gossip score.
+    /// Peers banned (graylisted gossip score, or sustained tx flooding).
     pub banned: AtomicU64,
+    /// Inbound txs dropped unvalidated because their peer was over its rate limit.
+    pub rate_limited: AtomicU64,
+    /// Inbound txs dropped unvalidated because the validation queue was full.
+    pub dropped: AtomicU64,
 }
 
 impl GossipStats {
@@ -202,6 +209,12 @@ impl NetworkHandle {
         rx.await.ok().flatten()
     }
 
+    /// Test hook: set `peer`'s application-specific gossipsub score.
+    #[cfg(test)]
+    pub(crate) async fn set_app_score(&self, peer: PeerId, score: f64) {
+        let _ = self.commands.send(Command::SetAppScore(peer, score)).await;
+    }
+
     /// Stop the swarm and wait for its task to finish.
     pub async fn shutdown(self) {
         let _ = self.commands.send(Command::Shutdown).await;
@@ -228,6 +241,7 @@ mod tests {
                     Command::PeerScore(_, reply) => {
                         let _ = reply.send(None);
                     }
+                    Command::SetAppScore(..) => {}
                     Command::Shutdown => break,
                 }
             }

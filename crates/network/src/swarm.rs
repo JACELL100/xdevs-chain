@@ -2,6 +2,18 @@
 //! tx topic with strict validation, identify, ping, optional kad, bootnodes, peer limits and
 //! a temporary ban list for peers whose gossip score falls below the graylist threshold.
 //!
+//! DoS protection (plan §12.5, security review):
+//!
+//! * Inbound txs are validated on a dedicated thread fed by a bounded queue
+//!   ([`NetworkConfig::channel_capacity`]); when it is full the tx is dropped (`Ignore`).
+//!   The swarm task never runs the validator (ECDSA recovery, state reads, pool locks).
+//! * Per-peer token bucket ([`PeerBudget`]): every inbound tx costs a token whatever its
+//!   verdict, an ignored one costs [`IGNORE_COST`] in total. Over budget, txs are dropped
+//!   unvalidated; a peer whose debt reaches a full burst (it kept sending faster than its
+//!   rate) is banned.
+//! * Inbound connections have their own limit ([`NetworkConfig::inbound_limit`]), so
+//!   peers dialling us can never take the slots our bootnode dials need.
+//!
 //! Gossipsub scores use `f64` internally; they only steer peer selection on the tx-gossip
 //! network and never feed into consensus.
 
@@ -32,6 +44,7 @@ use libp2p::{
     },
     tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder,
 };
+use std::collections::HashMap;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     panic::{catch_unwind, AssertUnwindSafe},
@@ -73,6 +86,12 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
 
 /// Score below which gossipsub ignores a peer entirely; we also ban it.
 pub(crate) const GRAYLIST_THRESHOLD: f64 = -80.0;
+/// Score below which we do not publish our own txs to a peer.
+const PUBLISH_THRESHOLD: f64 = -50.0;
+/// Tokens an inbound tx costs in total when its verdict is `Ignore` (1 otherwise):
+/// ignorable txs (unfunded senders, nonce gaps, ...) are free to forge, so a peer
+/// sending them gets fewer validations per second.
+pub(crate) const IGNORE_COST: i64 = 4;
 /// P4 weight: score = weight × (invalid messages)², so three invalid txs graylist a peer.
 const INVALID_MESSAGE_WEIGHT: f64 = -10.0;
 
@@ -159,7 +178,7 @@ fn peer_score(topic: &TopicHash) -> (PeerScoreParams, PeerScoreThresholds) {
     params.topics.insert(topic.clone(), tx_topic);
     let thresholds = PeerScoreThresholds {
         gossip_threshold: -10.0,
-        publish_threshold: -50.0,
+        publish_threshold: PUBLISH_THRESHOLD,
         graylist_threshold: GRAYLIST_THRESHOLD,
         ..PeerScoreThresholds::default()
     };
@@ -174,8 +193,12 @@ fn build_behaviour(
 ) -> Result<Behaviour, NetworkError> {
     let lib = |e: String| NetworkError::Libp2p(e);
     let max_peers = u32::try_from(config.max_peers).unwrap_or(u32::MAX);
+    // Inbound connections have their own (smaller) limit: peers dialling us can never
+    // fill every slot and lock out our bootnode / persistent dials.
+    let max_inbound = u32::try_from(config.inbound_limit()).unwrap_or(u32::MAX);
     let limits = ConnectionLimits::default()
         .with_max_pending_incoming(Some(max_peers))
+        .with_max_established_incoming(Some(max_inbound))
         .with_max_established(Some(max_peers))
         .with_max_established_per_peer(Some(MAX_CONNECTIONS_PER_PEER));
 
@@ -314,12 +337,18 @@ pub(crate) async fn spawn(
 
     let (cmd_tx, cmd_rx) = mpsc::channel(config.channel_capacity);
     let shared = Arc::new(Shared::default());
+    let (jobs, results, worker) = spawn_validation_worker(validator, config.channel_capacity)?;
     let mut event_loop = EventLoop {
         swarm,
         topic: topic.hash(),
         identify_protocol: identify_protocol(chain_id),
         kad_protocol: kad_protocol(chain_id),
-        validator,
+        jobs: Some(jobs),
+        results,
+        worker: Some(worker),
+        budgets: HashMap::new(),
+        tx_rate: u64::from(config.tx_rate_per_peer),
+        tx_burst: i64::from(config.tx_burst_per_peer),
         shared: shared.clone(),
         commands: cmd_rx,
         bootnodes,
@@ -351,13 +380,122 @@ pub(crate) async fn spawn(
     ))
 }
 
+/// An inbound tx waiting for (or done with) validation.
+struct Inbound {
+    from: PeerId,
+    id: MessageId,
+    data: Vec<u8>,
+}
+
+/// Start the validation thread: jobs come through a bounded queue (the swarm task
+/// never blocks on it), verdicts go back to the swarm task.
+#[allow(clippy::type_complexity)]
+fn spawn_validation_worker(
+    validator: TxValidator,
+    capacity: usize,
+) -> Result<
+    (
+        std::sync::mpsc::SyncSender<Inbound>,
+        mpsc::Receiver<(Inbound, Verdict)>,
+        std::thread::JoinHandle<()>,
+    ),
+    NetworkError,
+> {
+    let (jobs_tx, jobs_rx) = std::sync::mpsc::sync_channel::<Inbound>(capacity);
+    let (done_tx, done_rx) = mpsc::channel(capacity);
+    let worker = std::thread::Builder::new()
+        .name("xdevs-gossip-validate".into())
+        .spawn(move || {
+            while let Ok(job) = jobs_rx.recv() {
+                let verdict = catch_unwind(AssertUnwindSafe(|| validator(&job.data)))
+                    .unwrap_or_else(|_| {
+                        warn!(target: "xdevs::network", "tx validator panicked; ignoring tx");
+                        Verdict::Ignore
+                    });
+                if done_tx.blocking_send((job, verdict)).is_err() {
+                    break; // swarm task gone
+                }
+            }
+        })
+        .map_err(|e| NetworkError::Libp2p(format!("validation thread: {e}")))?;
+    Ok((jobs_tx, done_rx, worker))
+}
+
+/// Inbound tx budget of one peer: a token bucket in milli-tokens that may go into debt
+/// (down to minus one burst) while the peer keeps sending over its rate.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PeerBudget {
+    milli: i64,
+    last: Instant,
+}
+
+/// What [`PeerBudget::charge`] decided.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Charge {
+    /// Within budget: validate the tx.
+    Ok,
+    /// Over budget: drop the tx unvalidated.
+    Limited,
+    /// Over budget by a whole burst: ban the peer.
+    Ban,
+}
+
+impl PeerBudget {
+    pub(crate) fn new(burst: i64, now: Instant) -> Self {
+        Self {
+            milli: burst * 1000,
+            last: now,
+        }
+    }
+
+    fn refill(&mut self, rate: u64, burst: i64, now: Instant) {
+        let ms =
+            i64::try_from(now.saturating_duration_since(self.last).as_millis()).unwrap_or(i64::MAX);
+        let rate = i64::try_from(rate).unwrap_or(i64::MAX);
+        // `rate` tokens per second = `rate` milli-tokens per millisecond.
+        self.milli = self
+            .milli
+            .saturating_add(ms.saturating_mul(rate))
+            .min(burst * 1000);
+        self.last = now;
+    }
+
+    /// Charge `tokens` for one inbound tx.
+    pub(crate) fn charge(&mut self, tokens: i64, rate: u64, burst: i64, now: Instant) -> Charge {
+        self.refill(rate, burst, now);
+        let within = self.milli >= tokens * 1000;
+        self.milli -= tokens * 1000;
+        if within {
+            Charge::Ok
+        } else if self.milli <= -burst * 1000 {
+            Charge::Ban
+        } else {
+            Charge::Limited
+        }
+    }
+
+    /// Extra cost charged after validation (never bans by itself).
+    pub(crate) fn debit(&mut self, tokens: i64, burst: i64) {
+        self.milli = (self.milli - tokens * 1000).max(-burst * 1000 + 1);
+    }
+}
+
 /// Owns the swarm; driven by [`EventLoop::run`] on its own task.
 struct EventLoop {
     swarm: Swarm<Behaviour>,
     topic: TopicHash,
     identify_protocol: String,
     kad_protocol: StreamProtocol,
-    validator: TxValidator,
+    /// Bounded queue to the validation thread (`None` once shutting down).
+    jobs: Option<std::sync::mpsc::SyncSender<Inbound>>,
+    /// Verdicts from the validation thread.
+    results: mpsc::Receiver<(Inbound, Verdict)>,
+    worker: Option<std::thread::JoinHandle<()>>,
+    /// Inbound tx budgets of connected peers.
+    budgets: HashMap<PeerId, PeerBudget>,
+    /// Per-peer tx rate (tokens / s; 0 = unlimited) and burst.
+    tx_rate: u64,
+    tx_burst: i64,
     shared: Arc<Shared>,
     commands: mpsc::Receiver<Command>,
     bootnodes: Vec<Bootnode>,
@@ -366,8 +504,18 @@ struct EventLoop {
     ticks: u32,
     max_peers: usize,
     max_tx_size: usize,
-    /// Txs not yet published because no peer was subscribed, with when they were queued.
-    unsent: VecDeque<(Bytes, Instant)>,
+    /// Txs not yet published because no peer could take them, with when they were
+    /// queued and whether gossipsub already saw them (see [`EventLoop::try_publish`]).
+    unsent: VecDeque<Unsent>,
+}
+
+/// A tx waiting to be published.
+struct Unsent {
+    tx: Bytes,
+    queued_at: Instant,
+    /// `publish` was called and failed after gossipsub recorded the message id in its
+    /// duplicate cache: a later `Duplicate` means "still ours, not yet sent".
+    attempted: bool,
 }
 
 impl EventLoop {
@@ -424,10 +572,15 @@ impl EventLoop {
                     Some(Command::PeerScore(peer, reply)) => {
                         let _ = reply.send(self.swarm.behaviour().gossipsub.peer_score(&peer));
                     }
+                    #[cfg(test)]
+                    Some(Command::SetAppScore(peer, score)) => {
+                        self.swarm.behaviour_mut().gossipsub.set_application_score(&peer, score);
+                    }
                     // Shutdown, or every handle dropped.
                     Some(Command::Shutdown) | None => break,
                 },
                 event = self.swarm.select_next_some() => self.on_swarm_event(event),
+                Some((job, verdict)) = self.results.recv() => self.on_validated(job, verdict),
                 _ = tick.tick() => self.maintenance(),
             }
         }
@@ -461,27 +614,63 @@ impl EventLoop {
         self.shared.peers.store(0, Ordering::Relaxed);
         self.shared.topic_peers.store(0, Ordering::Relaxed);
         self.shared.close();
+        // Stop the validation thread: no more jobs, and its result sender fails.
+        let worker = self.worker.take();
+        drop(self);
+        if let Some(worker) = worker {
+            let _ = tokio::task::spawn_blocking(move || worker.join()).await;
+        }
         info!(target: "xdevs::network", "tx gossip stopped");
     }
 
     fn publish(&mut self, tx: Bytes) {
-        self.try_publish(tx, Instant::now());
+        self.try_publish(Unsent {
+            tx,
+            queued_at: Instant::now(),
+            attempted: false,
+        });
     }
 
-    /// Publish `tx`; if no peer is subscribed yet, keep it for a later retry.
-    fn try_publish(&mut self, tx: Bytes, queued_at: Instant) {
+    /// Whether some connected topic peer would receive a publish (gossipsub publishes
+    /// to subscribed peers at or above the publish threshold).
+    fn has_publish_peer(&self) -> bool {
+        let gossipsub = &self.swarm.behaviour().gossipsub;
+        gossipsub.all_peers().any(|(peer, topics)| {
+            topics.contains(&&self.topic)
+                && gossipsub
+                    .peer_score(peer)
+                    .is_none_or(|s| s >= PUBLISH_THRESHOLD)
+        })
+    }
+
+    /// Publish a tx; if no peer can take it now, keep it for a later retry.
+    ///
+    /// gossipsub records a message id in its duplicate cache *before* it finds that no
+    /// peer qualifies (e.g. every subscribed peer scores below the publish threshold),
+    /// so a retry would get `Duplicate` and the tx would be lost. Hence: check for an
+    /// eligible peer first, and treat `Duplicate` of a tx whose publish already failed
+    /// as "keep waiting" (until [`UNSENT_TTL`]; the duplicate cache expires sooner).
+    fn try_publish(&mut self, mut unsent: Unsent) {
+        if !self.has_publish_peer() {
+            self.queue_unsent(unsent);
+            return;
+        }
         match self
             .swarm
             .behaviour_mut()
             .gossipsub
-            .publish(self.topic.clone(), tx.to_vec())
+            .publish(self.topic.clone(), unsent.tx.to_vec())
         {
             Ok(_) => {}
-            Err(gossipsub::PublishError::NoPeersSubscribedToTopic) => {
-                if self.unsent.len() >= MAX_UNSENT {
-                    self.unsent.pop_front();
-                }
-                self.unsent.push_back((tx, queued_at));
+            Err(
+                gossipsub::PublishError::NoPeersSubscribedToTopic
+                | gossipsub::PublishError::AllQueuesFull(_),
+            ) => {
+                unsent.attempted = true;
+                self.queue_unsent(unsent);
+            }
+            Err(gossipsub::PublishError::Duplicate) if unsent.attempted => {
+                self.queue_unsent(unsent)
             }
             // A tx we already published or received: nothing to do.
             Err(e @ gossipsub::PublishError::Duplicate) => {
@@ -491,6 +680,13 @@ impl EventLoop {
         }
     }
 
+    fn queue_unsent(&mut self, unsent: Unsent) {
+        if self.unsent.len() >= MAX_UNSENT {
+            self.unsent.pop_front();
+        }
+        self.unsent.push_back(unsent);
+    }
+
     /// Retry txs that could not be published earlier (drops expired ones).
     fn flush_unsent(&mut self) {
         if self.unsent.is_empty() {
@@ -498,9 +694,9 @@ impl EventLoop {
         }
         let now = Instant::now();
         let pending = std::mem::take(&mut self.unsent);
-        for (tx, queued_at) in pending {
-            if now.duration_since(queued_at) < UNSENT_TTL {
-                self.try_publish(tx, queued_at);
+        for unsent in pending {
+            if now.duration_since(unsent.queued_at) < UNSENT_TTL {
+                self.try_publish(unsent);
             }
         }
     }
@@ -525,8 +721,16 @@ impl EventLoop {
                 debug!(target: "xdevs::network", %peer_id, ?endpoint, "connected");
                 self.update_peer_counts();
             }
-            SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
+            SwarmEvent::ConnectionClosed {
+                peer_id,
+                cause,
+                num_established,
+                ..
+            } => {
                 debug!(target: "xdevs::network", %peer_id, ?cause, "connection closed");
+                if num_established == 0 {
+                    self.budgets.remove(&peer_id);
+                }
                 self.update_peer_counts();
             }
             SwarmEvent::NewListenAddr { address, .. } => self.shared.add_listen_addr(address),
@@ -566,27 +770,80 @@ impl EventLoop {
     }
 
     /// Strict validation of one inbound tx: only accepted txs are delivered and forwarded.
+    /// Cheap checks run here; the validator runs on the validation thread
+    /// ([`EventLoop::on_validated`] gets its verdict).
     fn on_message(&mut self, from: PeerId, id: MessageId, message: gossipsub::Message) {
-        let verdict = if message.topic != self.topic || message.data.len() > self.max_tx_size {
-            Verdict::Reject
-        } else {
-            let validator = &self.validator;
-            catch_unwind(AssertUnwindSafe(|| validator(&message.data))).unwrap_or_else(|_| {
-                warn!(target: "xdevs::network", "tx validator panicked; ignoring tx");
-                Verdict::Ignore
-            })
+        let job = Inbound {
+            from,
+            id,
+            data: message.data,
         };
-        self.shared.stats.record(verdict);
+        if message.topic != self.topic || job.data.len() > self.max_tx_size {
+            return self.on_validated(job, Verdict::Reject);
+        }
+        match self.charge(from, 1) {
+            Charge::Ok => {}
+            over => {
+                self.shared
+                    .stats
+                    .rate_limited
+                    .fetch_add(1, Ordering::Relaxed);
+                self.report(&job, Verdict::Ignore);
+                if over == Charge::Ban && !self.banned.contains_key(&from) {
+                    warn!(target: "xdevs::network", %from, "peer keeps flooding txs over its rate limit");
+                    self.ban(from);
+                }
+                return;
+            }
+        }
+        let Some(jobs) = &self.jobs else { return };
+        match jobs.try_send(job) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::TrySendError::Full(job))
+            | Err(std::sync::mpsc::TrySendError::Disconnected(job)) => {
+                // Overloaded: drop without penalty (it is not the peer's fault).
+                self.shared.stats.dropped.fetch_add(1, Ordering::Relaxed);
+                self.report(&job, Verdict::Ignore);
+            }
+        }
+    }
+
+    /// Charge `from`'s inbound budget (always `Ok` without a rate limit).
+    fn charge(&mut self, from: PeerId, tokens: i64) -> Charge {
+        if self.tx_rate == 0 {
+            return Charge::Ok;
+        }
+        let (rate, burst, now) = (self.tx_rate, self.tx_burst, Instant::now());
+        self.budgets
+            .entry(from)
+            .or_insert_with(|| PeerBudget::new(burst, now))
+            .charge(tokens, rate, burst, now)
+    }
+
+    fn report(&mut self, job: &Inbound, verdict: Verdict) {
         self.swarm
             .behaviour_mut()
             .gossipsub
-            .report_message_validation_result(&id, &from, verdict.into());
+            .report_message_validation_result(&job.id, &job.from, verdict.into());
+    }
+
+    /// Apply the verdict on an inbound tx: report it to gossipsub (which forwards only
+    /// accepted txs and penalises rejected ones), deliver accepted txs.
+    fn on_validated(&mut self, job: Inbound, verdict: Verdict) {
+        self.shared.stats.record(verdict);
+        self.report(&job, verdict);
         match verdict {
-            Verdict::Accept => self.shared.deliver(from, &Bytes::from(message.data)),
-            Verdict::Ignore => {}
+            Verdict::Accept => self.shared.deliver(job.from, &Bytes::from(job.data)),
+            Verdict::Ignore => {
+                if self.tx_rate > 0 {
+                    if let Some(budget) = self.budgets.get_mut(&job.from) {
+                        budget.debit(IGNORE_COST - 1, self.tx_burst);
+                    }
+                }
+            }
             Verdict::Reject => {
-                debug!(target: "xdevs::network", %from, "rejected invalid tx");
-                self.ban_if_graylisted(from);
+                debug!(target: "xdevs::network", from = %job.from, "rejected invalid tx");
+                self.ban_if_graylisted(job.from);
             }
         }
     }
@@ -621,7 +878,7 @@ impl EventLoop {
         } = event
         {
             if !self.swarm.is_connected(&peer)
-                && self.has_room()
+                && self.has_room_for_discovery()
                 && !self.banned.contains_key(&peer)
             {
                 let opts = DialOpts::peer_id(peer)
@@ -638,6 +895,16 @@ impl EventLoop {
 
     fn has_room(&self) -> bool {
         self.swarm.connected_peers().count() < self.max_peers
+    }
+
+    /// Room for a discovery dial: keeps one slot per unconnected bootnode free.
+    fn has_room_for_discovery(&self) -> bool {
+        let reserved = self
+            .bootnodes
+            .iter()
+            .filter(|b| !b.peer.is_some_and(|p| self.swarm.is_connected(&p)))
+            .count();
+        self.swarm.connected_peers().count() + reserved < self.max_peers
     }
 
     fn update_peer_counts(&self) {
@@ -702,6 +969,7 @@ impl EventLoop {
     }
 
     fn ban(&mut self, peer: PeerId) {
+        self.budgets.remove(&peer);
         if self.banned.len() >= MAX_BANNED && !self.banned.contains_key(&peer) {
             if let Some(oldest) = self
                 .banned
@@ -713,7 +981,7 @@ impl EventLoop {
                 self.swarm.behaviour_mut().blocked.unblock_peer(oldest);
             }
         }
-        warn!(target: "xdevs::network", %peer, "banning peer for invalid tx gossip");
+        warn!(target: "xdevs::network", %peer, "banning peer for abusive tx gossip");
         self.banned.insert(peer, Instant::now() + BAN_DURATION);
         self.swarm.behaviour_mut().blocked.block_peer(peer);
         self.shared.stats.banned.fetch_add(1, Ordering::Relaxed);
@@ -819,6 +1087,83 @@ mod tests {
         );
         let b: Multiaddr = "/dns4/val1/tcp/30334".parse().unwrap();
         assert_eq!(split_p2p(&b), (b.clone(), None));
+    }
+
+    /// Per-peer budget: every tx costs a token; over budget txs are dropped; a peer
+    /// that keeps sending over its rate (debt of a full burst) is banned; it refills.
+    #[test]
+    fn peer_budget_limits_then_bans() {
+        let t0 = Instant::now();
+        let (rate, burst) = (10, 5);
+        let mut b = PeerBudget::new(burst, t0);
+        for _ in 0..5 {
+            assert_eq!(b.charge(1, rate, burst, t0), Charge::Ok);
+        }
+        assert_eq!(b.charge(1, rate, burst, t0), Charge::Limited);
+        // 100 ms later one token is back.
+        let t1 = t0 + Duration::from_millis(200);
+        assert_eq!(b.charge(1, rate, burst, t1), Charge::Ok);
+        // Ignored txs cost extra but never ban by themselves.
+        b.debit(100, burst);
+        assert_eq!(b.charge(1, rate, burst, t1), Charge::Ban);
+        // After a pause the peer is within budget again.
+        let t2 = t1 + Duration::from_secs(2);
+        assert_eq!(b.charge(1, rate, burst, t2), Charge::Ok);
+        let mut flood = PeerBudget::new(burst, t0);
+        let verdicts: Vec<Charge> = (0..11).map(|_| flood.charge(1, rate, burst, t0)).collect();
+        assert_eq!(verdicts[..5], [Charge::Ok; 5]);
+        assert_eq!(verdicts[5..9], [Charge::Limited; 4]);
+        assert_eq!(verdicts[10], Charge::Ban);
+    }
+
+    /// Regression (security review): when every subscribed peer scores below the
+    /// publish threshold, gossipsub records our tx as published (duplicate cache) and
+    /// still reports "no peers"; the retry must not then drop it as a duplicate. The tx
+    /// waits and goes out once a peer qualifies again.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn unsent_tx_waits_for_an_eligible_peer() {
+        let accept: TxValidator = Arc::new(|_: &[u8]| Verdict::Accept);
+        let local = |bootnodes: Vec<String>| NetworkConfig {
+            listen: "/ip4/127.0.0.1/tcp/0".into(),
+            bootnodes,
+            ..NetworkConfig::default()
+        };
+        let a_key = Keypair::generate_ed25519();
+        let a = crate::start(local(vec![]), 9, a_key.clone(), accept.clone())
+            .await
+            .unwrap();
+        let a_addr = format!("{}/p2p/{}", a.listen_addrs()[0], a.local_peer_id());
+        let b = crate::start(local(vec![a_addr]), 9, Keypair::generate_ed25519(), accept)
+            .await
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while a.topic_peer_count() < 1 || b.topic_peer_count() < 1 {
+            assert!(Instant::now() < deadline, "peers did not meet");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let b_id = b.local_peer_id();
+        // Score -60: below the publish threshold (-50), above the graylist (-80).
+        a.set_app_score(b_id, -6.0).await;
+        let score = a.peer_score(b_id).await.unwrap();
+        assert!(
+            score < PUBLISH_THRESHOLD && score > GRAYLIST_THRESHOLD,
+            "{score}"
+        );
+
+        let mut inbox = b.inbound();
+        a.publish_tx(Bytes::from_static(b"held-tx")).unwrap();
+        // Let a maintenance tick retry it while B is still ineligible.
+        tokio::time::sleep(MAINTENANCE_INTERVAL + Duration::from_secs(1)).await;
+        assert!(inbox.try_recv().is_err(), "sent to an ineligible peer");
+
+        a.set_app_score(b_id, 0.0).await;
+        let (_, tx) = tokio::time::timeout(MAINTENANCE_INTERVAL * 3, inbox.recv())
+            .await
+            .expect("queued tx never published")
+            .unwrap();
+        assert_eq!(tx, Bytes::from_static(b"held-tx"));
+        a.shutdown().await;
+        b.shutdown().await;
     }
 
     #[test]

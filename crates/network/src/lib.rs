@@ -8,7 +8,11 @@
 //! * Topic `/xdevs/<chainId>/tx/1` (gossipsub, strict validation, message id =
 //!   keccak256(raw tx)).
 //! * Inbound txs are checked by the caller's [`TxValidator`] callback (the node decodes,
-//!   recovers and adds to the pool); only [`Verdict::Accept`] messages are forwarded.
+//!   recovers and adds to the pool) on a dedicated validation thread fed by a bounded
+//!   queue (full = the tx is dropped), never on the swarm task; only
+//!   [`Verdict::Accept`] messages are forwarded.
+//! * Per-peer token bucket on inbound txs, a separate inbound-connection limit and a
+//!   temporary ban list (plan §12.5).
 //! * Every channel is bounded (plan §12.5).
 //!
 //! **Owner: WP3.** The public API below is frozen on day 0; change it only additively.
@@ -20,7 +24,7 @@ mod config;
 mod handle;
 mod swarm;
 
-pub use config::NetworkConfig;
+pub use config::{NetworkConfig, DEFAULT_TX_BURST_PER_PEER, DEFAULT_TX_RATE_PER_PEER};
 pub use handle::{GossipStats, NetworkHandle};
 pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
 pub use swarm::{tx_message_id, tx_topic};
@@ -42,7 +46,8 @@ pub enum Verdict {
 }
 
 /// Validation callback for inbound txs: raw EIP-2718 bytes → verdict. Called on the
-/// network task, so it must be fast and must not block.
+/// network's validation thread (one tx at a time; it may block briefly, e.g. on a pool
+/// lock or a state read).
 pub type TxValidator = Arc<dyn Fn(&[u8]) -> Verdict + Send + Sync + 'static>;
 
 /// Network errors.

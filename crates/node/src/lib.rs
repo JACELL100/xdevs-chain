@@ -31,9 +31,13 @@ pub mod consensus;
 mod events;
 mod metrics;
 mod producer;
+mod workers;
 
 pub use app::{ChainApp, ChainAppConfig, MAX_BLOCK_BYTES, PROPOSAL_EXTRA_DATA};
-pub use backend::{decode_revert_reason, NodeBackend, DEFAULT_PRIORITY_FEE, SYNC_LAG_THRESHOLD};
+pub use backend::{
+    decode_revert_reason, default_max_concurrent_requests, NodeBackend, DEFAULT_EVM_TIMEOUT,
+    DEFAULT_PRIORITY_FEE, RPC_QUEUE_TIMEOUT, SYNC_LAG_THRESHOLD,
+};
 pub use config::{
     ChainSection, DevSection, GossipSection, LogSection, MempoolSection, NodeConfig, NodeMode,
     RpcSection, ValidatorSection, DEFAULT_MAX_TIMESTAMP_DRIFT_SECS,
@@ -198,6 +202,10 @@ impl Node {
             self.cfg.clone(),
             self.config.rpc.gas_cap,
         )
+        .with_limits(
+            self.config.rpc.max_concurrent_requests,
+            Some(Duration::from_millis(self.config.rpc.evm_timeout_ms)),
+        )
         .with_events(events.clone());
         let mut handle = NodeHandle {
             http_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
@@ -289,6 +297,9 @@ impl Node {
             max_logs_range: self.config.rpc.max_logs_range,
             max_batch: self.config.rpc.max_batch,
             cors: self.config.rpc.cors.clone(),
+            max_in_flight_per_connection: self.config.rpc.max_in_flight_per_connection,
+            rate_limit_per_ip: self.config.rpc.rate_limit_per_ip,
+            rate_limit_burst: self.config.rpc.rate_limit_burst,
             ..Default::default()
         };
         let mut configs = vec![rpc_config.clone()];

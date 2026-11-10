@@ -2,16 +2,29 @@
 //!
 //! Every request runs on a blocking thread against one database snapshot, so all
 //! reads of a request see the same committed block even while the producer commits.
+//!
+//! DoS limits (security review "RPC load can starve consensus"): at most
+//! `max_concurrent` requests do blocking work at once (default 2 x CPUs; others wait up
+//! to [`RPC_QUEUE_TIMEOUT`] for a slot, then fail with -32005), and `eth_call` /
+//! `eth_estimateGas` stop after `evm_timeout` of EVM time (default 5 s, like geth) or as
+//! soon as the request is dropped (client gone), failing with "execution aborted".
+//! Consensus never shares these threads (see `ChainApp`).
 //! State queries at past blocks read the reverse state diffs of the recent blocks
 //! (`[chain] pruning` / `state_history_blocks`, default 10,000 blocks); older blocks
 //! fail with a geth-style "-32000" error.
 
 use crate::chain::{self, Db};
-use std::sync::Arc;
-use tokio::sync::broadcast;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+use tokio::sync::{broadcast, OwnedSemaphorePermit, Semaphore};
 use xdevs_consensus::{CommitCertificate, EngineStatus};
 use xdevs_crypto::decode_and_recover;
-use xdevs_execution::{next_base_fee, CallResult, EvmExecutor, ExecutionError};
+use xdevs_execution::{next_base_fee, CallLimits, CallResult, EvmExecutor, ExecutionError};
 use xdevs_mempool::{Pool, PoolError, TxOrigin, TxPool};
 use xdevs_network::NetworkHandle;
 use xdevs_primitives::reexports::alloy_primitives::U64;
@@ -48,6 +61,28 @@ fn db<T>(r: Result<T, DbError>) -> BackendResult<T> {
 
 type Snapshot<'a> = dyn DbRead + Send + Sync + 'a;
 
+/// Default EVM time limit of `eth_call` / `eth_estimateGas` (geth's `rpc.evmtimeout`).
+pub const DEFAULT_EVM_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long a request waits for a blocking-work slot before failing with -32005.
+pub const RPC_QUEUE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Default cap on concurrent blocking RPC work: 2 x available CPUs (at least 4).
+pub fn default_max_concurrent_requests() -> usize {
+    std::thread::available_parallelism()
+        .map_or(4, |n| n.get() * 2)
+        .max(4)
+}
+
+/// Sets the cancel flag of a simulation when the request future is dropped (the client
+/// disconnected, or the server gave up on it), so the EVM stops instead of running on.
+struct CancelOnDrop(Arc<AtomicBool>);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 /// A node is reported as syncing (`eth_syncing`) while peers are at least this many
 /// blocks ahead of its head.
 pub const SYNC_LAG_THRESHOLD: u64 = 2;
@@ -67,6 +102,11 @@ pub struct NodeBackend {
     starting_block: u64,
     /// Chain events for `eth_subscribe`; accepted txs are published as pending.
     events: Option<Arc<ChainEvents>>,
+    /// Slots for concurrent blocking work (shared by every RPC server of the node).
+    slots: Arc<Semaphore>,
+    max_concurrent: usize,
+    /// EVM time limit of `eth_call` / `eth_estimateGas` (`None` = unlimited).
+    evm_timeout: Option<Duration>,
 }
 
 impl std::fmt::Debug for NodeBackend {
@@ -85,6 +125,32 @@ struct Ctx {
     executor: Arc<EvmExecutor>,
     cfg: ChainConfig,
     gas_cap: u64,
+    evm_timeout: Option<Duration>,
+}
+
+impl Ctx {
+    /// Limits of one simulation: the EVM time limit from now, plus `cancel`.
+    fn call_limits(&self, cancel: Arc<AtomicBool>) -> CallLimits {
+        CallLimits {
+            deadline: self.evm_timeout.map(|t| std::time::Instant::now() + t),
+            cancel: Some(cancel),
+        }
+    }
+
+    /// Execution error -> RPC error, with geth's wording for an aborted simulation.
+    fn exec_err(&self, e: ExecutionError) -> RpcBackendError {
+        match e {
+            ExecutionError::Aborted(reason) => {
+                RpcBackendError::Rejected(match (reason, self.evm_timeout) {
+                    ("timeout", Some(t)) => {
+                        format!("execution aborted (timeout = {}s)", t.as_secs_f64())
+                    }
+                    (reason, _) => format!("execution aborted ({reason})"),
+                })
+            }
+            other => exec_err(other),
+        }
+    }
 }
 
 impl NodeBackend {
@@ -106,7 +172,24 @@ impl NodeBackend {
             consensus: None,
             starting_block: 0,
             events: None,
+            slots: Arc::new(Semaphore::new(default_max_concurrent_requests())),
+            max_concurrent: default_max_concurrent_requests(),
+            evm_timeout: Some(DEFAULT_EVM_TIMEOUT),
         }
+    }
+
+    /// DoS limits: at most `max_concurrent` requests doing blocking work at once (0 =
+    /// [`default_max_concurrent_requests`]) and an EVM time limit for `eth_call` /
+    /// `eth_estimateGas` (`None` or zero = unlimited).
+    pub fn with_limits(mut self, max_concurrent: usize, evm_timeout: Option<Duration>) -> Self {
+        let max = match max_concurrent {
+            0 => default_max_concurrent_requests(),
+            n => n,
+        };
+        self.slots = Arc::new(Semaphore::new(max));
+        self.max_concurrent = max;
+        self.evm_timeout = evm_timeout.filter(|t| !t.is_zero());
+        self
     }
 
     /// Serve `eth_subscribe` from `events` and publish the hash of every
@@ -131,25 +214,58 @@ impl NodeBackend {
         self
     }
 
-    /// Run `f` on a blocking thread with a consistent database snapshot.
+    /// A blocking-work slot; fails with -32005 after [`RPC_QUEUE_TIMEOUT`].
+    async fn slot(&self) -> BackendResult<OwnedSemaphorePermit> {
+        match tokio::time::timeout(RPC_QUEUE_TIMEOUT, self.slots.clone().acquire_owned()).await {
+            Ok(Ok(permit)) => Ok(permit),
+            Ok(Err(_)) => Err(internal("request slots closed")),
+            Err(_) => Err(RpcBackendError::LimitExceeded(format!(
+                "server busy: {} requests already running, try again later",
+                self.max_concurrent
+            ))),
+        }
+    }
+
+    fn ctx(&self) -> Ctx {
+        Ctx {
+            pool: self.pool.clone(),
+            executor: self.executor.clone(),
+            cfg: self.cfg.clone(),
+            gas_cap: self.gas_cap,
+            evm_timeout: self.evm_timeout,
+        }
+    }
+
+    /// Run `f` on a blocking thread (once a work slot is free) with a consistent
+    /// database snapshot.
     async fn read<T, F>(&self, f: F) -> BackendResult<T>
     where
         T: Send + 'static,
         F: FnOnce(&Snapshot<'_>, &Ctx) -> BackendResult<T> + Send + 'static,
     {
+        let permit = self.slot().await?;
         let db = self.db.clone();
-        let ctx = Ctx {
-            pool: self.pool.clone(),
-            executor: self.executor.clone(),
-            cfg: self.cfg.clone(),
-            gas_cap: self.gas_cap,
-        };
+        let ctx = self.ctx();
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let snapshot = db.snapshot().map_err(internal)?;
             f(&*snapshot, &ctx)
         })
         .await
         .map_err(|e| internal(format!("request task failed: {e}")))?
+    }
+
+    /// [`NodeBackend::read`] for an EVM simulation: `f` gets the [`CallLimits`] (the EVM
+    /// time limit from when it starts; cancelled if this future is dropped).
+    async fn simulate<T, F>(&self, f: F) -> BackendResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Snapshot<'_>, &Ctx, &CallLimits) -> BackendResult<T> + Send + 'static,
+    {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let _guard = CancelOnDrop(cancel.clone());
+        self.read(move |s, ctx| f(s, ctx, &ctx.call_limits(cancel)))
+            .await
     }
 }
 
@@ -507,12 +623,12 @@ impl RpcBackend for NodeBackend {
     }
 
     async fn call(&self, request: TransactionRequest, block: BlockId) -> BackendResult<Bytes> {
-        self.read(move |s, ctx| {
+        self.simulate(move |s, ctx, limits| {
             let (header, state) = state_at(s, block)?;
             match ctx
                 .executor
-                .call(&*state, &header, &request, ctx.gas_cap)
-                .map_err(exec_err)?
+                .call_with_limits(&*state, &header, &request, ctx.gas_cap, limits)
+                .map_err(|e| ctx.exec_err(e))?
             {
                 CallResult::Success { output, .. } => Ok(output),
                 CallResult::Revert { output, .. } => Err(reverted(output)),
@@ -527,11 +643,11 @@ impl RpcBackend for NodeBackend {
         request: TransactionRequest,
         block: BlockId,
     ) -> BackendResult<u64> {
-        self.read(move |s, ctx| {
+        self.simulate(move |s, ctx, limits| {
             let (header, state) = state_at(s, block)?;
             ctx.executor
-                .estimate_gas(&*state, &header, &request, ctx.gas_cap)
-                .map_err(exec_err)
+                .estimate_gas_with_limits(&*state, &header, &request, ctx.gas_cap, limits)
+                .map_err(|e| ctx.exec_err(e))
         })
         .await
     }
@@ -541,7 +657,9 @@ impl RpcBackend for NodeBackend {
         let pool = self.pool.clone();
         let gossip = self.gossip.clone();
         let events = self.events.clone();
+        let permit = self.slot().await?;
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let tx = decode_and_recover(&raw, chain_id)
                 .map_err(|e| RpcBackendError::Rejected(e.to_string()))?;
             let hash = tx.hash();

@@ -385,3 +385,50 @@ async fn commit_publishes_chain_events_once() {
     assert!(ev.logs.is_empty());
     assert!(rx.try_recv().is_err(), "re-commit must not publish again");
 }
+
+/// Rule 3 (timestamp drift) depends on the local clock, so its rejections are never
+/// cached: a live proposal judged "ahead of the clock" by a lagging validator becomes
+/// valid once that clock catches up. A block already judged valid stays valid for a
+/// re-proposal (e.g. after a polka) even if the clock reading moves back.
+#[tokio::test]
+async fn clock_dependent_rejections_are_never_cached() {
+    let g = genesis();
+    let (a, b) = (node(&g), node(&g));
+    let block = a.app.propose(1, 0, far()).await.unwrap();
+    let ts = block.header.timestamp;
+    let drift = ChainAppConfig::default().max_timestamp_drift_secs;
+    let verdict = |now: u64| match b
+        .app
+        .inner
+        .verdict(1, &block, BlockOrigin::Consensus, now)
+        .unwrap()
+    {
+        Verdict::Valid(_) => None,
+        Verdict::Invalid(r) => Some(r.to_string()),
+    };
+
+    // b's clock lags an hour behind the proposer's: untimely, and not cached.
+    let lagging = ts - drift - 3600;
+    for _ in 0..2 {
+        assert!(verdict(lagging)
+            .unwrap()
+            .contains("ahead of the local clock"));
+        assert!(b.app.inner.cached(&block.hash()).is_none());
+    }
+    // The clock caught up: the same block is valid (and that verdict is cached).
+    assert_eq!(verdict(ts), None);
+    assert!(matches!(
+        b.app.inner.cached(&block.hash()),
+        Some(Verdict::Valid(_))
+    ));
+    // Re-proposed in a later round (it may have a polka by now): still valid, even if
+    // the local clock stepped back meanwhile.
+    assert_eq!(verdict(lagging), None);
+    assert_eq!(
+        b.app
+            .validate(1, &block, BlockOrigin::Consensus)
+            .await
+            .unwrap(),
+        Validity::Valid
+    );
+}

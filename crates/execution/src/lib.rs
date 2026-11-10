@@ -7,7 +7,8 @@
 //! * [`ExecutionOutcome`] — roots, gas, receipts and the [`StateDiff`] of a block.
 //! * [`next_base_fee`] — EIP-1559 base fee with the 0.1 gwei floor (§15.1).
 //! * [`EvmExecutor::call`] / [`EvmExecutor::estimate_gas`] — single-call execution for
-//!   `eth_call` / `eth_estimateGas`.
+//!   `eth_call` / `eth_estimateGas`; the `*_with_limits` variants stop a simulation at a
+//!   wall-clock deadline or when it is cancelled ([`CallLimits`]).
 //!
 //! XIP-0001 (EOA lock, `docs/specs/xip-0001-eoa-lock.md`) is enforced by both
 //! [`BlockExecutor::execute`] (an invalid tx fails the block) and
@@ -35,6 +36,14 @@ pub use base_fee::next_base_fee;
 pub use db::StateDbError;
 pub use env::{BLOB_TX_TYPE, SPEC};
 pub use error::ExecutionError;
+pub use executor::CALL_LIMIT_CHECK_INTERVAL;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 use xdevs_primitives::{
     Address, Block, Bloom, Bytes, ChainConfig, Header, Log, ReceiptEnvelope, RecoveredTx, TxHash,
     B256,
@@ -158,6 +167,55 @@ impl CallResult {
     /// `true` for [`CallResult::Success`].
     pub const fn is_success(&self) -> bool {
         matches!(self, CallResult::Success { .. })
+    }
+}
+
+/// Stops an `eth_call` / `eth_estimateGas` simulation early (RPC DoS protection): a
+/// wall-clock `deadline` and/or a `cancel` flag (set e.g. when the RPC client went away).
+/// When either trips, the EVM halts at its next instruction and the call fails with
+/// [`ExecutionError::Aborted`]. Never used for block execution (which must be
+/// deterministic). The default has no limit.
+#[derive(Clone, Debug, Default)]
+pub struct CallLimits {
+    /// Abort once this instant has passed.
+    pub deadline: Option<Instant>,
+    /// Abort once this flag is `true`.
+    pub cancel: Option<Arc<AtomicBool>>,
+}
+
+impl CallLimits {
+    /// Limits with a deadline `timeout` from now.
+    pub fn timeout(timeout: std::time::Duration) -> Self {
+        Self {
+            deadline: Some(Instant::now() + timeout),
+            cancel: None,
+        }
+    }
+
+    /// Also abort when `cancel` becomes `true`.
+    pub fn with_cancel(mut self, cancel: Arc<AtomicBool>) -> Self {
+        self.cancel = Some(cancel);
+        self
+    }
+
+    /// `true` when nothing can abort the call.
+    pub fn is_unbounded(&self) -> bool {
+        self.deadline.is_none() && self.cancel.is_none()
+    }
+
+    /// Why the call must stop now (`None` = keep going).
+    pub fn tripped(&self) -> Option<&'static str> {
+        if self
+            .cancel
+            .as_ref()
+            .is_some_and(|c| c.load(Ordering::Relaxed))
+        {
+            return Some("cancelled");
+        }
+        if self.deadline.is_some_and(|d| Instant::now() >= d) {
+            return Some("timeout");
+        }
+        None
     }
 }
 

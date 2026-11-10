@@ -21,6 +21,7 @@ pub mod convert;
 mod cors;
 mod error;
 pub mod events;
+mod limits;
 mod server;
 pub mod subscription;
 
@@ -239,6 +240,9 @@ pub fn check_logs_limit(count: usize, limit: Option<usize>) -> BackendResult<()>
     }
 }
 
+/// Default of [`RpcServerConfig::max_in_flight_per_connection`].
+pub const DEFAULT_MAX_IN_FLIGHT_PER_CONNECTION: u32 = 32;
+
 /// Server settings (plan §19.3, §33.2 `[rpc]`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RpcServerConfig {
@@ -266,6 +270,16 @@ pub struct RpcServerConfig {
     /// Max active subscriptions over all connections of the server (default 1,000;
     /// error -32005 above).
     pub max_subscriptions: u32,
+    /// Max calls running at once per connection (default 32; 0 = unlimited). Calls
+    /// above it fail at once with -32005: one WebSocket client cannot run thousands of
+    /// heavy calls in parallel.
+    pub max_in_flight_per_connection: u32,
+    /// Per-IP token bucket: calls per second per client IP (plan §19.3; 0 = off, the
+    /// default). Calls over the budget fail with -32005. Behind a reverse proxy every
+    /// client shares the proxy's IP, so rate-limit at the proxy instead.
+    pub rate_limit_per_ip: u32,
+    /// Bucket size (burst) of the per-IP rate limit (default 2 × `rate_limit_per_ip`).
+    pub rate_limit_burst: u32,
 }
 
 impl Default for RpcServerConfig {
@@ -282,6 +296,9 @@ impl Default for RpcServerConfig {
             max_connections: 256,
             max_subscriptions_per_connection: 20,
             max_subscriptions: 1_000,
+            max_in_flight_per_connection: DEFAULT_MAX_IN_FLIGHT_PER_CONNECTION,
+            rate_limit_per_ip: 0,
+            rate_limit_burst: 0,
         }
     }
 }
@@ -313,14 +330,17 @@ impl RpcServerHandle {
 }
 
 /// Start the JSON-RPC server (HTTP and WebSocket on the same port) serving
-/// `eth_` / `net_` / `web3_` from `backend`, with the §19.3 limits from `config`.
+/// `eth_` / `net_` / `web3_` from `backend`, with the §19.3 limits from `config`
+/// (plus the per-connection in-flight cap and the per-IP rate limit).
 pub async fn start_server(
     config: RpcServerConfig,
     backend: Arc<dyn RpcBackend>,
 ) -> anyhow::Result<RpcServerHandle> {
     use jsonrpsee::{
         core::middleware::RpcServiceBuilder,
-        server::{BatchRequestConfig, Server, ServerConfig},
+        server::{
+            serve_with_graceful_shutdown, stop_channel, BatchRequestConfig, Server, ServerConfig,
+        },
     };
 
     let server_config = ServerConfig::builder()
@@ -335,18 +355,65 @@ pub async fn start_server(
     let http_middleware = tower::ServiceBuilder::new()
         .layer(cors)
         .layer(subscription::TransportLayer);
-    let rpc_middleware = RpcServiceBuilder::new().layer_fn(subscription::NoHttpSubscriptions::new);
+    let limits = limits::LimitsConfig {
+        max_in_flight: config.max_in_flight_per_connection,
+        rate: (config.rate_limit_per_ip > 0).then(|| {
+            let burst = match config.rate_limit_burst {
+                0 => config.rate_limit_per_ip.saturating_mul(2),
+                b => b,
+            };
+            Arc::new(limits::IpRateLimiter::new(config.rate_limit_per_ip, burst))
+        }),
+    };
+    // Instantiated once per WebSocket connection (or HTTP request): the in-flight cap
+    // is per connection.
+    let rpc_middleware = RpcServiceBuilder::new().layer_fn(move |service| {
+        limits::RequestLimits::new(subscription::NoHttpSubscriptions::new(service), &limits)
+    });
 
-    let server = Server::builder()
+    let listener = tokio::net::TcpListener::bind(config.http)
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to bind JSON-RPC server on {}: {e}", config.http))?;
+    let local_addr = listener.local_addr()?;
+    let builder = Server::builder()
         .set_config(server_config)
         .set_http_middleware(http_middleware)
         .set_rpc_middleware(rpc_middleware)
-        .build(config.http)
-        .await
-        .map_err(|e| anyhow::anyhow!("failed to bind JSON-RPC server on {}: {e}", config.http))?;
-    let local_addr = server.local_addr()?;
-    let module = build_module(config, backend)?;
-    let handle = server.start(module);
+        .to_service_builder();
+    let methods: jsonrpsee::Methods = build_module(config, backend)?.into();
+    let (stop, handle) = stop_channel();
+
+    // Our own accept loop (instead of `Server::start`) so every request carries the
+    // client IP for the per-IP rate limit.
+    tokio::spawn(async move {
+        loop {
+            let (socket, remote) = tokio::select! {
+                accepted = listener.accept() => match accepted {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        // E.g. out of file descriptors: back off instead of spinning.
+                        tracing::debug!(target: "xdevs::rpc", "accept failed: {e}");
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        continue;
+                    }
+                },
+                _ = stop.clone().shutdown() => break,
+            };
+            let _ = socket.set_nodelay(true);
+            let ip = limits::RemoteIp(remote.ip());
+            let (builder, methods, conn_stop) = (builder.clone(), methods.clone(), stop.clone());
+            let service = tower::service_fn(move |mut req: http::Request<_>| {
+                req.extensions_mut().insert(ip);
+                let mut svc = builder.clone().build(methods.clone(), conn_stop.clone());
+                async move { tower::Service::call(&mut svc, req).await }
+            });
+            tokio::spawn(serve_with_graceful_shutdown(
+                socket,
+                service,
+                stop.clone().shutdown(),
+            ));
+        }
+    });
     tracing::info!(target: "xdevs::rpc", %local_addr, "JSON-RPC server started (HTTP + WS)");
     Ok(RpcServerHandle::new(local_addr, handle))
 }

@@ -64,6 +64,10 @@ pub enum ExecutionError {
     /// Invalid call request (`eth_call` / `eth_estimateGas` parameters).
     #[error("invalid call request: {0}")]
     InvalidRequest(String),
+    /// `eth_call` / `eth_estimateGas` stopped by its [`crate::CallLimits`] (`"timeout"` or
+    /// `"cancelled"`). Says nothing about the call itself.
+    #[error("execution aborted ({0})")]
+    Aborted(&'static str),
     /// State access failed.
     #[error("state error: {0}")]
     State(String),

@@ -3,8 +3,8 @@
 use crate::{
     db::{StateDbError, StateOverlay},
     env::{block_env, call_tx_env, cfg_env, tx_env, BLOB_TX_TYPE},
-    next_base_fee, xip0001, BlockAttributes, BlockExecutor, BuiltBlock, CallResult, EvmExecutor,
-    ExecutionError, ExecutionOutcome,
+    next_base_fee, xip0001, BlockAttributes, BlockExecutor, BuiltBlock, CallLimits, CallResult,
+    EvmExecutor, ExecutionError, ExecutionOutcome,
 };
 use alloy_consensus::Eip658Value;
 use alloy_rpc_types_eth::TransactionRequest;
@@ -15,6 +15,8 @@ use revm::{
         ContextTr,
     },
     handler::{MainnetContext, MainnetEvm},
+    inspector::{InspectEvm, Inspector},
+    interpreter::{interpreter::EthInterpreter, Interpreter},
     primitives::eip7825::TX_GAS_LIMIT_CAP,
     Context, ExecuteEvm, MainBuilder, MainContext,
 };
@@ -42,6 +44,34 @@ fn new_evm<'o, 'a>(db: &'o mut StateOverlay<'a>, cfg: CfgEnv, block: BlockEnv) -
         .with_block(block)
         .with_cfg(cfg)
         .build_mainnet()
+}
+
+/// EVM instructions between two [`CallLimits`] checks (each check reads the clock).
+pub const CALL_LIMIT_CHECK_INTERVAL: u32 = 4096;
+
+/// Inspector that halts a simulation once its [`CallLimits`] trip: every
+/// [`CALL_LIMIT_CHECK_INTERVAL`] instructions it checks the limits; once tripped, every
+/// further instruction (in any frame) halts at once, so the whole call unwinds.
+struct Interrupt<'l> {
+    limits: &'l CallLimits,
+    steps: u32,
+    tripped: Option<&'static str>,
+}
+
+impl<CTX> Inspector<CTX, EthInterpreter> for Interrupt<'_> {
+    fn step(&mut self, interp: &mut Interpreter<EthInterpreter>, _context: &mut CTX) {
+        if self.tripped.is_none() {
+            self.steps = self.steps.wrapping_add(1);
+            if !self.steps.is_multiple_of(CALL_LIMIT_CHECK_INTERVAL) {
+                return;
+            }
+            self.tripped = self.limits.tripped();
+            if self.tripped.is_none() {
+                return;
+            }
+        }
+        interp.halt_oog();
+    }
 }
 
 /// Why a single transaction could not be applied.
@@ -185,13 +215,18 @@ impl EvmExecutor {
 
     /// Run a message call on `db` (nothing is committed) with relaxed checks like geth's
     /// `eth_call`: no nonce / base fee / block gas limit / EIP-3607 / EIP-7825 checks.
+    /// Fails with [`ExecutionError::Aborted`] when `limits` trip.
     fn run_call(
         &self,
         db: &mut StateOverlay<'_>,
         header: &Header,
         request: &TransactionRequest,
         gas_limit: u64,
+        limits: &CallLimits,
     ) -> Result<CallOutcome, ExecutionError> {
+        if let Some(reason) = limits.tripped() {
+            return Err(ExecutionError::Aborted(reason));
+        }
         let from = request.from.unwrap_or_default();
         let nonce = db
             .account(from)
@@ -210,8 +245,25 @@ impl EvmExecutor {
         cfg.disable_block_gas_limit = true;
         cfg.disable_eip3607 = true;
         cfg.tx_gas_limit_cap = Some(u64::MAX);
-        let mut evm = new_evm(db, cfg, block_env(header));
-        match evm.transact(env) {
+        let out = if limits.is_unbounded() {
+            new_evm(db, cfg, block_env(header)).transact(env)
+        } else {
+            let mut evm = Context::mainnet()
+                .with_db(db)
+                .with_block(block_env(header))
+                .with_cfg(cfg)
+                .build_mainnet_with_inspector(Interrupt {
+                    limits,
+                    steps: 0,
+                    tripped: None,
+                });
+            let out = evm.inspect_tx(env);
+            if let Some(reason) = evm.inspector.tripped {
+                return Err(ExecutionError::Aborted(reason));
+            }
+            out
+        };
+        match out {
             Ok(out) => Ok(CallOutcome::Done(out.result)),
             Err(EVMError::Transaction(e)) => Ok(CallOutcome::Invalid(e.to_string())),
             Err(e) => Err(evm_error(e)),
@@ -230,10 +282,23 @@ impl EvmExecutor {
         request: &TransactionRequest,
         gas_cap: u64,
     ) -> Result<CallResult, ExecutionError> {
+        self.call_with_limits(state, header, request, gas_cap, &CallLimits::default())
+    }
+
+    /// [`EvmExecutor::call`] that stops with [`ExecutionError::Aborted`] once `limits`
+    /// trip (RPC time limit / client gone).
+    pub fn call_with_limits(
+        &self,
+        state: &dyn StateProvider,
+        header: &Header,
+        request: &TransactionRequest,
+        gas_cap: u64,
+        limits: &CallLimits,
+    ) -> Result<CallResult, ExecutionError> {
         let cap = effective_cap(gas_cap);
         let gas_limit = request.gas.unwrap_or(cap).min(cap);
         let mut db = StateOverlay::new(state);
-        match self.run_call(&mut db, header, request, gas_limit)? {
+        match self.run_call(&mut db, header, request, gas_limit, limits)? {
             CallOutcome::Invalid(reason) => Err(ExecutionError::InvalidRequest(reason)),
             CallOutcome::Done(result) => Ok(to_call_result(result)),
         }
@@ -249,6 +314,19 @@ impl EvmExecutor {
         header: &Header,
         request: &TransactionRequest,
         gas_cap: u64,
+    ) -> Result<u64, ExecutionError> {
+        self.estimate_gas_with_limits(state, header, request, gas_cap, &CallLimits::default())
+    }
+
+    /// [`EvmExecutor::estimate_gas`] whose whole binary search stops with
+    /// [`ExecutionError::Aborted`] once `limits` trip.
+    pub fn estimate_gas_with_limits(
+        &self,
+        state: &dyn StateProvider,
+        header: &Header,
+        request: &TransactionRequest,
+        gas_cap: u64,
+        limits: &CallLimits,
     ) -> Result<u64, ExecutionError> {
         let mut db = StateOverlay::new(state);
         let locked = self.check_request_xip0001(&mut db, header, request)?;
@@ -282,7 +360,7 @@ impl EvmExecutor {
         }
 
         // Upper bound must succeed.
-        let first = match self.run_call(&mut db, header, request, hi)? {
+        let first = match self.run_call(&mut db, header, request, hi, limits)? {
             CallOutcome::Invalid(reason) => return Err(ExecutionError::InvalidRequest(reason)),
             CallOutcome::Done(r) => r,
         };
@@ -304,7 +382,7 @@ impl EvmExecutor {
         let mut lo = spent.saturating_sub(1);
         let succeeds = |gas: u64, db: &mut StateOverlay<'_>| -> Result<bool, ExecutionError> {
             Ok(matches!(
-                self.run_call(db, header, request, gas)?,
+                self.run_call(db, header, request, gas, limits)?,
                 CallOutcome::Done(ExecutionResult::Success { .. })
             ))
         };

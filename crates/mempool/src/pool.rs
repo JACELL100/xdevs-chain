@@ -410,6 +410,30 @@ impl Pool {
         Ok(plan)
     }
 
+    /// State-only checks of a new tx (no pool lock): nonce not below the account nonce
+    /// nor too far ahead, and the balance covers at least this tx alone.
+    fn precheck(&self, nonce: u64, cost: U256, account: &AccountInfo) -> Result<(), PoolError> {
+        if nonce < account.nonce {
+            return Err(PoolError::NonceTooLow {
+                state: account.nonce,
+                tx: nonce,
+            });
+        }
+        if nonce - account.nonce > self.config.max_nonce_gap {
+            return Err(PoolError::NonceGapTooLarge {
+                state: account.nonce,
+                tx: nonce,
+            });
+        }
+        if cost > account.balance {
+            return Err(PoolError::InsufficientFunds {
+                balance: account.balance,
+                cost,
+            });
+        }
+        Ok(())
+    }
+
     /// Drop queued txs older than the TTL (measured in block timestamps).
     fn expire_queued(&self, inner: &mut Inner, now: u64) {
         let ttl = self.config.queued_ttl_secs;
@@ -450,6 +474,10 @@ impl TxPool for Pool {
         let lock = self.read_lock(sender, &account)?;
         // XIP-0001 (§5 e): as if the tx were the first one of the next block.
         check_tx(lock, &TxShape::from(&tx), self.base_fee(), false)?;
+        // Cheap rejections before the write lock (security review: forged gossip txs
+        // from random unfunded senders must not serialise on the pool lock). Each is
+        // re-checked below against the pooled txs of the sender.
+        self.precheck(nonce, cost, &account)?;
 
         let mut inner = self.inner.write();
         if inner.by_hash.contains_key(&hash) {

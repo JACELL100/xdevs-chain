@@ -11,11 +11,26 @@
 //!   updates the pool. It is idempotent: a second call for a committed block only
 //!   replaces the certificate when the new one carries more signatures.
 //!
-//! Every storage / EVM step runs on a blocking thread.
+//! Every storage / EVM step runs on the app's own [`WorkerPool`] threads, never on
+//! tokio's shared blocking pool: RPC requests (`eth_call`, `eth_estimateGas`, ...) use
+//! that pool, and however many are queued, consensus work starts at once (security
+//! review: RPC load starving consensus).
+//!
+//! **Timestamp rule (rule 3) and the verdict cache.** A live proposal
+//! ([`BlockOrigin::Consensus`]) whose timestamp is more than `max_timestamp_drift_secs`
+//! ahead of the local clock is invalid *now*. That rejection depends on the local clock,
+//! so it is **never cached**: the same block is judged again on every call and becomes
+//! valid once the local clock catches up. Only deterministic verdicts (shape and
+//! execution) are cached. A block with a cached *valid* verdict is not re-checked against
+//! the clock: it was timely when first judged (or proposed by us, or decided), and a
+//! re-proposal of a value that already gathered a polka must not turn invalid because
+//! of clock skew or a clock step backwards, which could split validators and stall the
+//! height.
 
 use crate::{
     chain::{self, Db},
     producer::{after_commit, build_next_block, drop_rejected, unix_now, NextBlock},
+    workers::WorkerPool,
 };
 use anyhow::{bail, ensure, Context};
 use parking_lot::Mutex;
@@ -40,6 +55,9 @@ pub use crate::producer::MAX_BLOCK_BYTES;
 pub const PROPOSAL_EXTRA_DATA: &[u8] = b"xdevs";
 /// Execution verdicts kept (by block hash); the lowest heights are evicted first.
 const VERDICT_CACHE_CAPACITY: usize = 64;
+/// Threads of the consensus worker pool. More than one: a full block build that misses
+/// the propose deadline keeps running while the empty fallback block is built.
+const CONSENSUS_THREADS: usize = 4;
 const LOG: &str = "xdevs::app";
 
 /// Settings of a [`ChainApp`].
@@ -104,6 +122,8 @@ struct Inner {
 #[derive(Clone)]
 pub struct ChainApp {
     inner: Arc<Inner>,
+    /// Dedicated threads for every blocking step (see the module docs).
+    workers: Arc<WorkerPool>,
 }
 
 impl std::fmt::Debug for ChainApp {
@@ -138,6 +158,10 @@ impl ChainApp {
                 commit_lock: Mutex::new(()),
                 events: std::sync::OnceLock::new(),
             }),
+            workers: Arc::new(
+                WorkerPool::new("xdevs-consensus", CONSENSUS_THREADS)
+                    .expect("failed to spawn the consensus worker threads"),
+            ),
         }
     }
 
@@ -148,14 +172,15 @@ impl ChainApp {
         self
     }
 
-    /// Run `f` on a blocking thread.
+    /// Run `f` on a consensus worker thread.
     async fn blocking<T, F>(&self, f: F) -> anyhow::Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&Inner) -> anyhow::Result<T> + Send + 'static,
     {
         let inner = self.inner.clone();
-        tokio::task::spawn_blocking(move || f(&inner))
+        self.workers
+            .run(move || f(&inner))
             .await
             .context("chain app task failed")?
     }
@@ -219,8 +244,21 @@ impl Inner {
             "cannot validate height {height}: committed head is {head}"
         );
         let header = &block.header;
-        // Rule 3, live proposals only. Not cached: it depends on the clock. A proposer
-        // must use at least `parent + 1`, so that is always timely.
+        // The cache is keyed by the header hash: the body must belong to that header
+        // first (a proposer could pair a known header with another body).
+        if !body_matches_header(block) {
+            return Ok(Verdict::invalid(
+                "transactions root does not match the body",
+            ));
+        }
+        let hash = block.hash();
+        // Cached verdicts are deterministic (shape / execution). A cached valid block is
+        // not re-checked against the clock (module docs: polka'd re-proposals).
+        if let Some(v) = self.cached(&hash) {
+            return Ok(v);
+        }
+        // Rule 3, live proposals only. NEVER cached: it depends on the local clock. A
+        // proposer must use at least `parent + 1`, so that is always timely.
         if origin == BlockOrigin::Consensus {
             let limit = now_secs
                 .saturating_add(self.app.max_timestamp_drift_secs)
@@ -231,17 +269,6 @@ impl Inner {
                     header.timestamp
                 )));
             }
-        }
-        // The cache is keyed by the header hash: the body must belong to that header
-        // first (a proposer could pair a known header with another body).
-        if !body_matches_header(block) {
-            return Ok(Verdict::invalid(
-                "transactions root does not match the body",
-            ));
-        }
-        let hash = block.hash();
-        if let Some(v) = self.cached(&hash) {
-            return Ok(v);
         }
         let verdict = match self.check_shape(height, &parent, block) {
             Err(reason) => Verdict::invalid(reason),
@@ -254,6 +281,8 @@ impl Inner {
                     },
                     // A storage failure says nothing about the block.
                     Err(ExecutionError::State(e)) => bail!("state read failed: {e}"),
+                    // Never happens for blocks (no limits); not a verdict either way.
+                    Err(e @ ExecutionError::Aborted(_)) => bail!("block execution {e}"),
                     Err(e) => Verdict::invalid(e),
                 }
             }

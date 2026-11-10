@@ -377,6 +377,72 @@ fn call_and_estimate_report_reverts() {
     assert_eq!(exec.estimate_gas(&st, &header, &xfer, 0).unwrap(), 21_000);
 }
 
+/// Regression (RPC DoS): an `eth_call` of a contract that never stops (`JUMPDEST; PUSH1 0;
+/// JUMP`) with an unbounded gas cap is aborted at the wall-clock deadline instead of
+/// running forever; a cancelled call / estimate stops at once.
+#[test]
+fn call_limits_abort_endless_simulations() {
+    use std::sync::{atomic::AtomicBool, Arc};
+    use std::time::{Duration, Instant};
+    const LOOP: [u8; 4] = [0x5b, 0x60, 0x00, 0x56];
+    let exec = EvmExecutor::new(cfg());
+    let mut st = funded_state();
+    let target = Address::repeat_byte(0x66);
+    let hash = st.insert_code(Bytes::from_static(&LOOP));
+    st.insert_account(
+        target,
+        AccountInfo {
+            nonce: 1,
+            balance: U256::ZERO,
+            code_hash: hash,
+        },
+    );
+    let header = parent();
+    let req = TransactionRequest {
+        to: Some(TxKind::Call(target)),
+        ..Default::default()
+    };
+
+    let started = Instant::now();
+    let limits = CallLimits::timeout(Duration::from_millis(300));
+    assert_eq!(
+        exec.call_with_limits(&st, &header, &req, 0, &limits),
+        Err(ExecutionError::Aborted("timeout"))
+    );
+    let took = started.elapsed();
+    assert!(
+        took >= Duration::from_millis(300) && took < Duration::from_secs(5),
+        "{took:?}"
+    );
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let limits = CallLimits::default().with_cancel(cancel.clone());
+    let flag = cancel.clone();
+    let setter = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    assert_eq!(
+        exec.call_with_limits(&st, &header, &req, 0, &limits),
+        Err(ExecutionError::Aborted("cancelled"))
+    );
+    setter.join().unwrap();
+    assert_eq!(
+        exec.estimate_gas_with_limits(&st, &header, &req, 0, &limits),
+        Err(ExecutionError::Aborted("cancelled"))
+    );
+
+    // Limits that never trip do not change results.
+    let roomy = CallLimits::timeout(Duration::from_secs(600));
+    match exec
+        .call_with_limits(&st, &header, &req, 100_000, &roomy)
+        .unwrap()
+    {
+        CallResult::Halt { gas_used, .. } => assert_eq!(gas_used, 100_000),
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
 #[test]
 fn build_skips_and_rejects() {
     let exec = EvmExecutor::new(cfg());

@@ -477,6 +477,41 @@ fn unknown_sender_has_nothing() {
     ));
 }
 
+/// Regression (security review, tx-gossip flood): txs from unfunded senders and
+/// stale / far-future nonces are rejected from a state read alone, without waiting for
+/// the pool's write lock (blocked here by a read lock held for the whole check).
+#[test]
+fn cheap_rejections_do_not_take_the_write_lock() {
+    let f = Fixture::new();
+    f.fund(addr(1), 5, RICH);
+    // A held read lock blocks writers, not readers.
+    let guard = f.pool.inner.read();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            let results = vec![
+                f.add(transfer(addr(9), 0, FEE, 1)),
+                f.add(transfer(addr(1), 4, FEE, 1)),
+                f.add(transfer(addr(1), 5 + 1_000, FEE, 1)),
+            ];
+            tx.send(results).unwrap();
+        });
+        let results = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("rejections waited for the write lock");
+        drop(guard);
+        assert!(matches!(
+            results[0],
+            Err(PoolError::InsufficientFunds { .. })
+        ));
+        assert!(matches!(results[1], Err(PoolError::NonceTooLow { .. })));
+        assert!(matches!(
+            results[2],
+            Err(PoolError::NonceGapTooLarge { .. })
+        ));
+    });
+}
+
 #[test]
 fn insufficient_funds_is_cumulative() {
     let f = Fixture::new();

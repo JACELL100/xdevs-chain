@@ -49,6 +49,11 @@
 //! gas_cap = 50_000_000
 //! max_logs_range = 10_000
 //! max_batch = 50
+//! max_concurrent_requests = 0        # blocking RPC work at once; 0 = 2 x CPUs
+//! evm_timeout_ms = 5000              # eth_call / eth_estimateGas EVM time limit; 0 = none
+//! max_in_flight_per_connection = 32  # calls running at once per connection; 0 = no cap
+//! rate_limit_per_ip = 0              # calls/s per client IP; 0 = off (use the proxy's)
+//! rate_limit_burst = 0               # bucket size; 0 = 2 x rate_limit_per_ip
 //!
 //! [mempool]
 //! max_txs = 10_000
@@ -308,6 +313,18 @@ pub struct RpcSection {
     pub max_logs_range: u64,
     /// Max JSON-RPC batch size.
     pub max_batch: u32,
+    /// Max requests doing blocking work (state reads, EVM) at once over all RPC
+    /// connections; others wait for a slot. 0 = 2 x CPUs.
+    pub max_concurrent_requests: usize,
+    /// EVM time limit of `eth_call` / `eth_estimateGas` in ms (geth: 5 s); 0 = none.
+    pub evm_timeout_ms: u64,
+    /// Max calls running at once per connection (excess calls fail with -32005);
+    /// 0 = no cap.
+    pub max_in_flight_per_connection: u32,
+    /// Per-IP token bucket: calls per second per client IP (plan §19.3); 0 = off.
+    pub rate_limit_per_ip: u32,
+    /// Per-IP bucket size; 0 = 2 x `rate_limit_per_ip`.
+    pub rate_limit_burst: u32,
 }
 
 impl Default for RpcSection {
@@ -320,6 +337,11 @@ impl Default for RpcSection {
             gas_cap: 50_000_000,
             max_logs_range: 10_000,
             max_batch: 50,
+            max_concurrent_requests: 0,
+            evm_timeout_ms: 5_000,
+            max_in_flight_per_connection: xdevs_rpc::DEFAULT_MAX_IN_FLIGHT_PER_CONNECTION,
+            rate_limit_per_ip: 0,
+            rate_limit_burst: 0,
         }
     }
 }
