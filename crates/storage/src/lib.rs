@@ -26,7 +26,7 @@ pub use codec::{Decode, Encode};
 pub use error::DbError;
 pub use mem::MemDb;
 pub use redb_db::{RedbDatabase, RedbSnapshot, DB_FILE_NAME};
-pub use tables::{Table, TableId};
+pub use tables::{StateChangeSet, Table, TableId};
 
 /// Read access to a consistent view of the database.
 pub trait DbRead {
@@ -127,6 +127,10 @@ pub mod meta_keys {
     pub const GENESIS_HASH: &str = "genesis_hash";
     /// On-disk schema version (`u64`, big-endian), see [`super::SCHEMA_VERSION`].
     pub const SCHEMA_VERSION: &str = "schema_version";
+    /// First block whose reverse state diff is stored in the history tables (`u64`,
+    /// big-endian): the state after block `start - 1` and after every later block can
+    /// be read. Absent = no history (only the latest state).
+    pub const STATE_HISTORY_START: &str = "state_history_start";
 }
 
 /// Current on-disk schema version. Bump when a table encoding changes.

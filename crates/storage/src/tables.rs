@@ -11,10 +11,15 @@
 //! | `PlainStorage`   | (address, slot)        | value (32 bytes BE, never zero)        |
 //! | `Bytecodes`      | code hash              | raw bytecode                           |
 //! | `Meta`           | utf-8 string           | raw bytes (see [`crate::meta_keys`])   |
+//! | `AccountHistory` | (address, block)       | account *before* `block` (or absent)   |
+//! | `StorageHistory` | (address, slot, block) | slot value *before* `block` (0 = unset)|
+//! | `StateChangeSets`| block number           | [`StateChangeSet`] (keys for pruning)  |
 //!
 //! `Transactions` stores only the location; the transaction itself lives in `Bodies`
-//! (saves disk vs. storing it twice). `Commits`, `TrieNodes`, history tables and
-//! `LogIndex` arrive in later phases.
+//! (saves disk vs. storing it twice). The history tables hold reverse diffs for the
+//! last N blocks (§14.4) so state can be read at recent past blocks; the
+//! `StateChangeSets` index lets old entries be pruned block by block. `Commits`,
+//! `TrieNodes` and `LogIndex` arrive in later phases.
 
 use crate::codec::{Decode, Encode};
 use xdevs_primitives::{
@@ -42,11 +47,17 @@ pub enum TableId {
     Bytecodes,
     /// Misc metadata.
     Meta,
+    /// `(address, block) -> account before block`.
+    AccountHistory,
+    /// `(address, slot, block) -> value before block`.
+    StorageHistory,
+    /// `block -> keys changed by block`.
+    StateChangeSets,
 }
 
 impl TableId {
     /// Every table, in a fixed order (backends create them all on open).
-    pub const ALL: [TableId; 9] = [
+    pub const ALL: [TableId; 12] = [
         TableId::Headers,
         TableId::HeaderNumbers,
         TableId::Bodies,
@@ -56,6 +67,9 @@ impl TableId {
         TableId::PlainStorage,
         TableId::Bytecodes,
         TableId::Meta,
+        TableId::AccountHistory,
+        TableId::StorageHistory,
+        TableId::StateChangeSets,
     ];
 
     /// Stable on-disk table name.
@@ -70,6 +84,9 @@ impl TableId {
             TableId::PlainStorage => "PlainStorage",
             TableId::Bytecodes => "Bytecodes",
             TableId::Meta => "Meta",
+            TableId::AccountHistory => "AccountHistory",
+            TableId::StorageHistory => "StorageHistory",
+            TableId::StateChangeSets => "StateChangeSets",
         }
     }
 }
@@ -115,3 +132,19 @@ table!(/// `code hash -> bytecode`.
     Bytecodes, B256, Bytes);
 table!(/// `string key -> raw bytes`, see [`crate::meta_keys`].
     Meta, String, Vec<u8>);
+table!(/// `(address, block) -> account as it was before that block` (`None` = absent).
+    AccountHistory, (Address, u64), Option<AccountInfo>);
+table!(/// `(address, slot, block) -> value before that block` (zero = unset).
+    StorageHistory, (Address, B256, u64), U256);
+table!(/// `block -> keys whose history entries that block wrote` (pruning index).
+    StateChangeSets, u64, StateChangeSet);
+
+/// The state keys changed by one block: the keys of its [`AccountHistory`] and
+/// [`StorageHistory`] entries, kept so they can be pruned without a table scan.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StateChangeSet {
+    /// Changed accounts.
+    pub accounts: Vec<Address>,
+    /// Changed storage slots.
+    pub slots: Vec<(Address, B256)>,
+}

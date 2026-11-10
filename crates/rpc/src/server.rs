@@ -460,14 +460,11 @@ async fn eth_get_logs(params: Params<'static>, ctx: Arc<RpcContext>) -> RpcResul
             }
         }
     }
-    let logs = ctx.backend.logs(filter).await?;
     let max = ctx.config.max_logs_results;
-    if max > 0 && logs.len() > max {
-        return Err(RpcBackendError::LimitExceeded(format!(
-            "query returned more than {max} results"
-        ))
-        .into());
-    }
+    let limit = (max > 0).then_some(max);
+    let logs = ctx.backend.logs(filter, limit).await?;
+    // Backstop: backends should already stop at `limit` (see `RpcBackend::logs`).
+    crate::check_logs_limit(logs.len(), limit)?;
     Ok(logs)
 }
 

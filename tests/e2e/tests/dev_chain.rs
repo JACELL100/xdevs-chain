@@ -99,6 +99,36 @@ async fn eip1559_transfer_pays_fees_exactly() {
 
     let mined: Value = node.ok("eth_getTransactionByHash", vec![json!(hash)]).await;
     assert_eq!(mined["blockHash"], json!(block.header.hash));
+
+    // State pinned to past blocks (Foundry fork mode / `cast balance --block`), read
+    // while new blocks keep coming.
+    let mined_in = receipt.block_number.unwrap();
+    node.wait_block(mined_in + 2).await.unwrap();
+    let balance_at =
+        |who: Address, tag: Value| node.ok::<U256>("eth_getBalance", vec![json!(who), tag]);
+    assert_eq!(
+        balance_at(to, json!(format!("0x{:x}", mined_in - 1))).await,
+        U256::ZERO
+    );
+    assert_eq!(
+        balance_at(to, json!(format!("0x{mined_in:x}"))).await,
+        value
+    );
+    assert_eq!(
+        balance_at(from, json!({ "blockHash": block.header.hash })).await,
+        after[0]
+    );
+    assert_eq!(balance_at(from, json!("earliest")).await, before[0]);
+    let nonce_at = |n: u64| {
+        node.ok::<U256>(
+            "eth_getTransactionCount",
+            vec![json!(from), json!(format!("0x{n:x}"))],
+        )
+    };
+    assert_eq!(
+        nonce_at(mined_in - 1).await + U256::from(1),
+        nonce_at(mined_in).await
+    );
     node.shutdown().await;
 }
 
@@ -426,11 +456,40 @@ async fn chain_id_and_block_shape() {
     assert_eq!(history.gas_used_ratio.len(), 2);
     assert_eq!(history.reward.as_ref().map(Vec::len), Some(2));
 
-    // Only the latest state is kept: older state queries fail cleanly.
+    // Recent past state is kept (default window 10,000 blocks); unknown blocks fail.
+    let (_, dev) = dev_signer(2);
+    let at_genesis: U256 = node
+        .ok("eth_getBalance", vec![json!(dev), json!("0x0")])
+        .await;
+    assert_eq!(at_genesis, node.balance(dev).await);
+    let (code, msg) = node
+        .err("eth_getBalance", vec![json!(dev), json!("0xffffff")])
+        .await;
+    assert_eq!(code, -32000);
+    assert!(msg.contains("header not found"), "{msg}");
+    node.shutdown().await;
+}
+
+/// (e2) With a small state-history window, blocks that fell out of it fail cleanly.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pruned_state_history_fails_cleanly() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = test_config(dir.path(), Address::ZERO, true);
+    config.chain.state_history_blocks = Some(2);
+    let node = TestNode::start(config).await.expect("node starts");
+    node.wait_block(5).await.unwrap();
+    let head = node.block_number().await;
+    let ok: U256 = node
+        .ok(
+            "eth_getBalance",
+            vec![json!(Address::ZERO), json!(format!("0x{:x}", head - 1))],
+        )
+        .await;
+    assert_eq!(ok, U256::ZERO);
     let (code, msg) = node
         .err("eth_getBalance", vec![json!(Address::ZERO), json!("0x0")])
         .await;
     assert_eq!(code, -32000);
-    assert!(msg.contains("historical state"), "{msg}");
+    assert!(msg.contains("historical state not available"), "{msg}");
     node.shutdown().await;
 }

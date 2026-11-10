@@ -11,7 +11,10 @@ use xdevs_genesis::{genesis_block, Genesis};
 use xdevs_primitives::{
     Address, Block, ChainConfig, Header, ReceiptEnvelope, RecoveredTx, TxEnvelope, TxLocation, B256,
 };
-use xdevs_state::{write_state_diff, DbStateProvider, StateDiff, StateProvider};
+use xdevs_state::{
+    history::{record_block_history, set_history_start},
+    write_state_diff, DbStateProvider, StateDiff, StateProvider,
+};
 use xdevs_storage::{meta_keys, tables, Database, DbError, DbRead, DbReadExt, WriteBatch};
 
 /// Shared handle to the node database.
@@ -138,14 +141,22 @@ fn block_batch(
     (batch, hash)
 }
 
-/// Commit a built block atomically (one [`WriteBatch`], §14.2). Returns its hash.
-pub fn commit_block(db: &dyn Database, built: &BuiltBlock) -> Result<B256, DbError> {
-    let (batch, hash) = block_batch(
-        &built.block.header,
-        &built.block.body,
-        &built.outcome.receipts,
-        &built.outcome.state_diff,
-    );
+/// Commit a built block atomically (one [`WriteBatch`], §14.2), together with its
+/// reverse state diff so the state of the last `state_history` blocks stays readable
+/// (older history is pruned in the same batch). Returns the block hash.
+///
+/// Must be called by the only writer, on top of the latest committed block: the
+/// pre-block values for the history are read from the current flat state.
+pub fn commit_block(
+    db: &dyn Database,
+    built: &BuiltBlock,
+    state_history: u64,
+) -> anyhow::Result<B256> {
+    let header = &built.block.header;
+    let diff = &built.outcome.state_diff;
+    let (mut batch, hash) = block_batch(header, &built.block.body, &built.outcome.receipts, diff);
+    record_block_history(&mut batch, db, header.number, diff, state_history)
+        .context("record state history")?;
     db.write(batch)?;
     Ok(hash)
 }
@@ -184,6 +195,8 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
     }
     let (mut batch, _) = block_batch(&block.header, &[], &[], &diff);
     batch.put::<tables::Meta>(&meta_key(meta_keys::GENESIS_HASH), &hash.to_vec());
+    // Nothing exists before genesis: every state from block 0 on is readable.
+    set_history_start(&mut batch, 1);
     let cfg = serde_json::to_vec(&genesis.chain_config()).context("serialize chain config")?;
     batch.put::<tables::Meta>(&meta_key(meta_keys::CHAIN_CONFIG), &cfg);
     db.write(batch)?;

@@ -5,7 +5,8 @@
 //! [chain]
 //! genesis = "genesis.json"     # omit in dev mode to use the built-in dev genesis
 //! data_dir = ".xdevs/data"
-//! pruning = "full"
+//! pruning = "full"            # full (10,000 blocks of state history) | minimal (128) | archive
+//! # state_history_blocks = 10_000  # optional: overrides the pruning mode's window
 //!
 //! [dev]
 //! enabled = true
@@ -75,8 +76,34 @@ pub struct ChainSection {
     pub genesis: Option<PathBuf>,
     /// Database directory.
     pub data_dir: PathBuf,
-    /// `full` | `minimal` | `archive` (only `archive` behaviour in Phase 1).
+    /// `full` | `minimal` | `archive`. Blocks and receipts are always kept in Phase 1;
+    /// the mode sets how many past blocks' state stays readable (see
+    /// [`ChainSection::state_history_blocks`]).
     pub pruning: String,
+    /// Explicit state-history window in blocks (overrides `pruning`).
+    pub state_history_blocks: Option<u64>,
+}
+
+/// State-history window of `pruning = "minimal"`.
+pub const MINIMAL_STATE_HISTORY_BLOCKS: u64 = 128;
+
+impl ChainSection {
+    /// Number of past blocks whose state can be queried (`eth_getBalance`, `eth_call`,
+    /// ... at an older block): `state_history_blocks` if set, else `full` = 10,000
+    /// (plan §14.4), `minimal` = 128, `archive` = unlimited (`u64::MAX`). At least 1.
+    pub fn state_history_blocks(&self) -> anyhow::Result<u64> {
+        if let Some(n) = self.state_history_blocks {
+            return Ok(n.max(1));
+        }
+        match self.pruning.as_str() {
+            "full" => Ok(xdevs_state::history::DEFAULT_STATE_HISTORY_BLOCKS),
+            "minimal" => Ok(MINIMAL_STATE_HISTORY_BLOCKS),
+            "archive" => Ok(u64::MAX),
+            other => anyhow::bail!(
+                "unknown [chain] pruning mode {other:?} (expected full, minimal or archive)"
+            ),
+        }
+    }
 }
 
 impl Default for ChainSection {
@@ -85,6 +112,7 @@ impl Default for ChainSection {
             genesis: None,
             data_dir: PathBuf::from(".xdevs/data"),
             pruning: "full".into(),
+            state_history_blocks: None,
         }
     }
 }
@@ -229,6 +257,24 @@ mod tests {
         assert_eq!(c.mempool.max_txs, 10_000);
         let again = NodeConfig::from_toml_str(&c.to_toml_string().unwrap()).unwrap();
         assert_eq!(again, c);
+        assert_eq!(c.chain.state_history_blocks().unwrap(), u64::MAX);
+    }
+
+    #[test]
+    fn state_history_window_from_pruning_mode() {
+        let mut c = ChainSection::default();
+        assert_eq!(c.state_history_blocks().unwrap(), 10_000);
+        c.pruning = "minimal".into();
+        assert_eq!(
+            c.state_history_blocks().unwrap(),
+            MINIMAL_STATE_HISTORY_BLOCKS
+        );
+        c.pruning = "bogus".into();
+        assert!(c.state_history_blocks().is_err());
+        c.state_history_blocks = Some(0);
+        assert_eq!(c.state_history_blocks().unwrap(), 1);
+        let parsed = NodeConfig::from_toml_str("[chain]\nstate_history_blocks = 256").unwrap();
+        assert_eq!(parsed.chain.state_history_blocks().unwrap(), 256);
     }
 
     #[test]

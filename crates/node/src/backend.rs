@@ -2,8 +2,9 @@
 //!
 //! Every request runs on a blocking thread against one database snapshot, so all
 //! reads of a request see the same committed block even while the producer commits.
-//! Only the latest state is kept (Phase 1): state queries at older blocks fail with
-//! a geth-style "-32000" error.
+//! State queries at past blocks read the reverse state diffs of the recent blocks
+//! (`[chain] pruning` / `state_history_blocks`, default 10,000 blocks); older blocks
+//! fail with a geth-style "-32000" error.
 
 use crate::chain::{self, Db};
 use std::sync::Arc;
@@ -15,11 +16,14 @@ use xdevs_primitives::{
     TxEnvelope, TxKind, B256, U256,
 };
 use xdevs_rpc::{
+    check_logs_limit,
     convert::{self, ReceiptMeta, TxMeta},
     types::*,
     BackendResult, RpcBackend, RpcBackendError,
 };
-use xdevs_state::{DbStateProvider, StateProvider};
+use xdevs_state::{
+    history::oldest_available_state, DbStateProvider, HistoricalStateProvider, StateProvider,
+};
 use xdevs_storage::{DbError, DbRead};
 
 /// Fallback suggested priority fee when recent blocks carry no transactions
@@ -129,21 +133,29 @@ fn resolve_block_id(snap: &Snapshot<'_>, id: BlockId) -> BackendResult<Option<u6
     }
 }
 
-/// Header whose post-state is queried. Only the latest state exists in Phase 1.
-fn state_header(snap: &Snapshot<'_>, id: BlockId) -> BackendResult<Header> {
+/// State after block `id` and that block's header. The latest block reads the flat
+/// state directly; recent past blocks go through the reverse state diffs; blocks
+/// older than the kept history fail with -32000.
+fn state_at<'a>(
+    snap: &'a Snapshot<'a>,
+    id: BlockId,
+) -> BackendResult<(Header, Box<dyn StateProvider + 'a>)> {
     let (head_number, head) = db(chain::latest_header(snap))?;
     let number = resolve_block_id(snap, id)?.ok_or(RpcBackendError::UnknownBlock)?;
-    if number != head_number {
+    if number == head_number {
+        return Ok((head, Box::new(DbStateProvider::new(snap))));
+    }
+    let oldest = db(oldest_available_state(snap, head_number))?;
+    if number < oldest {
         return Err(RpcBackendError::Rejected(format!(
-            "historical state not available: block {number} (this node keeps only the \
-             state of the latest block {head_number})"
+            "historical state not available: block {number} (this node keeps the state \
+             of blocks {oldest}..={head_number}; raise [chain] state_history_blocks or use \
+             pruning = \"archive\")"
         )));
     }
-    Ok(head)
-}
-
-fn state<'a>(snap: &'a Snapshot<'a>) -> DbStateProvider<&'a Snapshot<'a>> {
-    DbStateProvider::new(snap)
+    let header = db(chain::header(snap, number))?
+        .ok_or_else(|| internal(format!("missing header of block {number}")))?;
+    Ok((header, Box::new(HistoricalStateProvider::new(snap, number))))
 }
 
 fn state_err(e: xdevs_state::StateError) -> RpcBackendError {
@@ -264,10 +276,14 @@ fn rpc_receipts_at(
     Ok(Some(out))
 }
 
+/// Append the logs of block `number` matching `filter` to `out`. Fails with
+/// `LimitExceeded` as soon as `out` would hold more than `limit` logs, so a huge
+/// range never buffers more than `limit + 1` results (plan §19.3).
 fn logs_in_block(
     snap: &Snapshot<'_>,
     number: u64,
     filter: &Filter,
+    limit: Option<usize>,
     out: &mut Vec<RpcLog>,
 ) -> BackendResult<()> {
     let Some(header) = db(chain::header(snap, number))? else {
@@ -284,6 +300,7 @@ fn logs_in_block(
         let meta = tx_meta(&header, hash, i as u64);
         for rpc_log in convert::rpc_logs(receipt, *tx.tx_hash(), meta, log_index) {
             if filter.matches(&rpc_log.inner) {
+                check_logs_limit(out.len() + 1, limit)?;
                 out.push(rpc_log);
             }
         }
@@ -380,8 +397,8 @@ impl RpcBackend for NodeBackend {
 
     async fn balance(&self, address: Address, block: BlockId) -> BackendResult<U256> {
         self.read(move |s, _| {
-            state_header(s, block)?;
-            Ok(state(s)
+            let (_, state) = state_at(s, block)?;
+            Ok(state
                 .basic_account(address)
                 .map_err(state_err)?
                 .map(|a| a.balance)
@@ -393,8 +410,8 @@ impl RpcBackend for NodeBackend {
     async fn transaction_count(&self, address: Address, block: BlockId) -> BackendResult<u64> {
         let pending = matches!(block, BlockId::Number(BlockNumberOrTag::Pending));
         self.read(move |s, ctx| {
-            state_header(s, block)?;
-            let nonce = state(s)
+            let (_, state) = state_at(s, block)?;
+            let nonce = state
                 .basic_account(address)
                 .map_err(state_err)?
                 .map(|a| a.nonce)
@@ -410,8 +427,8 @@ impl RpcBackend for NodeBackend {
 
     async fn code(&self, address: Address, block: BlockId) -> BackendResult<Bytes> {
         self.read(move |s, _| {
-            state_header(s, block)?;
-            state(s).code(address).map_err(state_err)
+            let (_, state) = state_at(s, block)?;
+            state.code(address).map_err(state_err)
         })
         .await
     }
@@ -423,8 +440,8 @@ impl RpcBackend for NodeBackend {
         block: BlockId,
     ) -> BackendResult<B256> {
         self.read(move |s, _| {
-            state_header(s, block)?;
-            let v = state(s).storage(address, slot).map_err(state_err)?;
+            let (_, state) = state_at(s, block)?;
+            let v = state.storage(address, slot).map_err(state_err)?;
             Ok(B256::from(v.to_be_bytes::<32>()))
         })
         .await
@@ -432,10 +449,10 @@ impl RpcBackend for NodeBackend {
 
     async fn call(&self, request: TransactionRequest, block: BlockId) -> BackendResult<Bytes> {
         self.read(move |s, ctx| {
-            let header = state_header(s, block)?;
+            let (header, state) = state_at(s, block)?;
             match ctx
                 .executor
-                .call(&state(s), &header, &request, ctx.gas_cap)
+                .call(&*state, &header, &request, ctx.gas_cap)
                 .map_err(exec_err)?
             {
                 CallResult::Success { output, .. } => Ok(output),
@@ -452,9 +469,9 @@ impl RpcBackend for NodeBackend {
         block: BlockId,
     ) -> BackendResult<u64> {
         self.read(move |s, ctx| {
-            let header = state_header(s, block)?;
+            let (header, state) = state_at(s, block)?;
             ctx.executor
-                .estimate_gas(&state(s), &header, &request, ctx.gas_cap)
+                .estimate_gas(&*state, &header, &request, ctx.gas_cap)
                 .map_err(exec_err)
         })
         .await
@@ -537,14 +554,14 @@ impl RpcBackend for NodeBackend {
         .await
     }
 
-    async fn logs(&self, filter: Filter) -> BackendResult<Vec<RpcLog>> {
+    async fn logs(&self, filter: Filter, limit: Option<usize>) -> BackendResult<Vec<RpcLog>> {
         self.read(move |s, _| {
             let mut out = Vec::new();
             match filter.block_option {
                 FilterBlockOption::AtBlockHash(hash) => {
                     let n =
                         db(chain::number_by_hash(s, hash))?.ok_or(RpcBackendError::UnknownBlock)?;
-                    logs_in_block(s, n, &filter, &mut out)?;
+                    logs_in_block(s, n, &filter, limit, &mut out)?;
                 }
                 FilterBlockOption::Range {
                     from_block,
@@ -558,7 +575,7 @@ impl RpcBackend for NodeBackend {
                     };
                     let (from, to) = (resolve(from_block), resolve(to_block).min(head));
                     for n in from..=to {
-                        logs_in_block(s, n, &filter, &mut out)?;
+                        logs_in_block(s, n, &filter, limit, &mut out)?;
                     }
                 }
             }
@@ -674,5 +691,175 @@ mod tests {
             vec![1, 5, 9, 9]
         );
         assert_eq!(rewards(&[], 0, &[10.0, 90.0]), vec![0, 0]);
+    }
+
+    use crate::producer::BlockProducer;
+    use alloy_rpc_types_eth::TransactionInput;
+    use xdevs_crypto::{sign_tx_envelope, signer_from_hex};
+    use xdevs_genesis::{Genesis, DEV_ACCOUNTS, DEV_ACCOUNT_BALANCE, DEV_PRIVATE_KEYS};
+    use xdevs_mempool::{FromState, PoolConfig, PoolParams};
+    use xdevs_primitives::{
+        constants::{DEV_CHAIN_ID, GWEI},
+        Log, LogData, Receipt, ReceiptWithBloom, TxEip1559,
+    };
+    use xdevs_storage::{meta_keys, tables, MemDb, WriteBatch};
+
+    /// Dev chain on a [`MemDb`] with a producer keeping `history` blocks of state.
+    fn dev_chain(history: u64) -> (Db, Arc<Pool>, BlockProducer, NodeBackend) {
+        let db: Db = Arc::new(MemDb::new());
+        let genesis = Genesis::dev(DEV_CHAIN_ID);
+        chain::init_genesis(&*db, &genesis).unwrap();
+        let cfg = genesis.chain_config();
+        let (_, head) = chain::latest_header(&*db).unwrap();
+        let pool = Arc::new(Pool::new(
+            PoolParams::from_chain_config(&cfg),
+            PoolConfig::default(),
+            Arc::new(FromState(DbStateProvider::new(db.clone()))),
+            next_base_fee(&head, &cfg),
+        ));
+        let executor = Arc::new(EvmExecutor::new(cfg.clone()));
+        let producer = BlockProducer::new(
+            db.clone(),
+            pool.clone(),
+            executor.clone(),
+            cfg.clone(),
+            Address::repeat_byte(0xfe),
+            Bytes::from_static(b"xdevs"),
+        )
+        .with_state_history(history);
+        let backend = NodeBackend::new(db.clone(), pool.clone(), executor, cfg, 50_000_000);
+        (db, pool, producer, backend)
+    }
+
+    fn transfer(nonce: u64, to: Address, value: u64) -> RecoveredTx {
+        let signer = signer_from_hex(DEV_PRIVATE_KEYS[0]).unwrap();
+        let tx = sign_tx_envelope(
+            &signer,
+            TxEip1559 {
+                chain_id: DEV_CHAIN_ID,
+                nonce,
+                gas_limit: 21_000,
+                max_fee_per_gas: 10 * u128::from(GWEI),
+                max_priority_fee_per_gas: u128::from(GWEI),
+                to: TxKind::Call(to),
+                value: U256::from(value),
+                input: Bytes::new(),
+                access_list: Default::default(),
+            },
+        )
+        .unwrap();
+        RecoveredTx::recover(tx).unwrap()
+    }
+
+    fn at(n: u64) -> BlockId {
+        BlockId::Number(BlockNumberOrTag::Number(n))
+    }
+
+    /// Regression: state queries pinned to a recent past block (Foundry fork mode,
+    /// `cast --block`, viem `blockNumber`) read that block's state instead of failing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn state_queries_at_past_blocks() {
+        let (db, pool, producer, backend) = dev_chain(3);
+        let to = Address::repeat_byte(0x77);
+        let from = DEV_ACCOUNTS[0];
+        pool.add(transfer(0, to, 5), TxOrigin::Local).unwrap();
+        assert_eq!(producer.produce(0).unwrap().tx_hashes.len(), 1); // block 1
+        pool.add(transfer(1, to, 7), TxOrigin::Local).unwrap();
+        assert_eq!(producer.produce(0).unwrap().tx_hashes.len(), 1); // block 2
+        producer.produce(0).unwrap(); // block 3 (empty)
+
+        let balance = |n| backend.balance(to, at(n));
+        assert_eq!(balance(0).await.unwrap(), U256::ZERO);
+        assert_eq!(balance(1).await.unwrap(), U256::from(5u64));
+        assert_eq!(balance(2).await.unwrap(), U256::from(12u64));
+        assert_eq!(balance(3).await.unwrap(), U256::from(12u64));
+        assert_eq!(
+            backend.balance(from, at(0)).await.unwrap(),
+            DEV_ACCOUNT_BALANCE
+        );
+        assert_eq!(backend.transaction_count(from, at(1)).await.unwrap(), 1);
+        let hash1 = chain::header(&*db, 1).unwrap().unwrap().hash_slow();
+        assert_eq!(
+            backend.balance(to, BlockId::from(hash1)).await.unwrap(),
+            U256::from(5u64)
+        );
+
+        // eth_call / estimateGas run on the historical state: BALANCE(to) at block 1.
+        let mut code = vec![0x73];
+        code.extend_from_slice(to.as_slice());
+        code.extend_from_slice(&[0x31, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3]);
+        let request = TransactionRequest {
+            from: Some(from),
+            input: TransactionInput::new(Bytes::from(code)),
+            ..Default::default()
+        };
+        let out = backend.call(request.clone(), at(1)).await.unwrap();
+        assert_eq!(U256::from_be_slice(&out), U256::from(5u64));
+        let out = backend.call(request.clone(), at(2)).await.unwrap();
+        assert_eq!(U256::from_be_slice(&out), U256::from(12u64));
+        assert!(backend.estimate_gas(request, at(1)).await.unwrap() > 21_000);
+        assert_eq!(backend.code(to, at(1)).await.unwrap(), Bytes::new());
+        assert_eq!(
+            backend.storage_at(to, B256::ZERO, at(1)).await.unwrap(),
+            B256::ZERO
+        );
+
+        // Window of 3 blocks: once the head is 5, block 1 is pruned, block 2 is kept.
+        producer.produce(0).unwrap();
+        producer.produce(0).unwrap();
+        assert_eq!(balance(2).await.unwrap(), U256::from(12u64));
+        let err = balance(1).await.unwrap_err();
+        assert!(
+            matches!(&err, RpcBackendError::Rejected(m) if m.contains("historical state not available")),
+            "{err:?}"
+        );
+        assert_eq!(
+            balance(99).await.unwrap_err(),
+            RpcBackendError::UnknownBlock
+        );
+    }
+
+    /// Regression: eth_getLogs stops collecting once the result cap is exceeded,
+    /// instead of buffering every log of the range first.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn logs_stop_collecting_at_the_limit() {
+        let (db, _pool, _producer, backend) = dev_chain(10);
+        let tx = transfer(0, Address::repeat_byte(1), 1).tx;
+        let log = Log {
+            address: Address::repeat_byte(0xcc),
+            data: LogData::new_unchecked(vec![], Bytes::new()),
+        };
+        let receipt = ReceiptWithBloom::from(Receipt::<Log> {
+            status: true.into(),
+            cumulative_gas_used: 21_000,
+            logs: vec![log; 5],
+        });
+        let (_, mut header) = chain::latest_header(&*db).unwrap();
+        header.number = 1;
+        header.logs_bloom = receipt.logs_bloom;
+        let mut batch = WriteBatch::new();
+        batch.put::<tables::Headers>(&1, &header);
+        batch.put::<tables::Bodies>(&1, &vec![tx]);
+        batch.put::<tables::Receipts>(&(1, 0), &ReceiptEnvelope::Eip1559(receipt));
+        batch.put::<tables::Meta>(
+            &meta_keys::LATEST_BLOCK.to_string(),
+            &1u64.to_be_bytes().to_vec(),
+        );
+        db.write(batch).unwrap();
+
+        let snap = db.snapshot().unwrap();
+        let mut out = Vec::new();
+        let err = logs_in_block(&*snap, 1, &Filter::default(), Some(2), &mut out).unwrap_err();
+        assert!(matches!(err, RpcBackendError::LimitExceeded(_)), "{err:?}");
+        assert_eq!(out.len(), 2, "collection stopped at the limit");
+        out.clear();
+        logs_in_block(&*snap, 1, &Filter::default(), Some(5), &mut out).unwrap();
+        assert_eq!(out.len(), 5);
+
+        let range = Filter::default().from_block(0u64).to_block(1u64);
+        let err = backend.logs(range.clone(), Some(4)).await.unwrap_err();
+        assert_eq!(err.code(), -32005);
+        assert_eq!(backend.logs(range.clone(), Some(5)).await.unwrap().len(), 5);
+        assert_eq!(backend.logs(range, None).await.unwrap().len(), 5);
     }
 }

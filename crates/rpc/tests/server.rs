@@ -45,6 +45,8 @@ struct Mock {
     last_filter: Mutex<Option<Filter>>,
     logs_calls: AtomicUsize,
     logs_to_return: AtomicUsize,
+    /// `limit` argument of the last `logs` call.
+    last_logs_limit: Mutex<Option<Option<usize>>>,
 }
 
 impl Mock {
@@ -59,6 +61,7 @@ impl Mock {
             last_filter: Mutex::new(None),
             logs_calls: AtomicUsize::new(0),
             logs_to_return: AtomicUsize::new(1),
+            last_logs_limit: Mutex::new(None),
         }
     }
 
@@ -229,9 +232,10 @@ impl RpcBackend for Mock {
             BlockId::Hash(_) => None,
         })
     }
-    async fn logs(&self, filter: Filter) -> BackendResult<Vec<RpcLog>> {
+    async fn logs(&self, filter: Filter, limit: Option<usize>) -> BackendResult<Vec<RpcLog>> {
         self.logs_calls.fetch_add(1, Ordering::SeqCst);
         *self.last_filter.lock().unwrap() = Some(filter);
+        *self.last_logs_limit.lock().unwrap() = Some(limit);
         let n = self.logs_to_return.load(Ordering::SeqCst);
         let one = convert::rpc_logs(&self.receipt(), self.tx.hash(), self.meta(HEAD), 0);
         Ok(std::iter::repeat_n(one[0].clone(), n).collect())
@@ -807,7 +811,10 @@ async fn get_logs_limits() {
     )
     .await;
 
-    // Too many results.
+    // The result cap is handed to the backend so it can stop collecting early.
+    assert_eq!(s.mock.last_logs_limit.lock().unwrap().take(), Some(Some(3)));
+
+    // Too many results (server-side backstop for backends that ignore the limit).
     s.mock.logs_to_return.store(4, Ordering::SeqCst);
     let (code, msg, _) = s.err("eth_getLogs", vec![json!({})]).await;
     assert_eq!(code, -32005);
@@ -820,6 +827,19 @@ async fn get_logs_limits() {
             .unwrap()
             .len(),
         3
+    );
+
+    // `max_logs_results = 0` means unlimited.
+    let unlimited = TestServer::with_config(RpcServerConfig {
+        max_logs_results: 0,
+        ..Default::default()
+    })
+    .await;
+    unlimited.mock.logs_to_return.store(20, Ordering::SeqCst);
+    unlimited.ok("eth_getLogs", vec![json!({})]).await;
+    assert_eq!(
+        unlimited.mock.last_logs_limit.lock().unwrap().take(),
+        Some(None)
     );
 }
 

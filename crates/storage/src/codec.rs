@@ -1,6 +1,6 @@
 //! Key/value codecs. Integer keys are big-endian so byte order == numeric order.
 
-use crate::DbError;
+use crate::{tables::StateChangeSet, DbError};
 use xdevs_primitives::{
     reexports::alloy_rlp, AccountInfo, Address, Bytes, Decodable2718, Encodable2718, Header,
     ReceiptEnvelope, TxEnvelope, TxLocation, B256, U256,
@@ -98,6 +98,96 @@ impl Decode for (Address, B256) {
     }
 }
 
+impl Encode for (Address, u64) {
+    fn encode(&self) -> Vec<u8> {
+        let mut v = Vec::with_capacity(28);
+        v.extend_from_slice(self.0.as_slice());
+        v.extend_from_slice(&self.1.to_be_bytes());
+        v
+    }
+}
+impl Decode for (Address, u64) {
+    fn decode(bytes: &[u8]) -> Result<Self, DbError> {
+        let b = fixed::<28>(bytes, "(Address, u64)")?;
+        Ok((Address::decode(&b[..20])?, u64::decode(&b[20..])?))
+    }
+}
+
+impl Encode for (Address, B256, u64) {
+    fn encode(&self) -> Vec<u8> {
+        let mut v = Vec::with_capacity(60);
+        v.extend_from_slice(self.0.as_slice());
+        v.extend_from_slice(self.1.as_slice());
+        v.extend_from_slice(&self.2.to_be_bytes());
+        v
+    }
+}
+impl Decode for (Address, B256, u64) {
+    fn decode(bytes: &[u8]) -> Result<Self, DbError> {
+        let b = fixed::<60>(bytes, "(Address, B256, u64)")?;
+        Ok((
+            Address::decode(&b[..20])?,
+            B256::decode(&b[20..52])?,
+            u64::decode(&b[52..])?,
+        ))
+    }
+}
+
+/// `None` = empty bytes; `Some` = the account's RLP (a list, never empty).
+impl Encode for Option<AccountInfo> {
+    fn encode(&self) -> Vec<u8> {
+        self.as_ref().map(Encode::encode).unwrap_or_default()
+    }
+}
+impl Decode for Option<AccountInfo> {
+    fn decode(bytes: &[u8]) -> Result<Self, DbError> {
+        if bytes.is_empty() {
+            Ok(None)
+        } else {
+            AccountInfo::decode(bytes).map(Some)
+        }
+    }
+}
+
+/// `[n_accounts: u32 BE][address; n_accounts][(address, slot); ..]`.
+impl Encode for StateChangeSet {
+    fn encode(&self) -> Vec<u8> {
+        let mut v = Vec::with_capacity(4 + 20 * self.accounts.len() + 52 * self.slots.len());
+        v.extend_from_slice(&(self.accounts.len() as u32).to_be_bytes());
+        for a in &self.accounts {
+            v.extend_from_slice(a.as_slice());
+        }
+        for key in &self.slots {
+            v.extend_from_slice(&key.encode());
+        }
+        v
+    }
+}
+impl Decode for StateChangeSet {
+    fn decode(bytes: &[u8]) -> Result<Self, DbError> {
+        let bad = || DbError::Decode("StateChangeSet: bad length".into());
+        let (count, rest) = bytes.split_at_checked(4).ok_or_else(bad)?;
+        let n = u32::from_be_bytes(fixed(count, "u32")?) as usize;
+        let split = n
+            .checked_mul(20)
+            .filter(|l| *l <= rest.len())
+            .ok_or_else(bad)?;
+        let (accounts, slots) = rest.split_at(split);
+        let (accounts, _) = accounts.as_chunks::<20>();
+        let (slots, tail) = slots.as_chunks::<52>();
+        if !tail.is_empty() {
+            return Err(bad());
+        }
+        Ok(StateChangeSet {
+            accounts: accounts.iter().map(|a| Address::from(*a)).collect(),
+            slots: slots
+                .iter()
+                .map(|k| <(Address, B256)>::decode(k))
+                .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
 impl Encode for String {
     fn encode(&self) -> Vec<u8> {
         self.as_bytes().to_vec()
@@ -182,6 +272,15 @@ mod tests {
         rt(B256::repeat_byte(3));
         rt(Address::repeat_byte(4));
         rt((Address::repeat_byte(1), B256::repeat_byte(2)));
+        rt((Address::repeat_byte(1), 7u64));
+        rt((Address::repeat_byte(1), B256::repeat_byte(2), 7u64));
+        rt(None::<AccountInfo>);
+        rt(Some(AccountInfo::new(0, U256::ZERO)));
+        rt(StateChangeSet::default());
+        rt(StateChangeSet {
+            accounts: vec![Address::repeat_byte(1), Address::repeat_byte(2)],
+            slots: vec![(Address::repeat_byte(3), B256::repeat_byte(4))],
+        });
         rt(U256::from(123_456u64));
         rt(String::from("latest_block"));
         rt(vec![1u8, 2, 3]);
@@ -211,11 +310,17 @@ mod tests {
     fn integer_keys_sort_numerically() {
         assert!(255u64.encode() < 256u64.encode());
         assert!((1u64, 300u64).encode() < (2u64, 0u64).encode());
+        let a = Address::repeat_byte(1);
+        assert!((a, 255u64).encode() < (a, 256u64).encode());
+        assert!((a, u64::MAX).encode() < (Address::repeat_byte(2), 0u64).encode());
     }
 
     #[test]
     fn bad_lengths_fail() {
         assert!(u64::decode(&[1, 2]).is_err());
         assert!(Address::decode(&[0; 19]).is_err());
+        assert!(StateChangeSet::decode(&[0, 0]).is_err());
+        assert!(StateChangeSet::decode(&[0, 0, 0, 1, 1]).is_err());
+        assert!(StateChangeSet::decode(&[0, 0, 0, 0, 1]).is_err());
     }
 }

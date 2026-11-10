@@ -9,7 +9,7 @@ use std::sync::Arc;
 use xdevs_execution::{next_base_fee, BlockAttributes, BlockExecutor, EvmExecutor};
 use xdevs_mempool::{Pool, TxPool};
 use xdevs_primitives::{Address, Bytes, ChainConfig, TxHash, B256};
-use xdevs_state::DbStateProvider;
+use xdevs_state::{history::DEFAULT_STATE_HISTORY_BLOCKS, DbStateProvider};
 
 /// Summary of a produced block.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,6 +38,8 @@ pub struct BlockProducer {
     cfg: ChainConfig,
     fee_recipient: Address,
     extra_data: Bytes,
+    /// Past blocks whose state stays readable (see [`chain::commit_block`]).
+    state_history: u64,
     /// Serialises block production (one block at a time).
     lock: Mutex<()>,
 }
@@ -68,8 +70,16 @@ impl BlockProducer {
             cfg,
             fee_recipient,
             extra_data,
+            state_history: DEFAULT_STATE_HISTORY_BLOCKS,
             lock: Mutex::new(()),
         }
+    }
+
+    /// Keep the state of the last `blocks` blocks readable (default
+    /// [`DEFAULT_STATE_HISTORY_BLOCKS`]; `u64::MAX` = archive).
+    pub fn with_state_history(mut self, blocks: u64) -> Self {
+        self.state_history = blocks;
+        self
     }
 
     /// Build, commit and announce one block. `now_secs` is the wall-clock time used for
@@ -92,7 +102,7 @@ impl BlockProducer {
             let state = DbStateProvider::new(&*snapshot);
             self.executor.build(&parent, attrs, candidates, &state)?
         };
-        let hash = chain::commit_block(&*self.db, &built)?;
+        let hash = chain::commit_block(&*self.db, &built, self.state_history)?;
 
         let rejected: Vec<TxHash> = built.rejected.iter().map(|(h, _)| *h).collect();
         for (h, e) in &built.rejected {

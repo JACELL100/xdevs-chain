@@ -72,6 +72,7 @@ impl Node {
     /// database is empty (and verify the stored genesis hash and head state root
     /// otherwise).
     pub fn new(config: NodeConfig) -> anyhow::Result<Self> {
+        config.chain.state_history_blocks()?;
         let genesis = load_genesis(&config)?;
         let data_dir = &config.chain.data_dir;
         let db = RedbDatabase::open_dir(data_dir)
@@ -173,14 +174,17 @@ impl Node {
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let producer = if self.config.dev.enabled {
-            let producer = Arc::new(BlockProducer::new(
-                self.db.clone(),
-                self.pool.clone(),
-                self.executor.clone(),
-                self.cfg.clone(),
-                self.config.dev.fee_recipient,
-                Bytes::from_static(DEV_BLOCK_EXTRA_DATA),
-            ));
+            let producer = Arc::new(
+                BlockProducer::new(
+                    self.db.clone(),
+                    self.pool.clone(),
+                    self.executor.clone(),
+                    self.cfg.clone(),
+                    self.config.dev.fee_recipient,
+                    Bytes::from_static(DEV_BLOCK_EXTRA_DATA),
+                )
+                .with_state_history(self.config.chain.state_history_blocks()?),
+            );
             let block_time = self.block_time();
             tracing::info!(
                 target: "xdevs::node",

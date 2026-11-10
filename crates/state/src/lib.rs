@@ -6,6 +6,8 @@
 //! * [`InMemoryState`] — complete in-memory state with Ethereum MPT root, for tests.
 //! * [`DbStateProvider`] — latest state read from the flat `PlainAccounts` /
 //!   `PlainStorage` / `Bytecodes` tables.
+//! * [`history`] — reverse diffs of recent blocks and [`HistoricalStateProvider`] for
+//!   reading the state at a past block (plan §14.1, §14.4).
 //! * [`root`] — Ethereum state/storage root computation (alloy-trie).
 
 #![forbid(unsafe_code)]
@@ -13,11 +15,13 @@
 
 mod db;
 mod diff;
+pub mod history;
 mod memory;
 pub mod root;
 
 pub use db::{write_state_diff, DbStateProvider};
 pub use diff::{StateDiff, StorageDiff};
+pub use history::HistoricalStateProvider;
 pub use memory::InMemoryState;
 
 use std::sync::Arc;

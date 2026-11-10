@@ -105,11 +105,16 @@ pub trait RpcBackend: Send + Sync + 'static {
     /// `eth_getBlockReceipts`.
     async fn block_receipts(&self, block: BlockId) -> BackendResult<Option<Vec<RpcReceipt>>>;
 
-    /// `eth_getLogs`. The server resolves block tags to numbers, enforces
-    /// [`RpcServerConfig::max_logs_range`] before calling this and
-    /// [`RpcServerConfig::max_logs_results`] on the result, so the backend receives
+    /// `eth_getLogs`. The server resolves block tags to numbers and enforces
+    /// [`RpcServerConfig::max_logs_range`] before calling this, so the backend receives
     /// either `AtBlockHash` or a numeric `Range { from <= to <= head }`.
-    async fn logs(&self, filter: Filter) -> BackendResult<Vec<RpcLog>>;
+    ///
+    /// `limit` is [`RpcServerConfig::max_logs_results`] (`None` = unlimited). The
+    /// backend must stop collecting and return [`RpcBackendError::LimitExceeded`] as
+    /// soon as more than `limit` logs match (use [`check_logs_limit`]), so memory use
+    /// is bounded by the result cap rather than by the block range. The server also
+    /// checks the returned length as a backstop.
+    async fn logs(&self, filter: Filter, limit: Option<usize>) -> BackendResult<Vec<RpcLog>>;
 
     /// `eth_gasPrice`: next base fee + suggested tip.
     async fn gas_price(&self) -> BackendResult<U256>;
@@ -127,6 +132,17 @@ pub trait RpcBackend: Send + Sync + 'static {
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> BackendResult<FeeHistory>;
+}
+
+/// `eth_getLogs` result cap check: `Err(LimitExceeded)` once `count` matching logs
+/// exceed `limit` (`None` = unlimited). Shared by the server and backends.
+pub fn check_logs_limit(count: usize, limit: Option<usize>) -> BackendResult<()> {
+    match limit {
+        Some(max) if count > max => Err(RpcBackendError::LimitExceeded(format!(
+            "query returned more than {max} results"
+        ))),
+        _ => Ok(()),
+    }
 }
 
 /// Server settings (plan §19.3, §33.2 `[rpc]`).
@@ -230,4 +246,18 @@ pub async fn start_rpc_server(
     backend: Arc<dyn RpcBackend>,
 ) -> anyhow::Result<RpcServerHandle> {
     start_server(config, backend).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logs_limit_check() {
+        assert!(check_logs_limit(3, Some(3)).is_ok());
+        assert!(check_logs_limit(usize::MAX, None).is_ok());
+        let err = check_logs_limit(4, Some(3)).unwrap_err();
+        assert_eq!(err.code(), -32005);
+        assert!(err.to_string().contains("more than 3 results"), "{err}");
+    }
 }

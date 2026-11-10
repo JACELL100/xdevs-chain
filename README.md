@@ -45,6 +45,26 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | Encrypted mempool, parallel execution, local fee markets | 📋 Planned (Phase 5) |
 | Light-client bridges | 📋 Planned (Phase 7) |
 
+### Phase 1 node status (what the Rust node does today)
+
+Works and is covered by tests (unit tests per crate plus in-process end-to-end tests driven only through JSON-RPC):
+
+- `xdevs run --dev`: one node that produces a block every `--block-time` (default 2 s) from its mempool, with EIP-1559 fees (base fee split 80% burned / 20% treasury, tip to `--fee-recipient`).
+- Legacy, EIP-2930 and EIP-1559 transactions; tx hashes, RLP, receipts root, tx root and state root computed the Ethereum way. Blob (type 3) transactions are rejected.
+- Storage in `redb` with one atomic write per block; restarts resume from the same head and state root.
+- JSON-RPC over HTTP (WebSocket transport on the same port): `eth_chainId`, `eth_blockNumber`, `eth_getBalance`, `eth_getTransactionCount`, `eth_getCode`, `eth_getStorageAt`, `eth_call`, `eth_estimateGas`, `eth_sendRawTransaction`, block / transaction / receipt lookups, `eth_getBlockReceipts`, `eth_getLogs`, `eth_gasPrice`, `eth_maxPriorityFeePerGas`, `eth_feeHistory`, `net_*` and `web3_*`.
+- State queries at past blocks: the node keeps reverse state diffs for the last 10,000 blocks (`[chain] pruning = "full"`; `"minimal"` keeps 128, `"archive"` keeps all, `state_history_blocks` sets any window), so `cast ... --block N`, `anvil --fork-url` and `forge script` can pin a block while new blocks keep coming. Older blocks return `-32000 historical state not available`.
+- Public-RPC limits from §19.3 of the plan: `eth_getLogs` at most 10,000 blocks per query and 10,000 results (the node stops collecting as soon as the cap is passed), `eth_call` gas cap 50M, batches of at most 50 requests, request/response size limits.
+
+Not done yet:
+
+- Multi-node consensus, peer-to-peer networking and state sync (Phase 2). Without `--dev` the node produces no blocks.
+- `eth_subscribe` (WebSocket subscriptions), filter methods (`eth_newFilter`, `eth_getFilterChanges`, ...), `eth_getProof`, and `debug_` / `trace_` / `txpool_` namespaces.
+- No pending block: the `pending` tag means `latest`, except that `eth_getTransactionCount` with `pending` counts pool transactions.
+- Block and receipt pruning (all blocks are kept), an incremental state root (the root is recomputed from the full flat state each block, so large states get slow), JSON log output, and EIP-7702 (type 4) transactions.
+- Dev block timestamps are whole seconds and at least parent + 1, so block times under 1 s run ahead of the wall clock.
+- Graceful shutdown on Ctrl-C is tested in-process; it has not been checked by hand with a console Ctrl-C on Windows.
+
 ### Honest trade-offs
 
 - **Security grows with adoption.** A new chain has far less stake and fewer independent validators than Ethereum. Until many independent operators join, it is a testnet, not a decentralized network.
@@ -119,7 +139,7 @@ cast block-number --rpc-url http://127.0.0.1:8545
 
 The dev genesis pre-funds the 10 well-known Anvil/Hardhat test accounts (mnemonic `test test test test test test test test test test test junk`) with 10,000 tXDS each. **These keys are public: never use them outside a local dev chain.**
 
-Current Phase 1 limits: only the latest state is kept (queries pinned to an older block return "historical state not available"), and WebSocket subscriptions (`eth_subscribe`) are not implemented yet.
+Current Phase 1 limits: state is readable for the last 10,000 blocks by default (older blocks return "historical state not available"), and WebSocket subscriptions (`eth_subscribe`) are not implemented yet. See [Phase 1 node status](#phase-1-node-status-what-the-rust-node-does-today).
 
 ## Add the local dev chain to MetaMask
 
