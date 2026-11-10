@@ -1,4 +1,7 @@
+# Build output: default and per-tool build dirs (out-wallet, out-genesis, ...)
 out/
+out-*/
 cache/
+cache-*/
 broadcast/
 .env
