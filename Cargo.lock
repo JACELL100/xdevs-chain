@@ -7853,6 +7853,7 @@ dependencies = [
  "xdevs-execution",
  "xdevs-genesis",
  "xdevs-mempool",
+ "xdevs-metrics",
  "xdevs-network",
  "xdevs-primitives",
  "xdevs-rpc",

@@ -19,6 +19,7 @@ xdevs-mempool.workspace = true
 xdevs-rpc.workspace = true
 xdevs-consensus.workspace = true
 xdevs-network.workspace = true
+xdevs-metrics.workspace = true
 alloy-rpc-types-eth.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true

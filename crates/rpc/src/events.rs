@@ -25,6 +25,8 @@ pub struct BlockEvent {
     /// results (block hash/number, tx hash/index, block-wide `logIndex`,
     /// `removed: false`). Subscriptions filter them.
     pub logs: Vec<RpcLog>,
+    /// Number of transactions in the block (for metrics; not part of `newHeads`).
+    pub tx_count: usize,
 }
 
 /// Broadcaster of chain events (cheap to share behind an [`Arc`]).
@@ -97,6 +99,7 @@ mod tests {
         BlockEvent {
             header,
             logs: Vec::new(),
+            tx_count: 0,
         }
     }
 

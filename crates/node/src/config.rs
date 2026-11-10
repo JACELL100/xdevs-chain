@@ -90,6 +90,8 @@ pub struct NodeConfig {
     pub mempool: MempoolSection,
     /// `[log]`.
     pub log: LogSection,
+    /// `[metrics]`: Prometheus `/metrics` endpoint (plan §24.7).
+    pub metrics: xdevs_metrics::MetricsConfig,
 }
 
 impl NodeConfig {
@@ -430,7 +432,7 @@ mod tests {
     fn unknown_sections_and_keys_are_ignored() {
         let s = "[p2p]
 max_peers = 50
-[metrics]
+[future_section]
 listen = \"x\"";
         assert_eq!(NodeConfig::from_toml_str(s).unwrap(), NodeConfig::default());
     }

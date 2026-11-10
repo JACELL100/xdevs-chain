@@ -13,5 +13,15 @@ ignore = [
   # machine. Validator consensus keys are Ed25519 (not affected).
   # Re-check: when alloy/revm move to elliptic-curve 0.14, or by 2027-01-31.
   "RUSTSEC-2026-0387",
+  # RUSTSEC-2026-0118 / RUSTSEC-2026-0119: hickory-proto 0.25.x (DNSSEC NSEC3 validation
+  # loop; O(n^2) name compression when ENCODING messages). Pulled in only through
+  # libp2p-dns 0.44, which libp2p 0.56 uses for /dns4 peer addresses. The fix is in
+  # hickory-proto 0.26, which needs a newer libp2p than the =0.56.0 that Malachite 0.8.2
+  # pins, so it cannot be upgraded here. Exposure: libp2p-dns does not enable DNSSEC
+  # validation (0118 not reachable), and the names it encodes are our own configured
+  # peer hostnames, not attacker input (0119).
+  # Re-check: when Malachite moves to a newer libp2p, or by 2027-01-31.
+  "RUSTSEC-2026-0118",
+  "RUSTSEC-2026-0119",
 ]
 informational_warnings = ["unmaintained", "unsound", "notice"]

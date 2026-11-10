@@ -29,6 +29,7 @@ pub mod chain;
 mod config;
 pub mod consensus;
 mod events;
+mod metrics;
 mod producer;
 
 pub use app::{ChainApp, ChainAppConfig, MAX_BLOCK_BYTES, PROPOSAL_EXTRA_DATA};
@@ -206,6 +207,7 @@ impl Node {
             consensus_status: None,
             gossip: None,
             shutdown_tx,
+            metrics: None,
             db: Some(self.db.clone()),
             genesis_hash: self.genesis_hash,
             mode: self.mode,
@@ -250,6 +252,26 @@ impl Node {
                     handle.shutdown().await;
                     return Err(e);
                 }
+            }
+        }
+
+        let sources = metrics::MetricsSources {
+            events: events.clone(),
+            pool: self.pool.clone(),
+            gossip: handle.gossip.clone(),
+            consensus: handle.consensus_status.clone(),
+        };
+        match metrics::NodeMetrics::start(
+            &self.config.metrics,
+            sources,
+            handle.shutdown_tx.subscribe(),
+        )
+        .await
+        {
+            Ok(m) => handle.metrics = m,
+            Err(e) => {
+                handle.shutdown().await;
+                return Err(e);
             }
         }
 
@@ -460,6 +482,7 @@ pub struct NodeHandle {
     consensus_status: Option<EngineStatus>,
     gossip: Option<Arc<NetworkHandle>>,
     shutdown_tx: watch::Sender<bool>,
+    metrics: Option<metrics::NodeMetrics>,
     db: Option<Db>,
     genesis_hash: B256,
     mode: NodeMode,
@@ -494,6 +517,11 @@ impl NodeHandle {
     /// How the node runs.
     pub fn mode(&self) -> NodeMode {
         self.mode
+    }
+
+    /// Address of the Prometheus `/metrics` endpoint, if `[metrics] enabled`.
+    pub fn metrics_addr(&self) -> Option<SocketAddr> {
+        self.metrics.as_ref().map(metrics::NodeMetrics::local_addr)
     }
 
     /// Live consensus status (validator / full-node mode).
@@ -563,6 +591,9 @@ impl NodeHandle {
         for server in std::mem::take(&mut self.rpc) {
             server.stop();
             server.stopped().await;
+        }
+        if let Some(metrics) = self.metrics.take() {
+            metrics.shutdown().await;
         }
         if let Some(mut gossip) = self.gossip.take() {
             // The RPC backend holds the other reference until its servers are gone.

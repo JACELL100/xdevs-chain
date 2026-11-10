@@ -189,7 +189,11 @@ pub fn block_event(block: &Block, hash: B256, receipts: &[ReceiptEnvelope]) -> B
         logs.extend(rpc_logs(receipt, *tx.tx_hash(), meta, log_index));
         log_index += receipt.logs().len() as u64;
     }
-    BlockEvent { header, logs }
+    BlockEvent {
+        header,
+        logs,
+        tx_count: block.body.len(),
+    }
 }
 
 fn rpc_log(log: xdevs_primitives::Log, tx_hash: B256, meta: &TxMeta, log_index: u64) -> RpcLog {
