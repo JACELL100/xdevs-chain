@@ -4,9 +4,8 @@
 //! gossiped, included and visible on node 4; every node has the same block hash and
 //! state root at every common height, and serves the commit certificates.
 //!
-//! Tx-gossip bootnodes point only at nodes started earlier. With mutual bootnodes, a
-//! pair whose first dial hit a not-yet-listening port sometimes never ends up subscribed
-//! to each other's tx topic (an `xdevs-network` issue, reported for WP3).
+//! Tx-gossip bootnodes are mutual (every node lists every other one), so early dials hit
+//! ports that are not listening yet; the network retries them on a fresh local port.
 
 use jsonrpsee::{
     core::client::ClientT,
@@ -150,8 +149,11 @@ async fn four_validators_produce_identical_evm_blocks() {
         config.p2p.listen = addr(p2p[i]);
         config.p2p.persistent_peers = (0..N).filter(|j| *j != i).map(|j| addr(p2p[j])).collect();
         config.gossip.network.listen = addr(gossip[i]);
-        // Each node bootstraps from the nodes already running (see the module docs).
-        config.gossip.network.bootnodes = (0..i).map(|j| addr(gossip[j])).collect();
+        // Mutual bootnodes, including nodes that are not running yet.
+        config.gossip.network.bootnodes = (0..N)
+            .filter(|j| *j != i)
+            .map(|j| addr(gossip[j]))
+            .collect();
         config.rpc.http = "127.0.0.1:0".parse().unwrap();
 
         let node = Node::new(config).unwrap();

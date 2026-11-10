@@ -33,7 +33,7 @@ use libp2p::{
     tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder,
 };
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashSet, VecDeque},
     panic::{catch_unwind, AssertUnwindSafe},
     sync::{atomic::Ordering, Arc},
     time::{Duration, Instant},
@@ -61,6 +61,11 @@ const KAD_BOOTSTRAP_TICKS: u32 = 6;
 const BAN_DURATION: Duration = Duration::from_secs(600);
 /// Ban list cap; the entry closest to expiry is evicted first.
 const MAX_BANNED: usize = 1024;
+/// Txs published while no peer was subscribed are kept (oldest dropped first) and retried
+/// when a peer joins the topic and on every maintenance tick.
+const MAX_UNSENT: usize = 1024;
+/// How long an unsent tx is retried before it is dropped.
+const UNSENT_TTL: Duration = Duration::from_secs(120);
 /// How long `start` waits for the listeners to bind.
 const LISTEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long shutdown waits for peers to see our unsubscribe and disconnects.
@@ -322,6 +327,7 @@ pub(crate) async fn spawn(
         ticks: 0,
         max_peers: config.max_peers,
         max_tx_size: config.max_tx_size,
+        unsent: VecDeque::new(),
     };
     event_loop.listen(listen_addrs(&config)?).await?;
     event_loop.add_bootnodes_to_kad();
@@ -360,6 +366,8 @@ struct EventLoop {
     ticks: u32,
     max_peers: usize,
     max_tx_size: usize,
+    /// Txs not yet published because no peer was subscribed, with when they were queued.
+    unsent: VecDeque<(Bytes, Instant)>,
 }
 
 impl EventLoop {
@@ -457,6 +465,11 @@ impl EventLoop {
     }
 
     fn publish(&mut self, tx: Bytes) {
+        self.try_publish(tx, Instant::now());
+    }
+
+    /// Publish `tx`; if no peer is subscribed yet, keep it for a later retry.
+    fn try_publish(&mut self, tx: Bytes, queued_at: Instant) {
         match self
             .swarm
             .behaviour_mut()
@@ -464,14 +477,31 @@ impl EventLoop {
             .publish(self.topic.clone(), tx.to_vec())
         {
             Ok(_) => {}
-            // No peers yet, or a tx we already saw: nothing to do.
-            Err(
-                e @ (gossipsub::PublishError::NoPeersSubscribedToTopic
-                | gossipsub::PublishError::Duplicate),
-            ) => {
+            Err(gossipsub::PublishError::NoPeersSubscribedToTopic) => {
+                if self.unsent.len() >= MAX_UNSENT {
+                    self.unsent.pop_front();
+                }
+                self.unsent.push_back((tx, queued_at));
+            }
+            // A tx we already published or received: nothing to do.
+            Err(e @ gossipsub::PublishError::Duplicate) => {
                 debug!(target: "xdevs::network", "tx not published: {e}")
             }
             Err(e) => warn!(target: "xdevs::network", "tx publish failed: {e}"),
+        }
+    }
+
+    /// Retry txs that could not be published earlier (drops expired ones).
+    fn flush_unsent(&mut self) {
+        if self.unsent.is_empty() {
+            return;
+        }
+        let now = Instant::now();
+        let pending = std::mem::take(&mut self.unsent);
+        for (tx, queued_at) in pending {
+            if now.duration_since(queued_at) < UNSENT_TTL {
+                self.try_publish(tx, queued_at);
+            }
         }
     }
 
@@ -526,9 +556,11 @@ impl EventLoop {
                 message_id,
                 message,
             } => self.on_message(propagation_source, message_id, message),
-            gossipsub::Event::Subscribed { .. } | gossipsub::Event::Unsubscribed { .. } => {
-                self.update_peer_counts()
+            gossipsub::Event::Subscribed { .. } => {
+                self.update_peer_counts();
+                self.flush_unsent();
             }
+            gossipsub::Event::Unsubscribed { .. } => self.update_peer_counts(),
             other => debug!(target: "xdevs::network", ?other, "gossipsub event"),
         }
     }
@@ -595,6 +627,7 @@ impl EventLoop {
                 let opts = DialOpts::peer_id(peer)
                     .addresses(addresses.into_vec())
                     .condition(PeerCondition::DisconnectedAndNotDialing)
+                    .allocate_new_port()
                     .build();
                 if let Err(e) = self.swarm.dial(opts) {
                     debug!(target: "xdevs::network", %peer, "discovery dial failed: {e}");
@@ -644,8 +677,12 @@ impl EventLoop {
                 Some(p) => DialOpts::peer_id(p)
                     .addresses(vec![addr.clone()])
                     .condition(PeerCondition::DisconnectedAndNotDialing)
+                    .allocate_new_port()
                     .build(),
-                None => DialOpts::unknown_peer_id().address(addr.clone()).build(),
+                None => DialOpts::unknown_peer_id()
+                    .address(addr.clone())
+                    .allocate_new_port()
+                    .build(),
             };
             if !self.has_room() {
                 return;
@@ -703,6 +740,7 @@ impl EventLoop {
         }
 
         self.dial_bootnodes();
+        self.flush_unsent();
 
         self.ticks = self.ticks.wrapping_add(1);
         if self.ticks % KAD_BOOTSTRAP_TICKS == 1 {

@@ -10,6 +10,7 @@ repository.workspace = true
 
 [dependencies]
 xdevs-primitives.workspace = true
+tracing-subscriber.workspace = true
 # Must stay on Malachite's libp2p (=0.56.0) so only one libp2p stack is compiled.
 libp2p.workspace = true
 anyhow.workspace = true
@@ -20,4 +21,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 toml.workspace = true
+xdevs-primitives.workspace = true
+tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
