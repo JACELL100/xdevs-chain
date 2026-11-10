@@ -2215,7 +2215,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c54e03a951783e8b327515db3f2a2fd0e3bed362a96b066f341ce66ed49b4ead"
 dependencies = [
  "data-encoding",
- "syn 3.0.10",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -7670,7 +7670,7 @@ dependencies = [
  "p256",
  "pbkdf2",
  "proptest",
- "rand 0.8.8",
+ "rand 0.10.3",
  "scrypt",
  "serde",
  "serde_json",
@@ -7786,7 +7786,7 @@ dependencies = [
  "ed25519-consensus",
  "jsonrpsee",
  "parking_lot 0.13.0",
- "rand 0.8.8",
+ "rand 0.10.3",
  "serde",
  "serde_json",
  "tempfile",
