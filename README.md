@@ -38,7 +38,8 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | Guardian Vault (time-locked transfers with a cancel window) | ✅ Contracts built and tested |
 | Expiring approvals (XDRC-20, Permit2Expiring), `.xdevs` names with look-alike protection | ✅ Contracts built and tested |
 | Staking, governance, treasury, gas sponsorship (paymasters) | ✅ Contracts built and tested |
-| Guardian freeze and protocol-level EOA lock (XIP-0001) | 🛠 In progress |
+| Guardian freeze (breaks owner-vs-thief recovery stalemates), EOA lock for existing MetaMask addresses | ✅ Contracts built and tested |
+| Node enforcement of the EOA lock ([XIP-0001](docs/specs/xip-0001-eoa-lock.md)) | 🛠 In progress |
 | Multi-node BFT consensus with ~1–2 s finality, public testnet | 📋 Next (Phases 2–3) |
 | Transaction simulation and recipient-check RPCs, reference wallet | 📋 Planned (Phase 4) |
 | Encrypted mempool, parallel execution, local fee markets | 📋 Planned (Phase 5) |
