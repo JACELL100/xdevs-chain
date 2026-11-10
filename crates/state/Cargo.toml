@@ -1,0 +1,21 @@
+[package]
+name = "xdevs-state"
+description = "xDEVS Chain state: StateProvider, StateDiff, in-memory state, state root."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+xdevs-primitives.workspace = true
+xdevs-storage.workspace = true
+alloy-rlp.workspace = true
+alloy-trie.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+

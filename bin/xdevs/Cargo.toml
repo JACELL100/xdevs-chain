@@ -1,0 +1,22 @@
+[package]
+name = "xdevs"
+description = "The xDEVS Chain node binary."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+xdevs-node.workspace = true
+xdevs-genesis.workspace = true
+xdevs-primitives.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

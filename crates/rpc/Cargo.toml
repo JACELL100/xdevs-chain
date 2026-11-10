@@ -1,0 +1,29 @@
+[package]
+name = "xdevs-rpc"
+description = "xDEVS Chain JSON-RPC server (eth_, net_, web3_) over an RpcBackend trait."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+xdevs-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-serde.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+jsonrpsee.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+# Already in the graph via jsonrpsee-server (no new downloads): used for the
+# small CORS middleware in `src/cors.rs` instead of pulling in tower-http.
+http = "1.5.0"
+tower = { version = "0.5.3", default-features = false }
+
+[dev-dependencies]
+jsonrpsee = { workspace = true, features = ["http-client"] }

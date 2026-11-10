@@ -1,0 +1,32 @@
+[package]
+name = "xdevs-node"
+description = "xDEVS Chain node wiring: config, dev-mode block producer, services, lifecycle."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+xdevs-primitives.workspace = true
+xdevs-crypto.workspace = true
+xdevs-storage.workspace = true
+xdevs-state.workspace = true
+xdevs-execution.workspace = true
+xdevs-genesis.workspace = true
+xdevs-mempool.workspace = true
+xdevs-rpc.workspace = true
+alloy-rpc-types-eth.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

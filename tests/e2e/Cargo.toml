@@ -1,0 +1,23 @@
+[package]
+name = "xdevs-e2e"
+description = "End-to-end tests: an in-process xDEVS dev node driven over JSON-RPC."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+xdevs-node.workspace = true
+xdevs-primitives.workspace = true
+xdevs-crypto.workspace = true
+xdevs-genesis.workspace = true
+alloy-rpc-types-eth.workspace = true
+anyhow.workspace = true
+jsonrpsee = { workspace = true, features = ["http-client"] }
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true

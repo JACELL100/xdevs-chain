@@ -1,0 +1,19 @@
+[package]
+name = "xdevs-storage"
+description = "xDEVS Chain storage: Database trait, tables, atomic write batches, redb backend."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+xdevs-primitives.workspace = true
+alloy-rlp.workspace = true
+redb.workspace = true
+parking_lot.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

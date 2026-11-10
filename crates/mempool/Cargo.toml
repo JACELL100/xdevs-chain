@@ -1,0 +1,20 @@
+[package]
+name = "xdevs-mempool"
+description = "xDEVS Chain transaction pool: validation, pending/queued sub-pools, ordering."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+xdevs-primitives.workspace = true
+xdevs-state.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
