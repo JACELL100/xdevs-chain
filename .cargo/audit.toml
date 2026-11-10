@@ -1,0 +1,17 @@
+# cargo-audit configuration (committed; .cargo/config.toml stays local-only).
+#
+# Every ignored advisory must say why it is acceptable and when to re-check it.
+
+[advisories]
+ignore = [
+  # RUSTSEC-2026-0387: crypto-bigint 0.5.x timing variability in "constant-time" ops.
+  # Pulled in via elliptic-curve 0.13 by alloy, revm (k256/p256 precompiles) and
+  # xdevs-crypto. The fix (crypto-bigint >= 0.7.6) needs the elliptic-curve 0.14
+  # line, which alloy and revm have not adopted yet, so it cannot be upgraded here.
+  # Exposure: the node only VERIFIES signatures over public data with this code;
+  # secret-key operations are limited to xdevs-cli signing on the user's own
+  # machine. Validator consensus keys are Ed25519 (not affected).
+  # Re-check: when alloy/revm move to elliptic-curve 0.14, or by 2027-01-31.
+  "RUSTSEC-2026-0387",
+]
+informational_warnings = ["unmaintained", "unsound", "notice"]

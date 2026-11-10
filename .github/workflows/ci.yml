@@ -26,7 +26,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     # TODO: pin action versions to commit SHAs once the repo is set up.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # The repo's rust-toolchain.toml pins the version; rustup honours it.
       # .cargo/config.toml contains a local-only proxy/target-dir setup, so CI
       # removes it before building.
@@ -46,10 +46,12 @@ jobs:
       contents: read
       checks: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      # Ignored advisories (with reasons and re-check dates) live in .cargo/audit.toml.
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ignore: RUSTSEC-2026-0387
 
   contracts:
     name: contracts (foundry)
@@ -58,7 +60,7 @@ jobs:
       run:
         working-directory: contracts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
@@ -79,8 +81,8 @@ jobs:
       run:
         working-directory: ${{ matrix.package }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
