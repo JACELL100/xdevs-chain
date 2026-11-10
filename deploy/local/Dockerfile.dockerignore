@@ -1,0 +1,35 @@
+# Build context of deploy/local/Dockerfile (the repo root). BuildKit uses this file
+# instead of a root .dockerignore because it sits next to the Dockerfile.
+# Only the Cargo workspace (Cargo.toml, Cargo.lock, crates/, bin/, tests/) and
+# deploy/configs (included by xdevs-genesis tests) are needed.
+
+# VCS, CI, editors
+.git
+.github
+.vscode
+.idea
+
+# Local-only cargo setup (proxy, target dir) and the "stable" toolchain file: the image
+# pins its own Rust version.
+.cargo/config.toml
+rust-toolchain.toml
+
+# Build output and dependencies of other ecosystems
+**/target
+**/node_modules
+.xdevs
+data
+
+# Not part of the Rust build
+apps
+sdk
+contracts
+docs
+scripts
+deploy/local
+deploy/systemd
+xDEVS_Chain_Implementation_Plan.md
+
+# Secrets never go into an image
+**/.env
+**/*.keystore.json

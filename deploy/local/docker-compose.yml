@@ -1,25 +1,175 @@
-# Local networks (plan §33.7).
-# Phase 1 (works once Node::run lands): single dev node
-#   docker compose -f deploy/local/docker-compose.yml up -d dev
-# Phase 2 sketch (needs consensus + p2p, and ./cfg/valN.toml): 4 validators
+# xDEVS Chain local networks (plan §33.7, research doc docs/research/phase2-consensus.md §6.12).
+# Runbook: docs/runbooks/localnet.md. Usually driven by the scripts:
+#
+#   scripts/localnet-up.sh --build            # 4 validators (profile `validators`)
+#   scripts/chaos.sh start node4              # late joiner full node (profile `joiner`)
+#   scripts/check.sh                          # no fork, every node reachable
+#   scripts/localnet-down.sh                  # stop and wipe
+#
+# Plain compose works too (run from the repo root):
 #   docker compose -f deploy/local/docker-compose.yml --profile validators up -d
-# NOTE: the RPC must listen on 0.0.0.0 inside the container for the port mapping to work.
+#   docker compose -f deploy/local/docker-compose.yml --profile joiner up -d node4
+#   docker compose -f deploy/local/docker-compose.yml --profile dev up -d dev   # single dev node
+#
+# Layout: the one-shot `init` service runs `xdevs-cli testnet init` (4 validators + 1 full
+# node) into the shared `localnet` volume, then rewrites each peer address to the owner's
+# service name (scripts/localnet-init.sh). Node k listens on 30300 + 10k (consensus p2p),
+# +1 (tx gossip), +2 (JSON-RPC), +3 (metrics) on every interface of its container, and its
+# RPC is published on 127.0.0.1:(8545 + 10k): node0 = 8545, node1 = 8555, ..., node4 = 8585.
+#
+# Environment: XDEVS_IMAGE (default xdevs:local), XDEVS_BLOCK_TIME (1s), XDEVS_CHAIN_ID
+# (7117), XDEVS_LOG (RUST_LOG filter, default info), XDEVS_RESTART (restart policy, default
+# "no" so chaos tests stay deterministic), XDEVS_FORCE_INIT=1 (regenerate the network).
+# The genesis, block time and chain id are fixed when the volume is first initialised:
+# `scripts/localnet-down.sh` wipes it.
+#
+# DEV / TESTNET ONLY: consensus keys are unencrypted in the volume, and the dev accounts
+# use the public Anvil keys.
+
+name: xdevs-localnet
+
+x-node-env: &node-env
+  RUST_LOG: ${XDEVS_LOG:-info}
+  NO_COLOR: "1"
+
+x-node: &node
+  image: ${XDEVS_IMAGE:-xdevs:local}
+  pull_policy: missing
+  restart: ${XDEVS_RESTART:-no}
+  stop_signal: SIGINT
+  stop_grace_period: 20s
+  volumes:
+    - localnet:/localnet
+  networks:
+    - localnet
+  depends_on:
+    init:
+      condition: service_completed_successfully
+  # Healthy = the JSON-RPC answers (not "making blocks": a lone node cannot).
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - >-
+        curl -fsS -m 3 -H 'content-type: application/json'
+        --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'
+        http://127.0.0.1:$${XDEVS_RPC_PORT}/ >/dev/null
+    interval: 5s
+    timeout: 5s
+    retries: 6
+    start_period: 60s
+    start_interval: 1s
+
 services:
-  dev:
-    build: { context: ../.., dockerfile: deploy/local/Dockerfile }
-    image: xdevs:dev
-    command: ["node", "--dev", "--data-dir", "/var/lib/xdevs"]
-    volumes: ["dev:/var/lib/xdevs"]
-    ports: ["127.0.0.1:8545:8545"]
+  # One-shot generator of the shared localnet volume (keys, genesis, per-node config).
+  init:
+    image: ${XDEVS_IMAGE:-xdevs:local}
+    build: &build
+      context: ../..
+      dockerfile: deploy/local/Dockerfile
+    pull_policy: missing
+    profiles: [validators, joiner]
+    user: "0:0"
+    entrypoint: ["bash", "/opt/xdevs/localnet-init.sh"]
+    command: []
+    environment:
+      XDEVS_VALIDATORS: "4"
+      XDEVS_FULL_NODES: "1"
+      XDEVS_BASE_PORT: "30300"
+      XDEVS_BLOCK_TIME: ${XDEVS_BLOCK_TIME:-1s}
+      XDEVS_CHAIN_ID: ${XDEVS_CHAIN_ID:-7117}
+      XDEVS_FORCE_INIT: ${XDEVS_FORCE_INIT:-0}
+    volumes:
+      - localnet:/localnet
+      - ../../scripts/localnet-init.sh:/opt/xdevs/localnet-init.sh:ro
+    network_mode: none
+    restart: "no"
 
-  val1: &val
-    image: xdevs:dev
+  # ---- 4 genesis validators ---------------------------------------------------------
+  node0:
+    <<: *node
     profiles: [validators]
-    command: ["node", "--config", "/cfg/val1.toml"]
-    volumes: ["./cfg:/cfg:ro", "val1:/var/lib/xdevs"]
-    ports: ["127.0.0.1:18545:8545"]
-  val2: { <<: *val, command: ["node", "--config", "/cfg/val2.toml"], volumes: ["./cfg:/cfg:ro", "val2:/var/lib/xdevs"], ports: [] }
-  val3: { <<: *val, command: ["node", "--config", "/cfg/val3.toml"], volumes: ["./cfg:/cfg:ro", "val3:/var/lib/xdevs"], ports: [] }
-  val4: { <<: *val, command: ["node", "--config", "/cfg/val4.toml"], volumes: ["./cfg:/cfg:ro", "val4:/var/lib/xdevs"], ports: [] }
+    hostname: node0
+    command: ["run", "--config", "/localnet/node0/config.toml"]
+    environment:
+      <<: *node-env
+      XDEVS_RPC_PORT: "30302"
+    ports:
+      - "127.0.0.1:8545:30302"
 
-volumes: { dev: {}, val1: {}, val2: {}, val3: {}, val4: {} }
+  node1:
+    <<: *node
+    profiles: [validators]
+    hostname: node1
+    command: ["run", "--config", "/localnet/node1/config.toml"]
+    environment:
+      <<: *node-env
+      XDEVS_RPC_PORT: "30312"
+    ports:
+      - "127.0.0.1:8555:30312"
+
+  node2:
+    <<: *node
+    profiles: [validators]
+    hostname: node2
+    command: ["run", "--config", "/localnet/node2/config.toml"]
+    environment:
+      <<: *node-env
+      XDEVS_RPC_PORT: "30322"
+    ports:
+      - "127.0.0.1:8565:30322"
+
+  node3:
+    <<: *node
+    profiles: [validators]
+    hostname: node3
+    command: ["run", "--config", "/localnet/node3/config.toml"]
+    environment:
+      <<: *node-env
+      XDEVS_RPC_PORT: "30332"
+    ports:
+      - "127.0.0.1:8575:30332"
+
+  # ---- late joiner: a full node (no consensus key) that syncs from genesis -----------
+  node4:
+    <<: *node
+    profiles: [joiner]
+    hostname: node4
+    command: ["run", "--config", "/localnet/node4/config.toml"]
+    environment:
+      <<: *node-env
+      XDEVS_RPC_PORT: "30342"
+    ports:
+      - "127.0.0.1:8585:30342"
+
+  # ---- load generator (scripts/soak.sh): `docker compose run --rm loadgen --tps 50 ...` --
+  loadgen:
+    image: ${XDEVS_IMAGE:-xdevs:local}
+    pull_policy: missing
+    profiles: [loadgen]
+    init: true
+    entrypoint: ["xdevs-loadgen"]
+    command: ["--rpc", "http://node0:30302"]
+    networks:
+      - localnet
+    restart: "no"
+
+  # ---- Phase-1 single-node dev chain (profile `dev`; shares host port 8545 with node0) --
+  dev:
+    image: ${XDEVS_IMAGE:-xdevs:local}
+    build: *build
+    pull_policy: missing
+    profiles: [dev]
+    stop_signal: SIGINT
+    command: ["run", "--dev", "--http", "0.0.0.0:8545", "--data-dir", "/var/lib/xdevs"]
+    volumes:
+      - dev:/var/lib/xdevs
+    ports:
+      - "127.0.0.1:8545:8545"
+
+networks:
+  localnet:
+    name: ${XDEVS_NETWORK:-xdevs-localnet}
+
+volumes:
+  localnet: {}
+  dev: {}

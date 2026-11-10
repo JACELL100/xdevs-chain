@@ -8,3 +8,8 @@ Operational runbooks (plan §33.8). Entries marked TODO are written once the mat
 4. Chain halted: diagnosis checklist. Check peers, clocks, whether more than 1/3 of validators are offline, and for a state-root mismatch (TODO, Phase 2)
 5. Restoring a node from a snapshot (TODO)
 6. Faucet wallet refill and compromise response: [faucet.md](faucet.md)
+
+## Testing
+
+- Local Docker 4-validator network and chaos commands: [localnet.md](localnet.md)
+- Soak test (CI up to 5.5 h; 24 h on the Oracle VMs): [soak.md](soak.md)

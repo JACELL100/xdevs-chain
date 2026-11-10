@@ -1,0 +1,151 @@
+name: soak
+
+# Soak test on the Docker localnet: continuous load (xdevs-loadgen, or the xdevs-cli
+# fallback) plus periodic fork / state-root / stall checks; uploads summary.json.
+# Runbook: docs/runbooks/soak.md (pass criteria, the 24 h soak on the Oracle VMs).
+#
+# GitHub-hosted jobs stop after 6 h, so the soak itself is capped at 330 minutes and is
+# shortened further if the image build ate into the budget. Use the `image` input
+# (a prebuilt ghcr.io/jacell100/xdevs-chain tag) to skip the build on long runs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: "Soak duration in minutes (1-330)"
+        type: number
+        required: true
+        default: 60
+      tps:
+        description: "Target transactions per second (xdevs-loadgen)"
+        type: number
+        default: 20
+      block_time:
+        description: "Block time of the localnet (e.g. 1s, 2s)"
+        type: string
+        default: "1s"
+      image:
+        description: "Prebuilt image to soak (empty = build this commit), e.g. ghcr.io/jacell100/xdevs-chain:main"
+        type: string
+        default: ""
+  # Nightly soak: DISABLED by default. Uncomment to enable (scheduled runs use the
+  # defaults: 60 minutes, 20 TPS, 1 s blocks, image built from the default branch).
+  # schedule:
+  #   - cron: "17 2 * * *"
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: soak-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      DURATION_MINUTES: ${{ inputs.duration_minutes || 60 }}
+      TPS: ${{ inputs.tps || 20 }}
+      XDEVS_BLOCK_TIME: ${{ inputs.block_time || '1s' }}
+      PREBUILT_IMAGE: ${{ inputs.image }}
+    steps:
+      - name: Record the job start and validate inputs
+        run: |
+          echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          if ! [[ $DURATION_MINUTES =~ ^[0-9]+$ ]] || (( DURATION_MINUTES < 1 || DURATION_MINUTES > 330 )); then
+            echo "::error::duration_minutes must be 1-330 (GitHub-hosted jobs stop after 6 h)"
+            exit 1
+          fi
+          if ! [[ $TPS =~ ^[0-9]+$ ]]; then
+            echo "::error::tps must be a non-negative integer"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+        if: env.PREBUILT_IMAGE == ''
+
+      - name: Build the node image
+        if: env.PREBUILT_IMAGE == ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/local/Dockerfile
+          platforms: linux/amd64
+          tags: xdevs:local
+          load: true
+          cache-from: type=gha,scope=xdevs-linux-amd64
+
+      - uses: docker/login-action@v3
+        if: env.PREBUILT_IMAGE != ''
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Select the image
+        run: |
+          if [[ -n $PREBUILT_IMAGE ]]; then
+            docker pull "$PREBUILT_IMAGE"
+            echo "XDEVS_IMAGE=$PREBUILT_IMAGE" >> "$GITHUB_ENV"
+          else
+            echo "XDEVS_IMAGE=xdevs:local" >> "$GITHUB_ENV"
+          fi
+
+      - name: Start the localnet (4 validators)
+        run: bash scripts/localnet-up.sh --fresh
+
+      - name: Soak
+        run: |
+          # Leave >= 15 minutes of the 6 h job for the final check, log export and upload.
+          elapsed=$(( ($(date +%s) - JOB_START) / 60 ))
+          budget=$(( 345 - elapsed ))
+          minutes=$DURATION_MINUTES
+          if (( minutes > budget )); then
+            echo "::warning::shortening the soak from ${minutes} to ${budget} minutes (setup took ${elapsed} min)"
+            minutes=$budget
+          fi
+          bash scripts/soak.sh --duration "${minutes}m" --tps "$TPS" --artifacts soak-artifacts
+
+      - name: Job summary
+        if: always()
+        run: |
+          f=soak-artifacts/summary.json
+          [[ -f $f ]] || { echo "no soak summary" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          {
+            echo "## Soak: $(jq -r 'if .pass then "PASS" else "FAIL" end' "$f")"
+            echo
+            echo '| metric | value |'
+            echo '|---|---|'
+            jq -r '[
+                ["duration (s)", .elapsed_secs], ["blocks", .blocks],
+                ["avg block time (s)", .avg_block_time_secs], ["forks", .forks],
+                ["state-root mismatches", .root_mismatches], ["certificate mismatches", .cert_mismatches],
+                ["longest stall (s)", "\(.max_stall_secs) (limit \(.stall_limit_secs))"],
+                ["checks failed / run", "\(.failed_checks) / \(.checks)"],
+                ["log alerts", (.log_alerts | tostring)], ["load", "\(.load.mode) \(.load.detail)"],
+                ["aborted", (.aborted // "no")]
+              ][] | "| \(.[0]) | \(.[1]) |"' "$f"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compress logs
+        if: always()
+        run: |
+          if [[ -d soak-artifacts/logs ]]; then
+            tar -C soak-artifacts -czf soak-artifacts/logs.tar.gz logs && rm -rf soak-artifacts/logs
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: soak-${{ github.run_id }}
+          path: soak-artifacts/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Tear down
+        if: always()
+        run: bash scripts/localnet-down.sh || true

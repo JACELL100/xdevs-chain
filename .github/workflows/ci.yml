@@ -40,6 +40,47 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
 
+  # The maintainers develop on Windows with the GNU toolchain: keep the whole workspace
+  # (Malachite, libp2p, redb, ...) compiling for x86_64-pc-windows-gnu.
+  windows-check:
+    name: windows-check (x86_64-pc-windows-gnu)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      # .cargo/config.toml is local-only and gitignored; make sure no copy is used.
+      - name: Drop local-only cargo config
+        run: rm -f .cargo/config.toml
+      # MinGW-w64 gcc for crates with C code (ring, ...).
+      - id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          release: false
+          update: false
+          install: mingw-w64-x86_64-gcc
+      - name: Put MinGW gcc on PATH
+        env:
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: printf '%s\n' "${MSYS2_ROOT}\\mingw64\\bin" >> "$GITHUB_PATH"
+      - name: Install the GNU toolchain
+        run: |
+          rustup set default-host x86_64-pc-windows-gnu
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+          # Overrides rust-toolchain.toml's "stable" (which would resolve to the MSVC host).
+          echo "RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-gnu" >> "$GITHUB_ENV"
+      - name: Versions
+        run: |
+          gcc --version | head -n1
+          rustc -vV
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-gnu
+      - run: cargo check --workspace --locked
+
   audit:
     runs-on: ubuntu-latest
     permissions:
