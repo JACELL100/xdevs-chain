@@ -83,16 +83,15 @@ jobs:
 
   audit:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      checks: write
     steps:
       - uses: actions/checkout@v5
-      # Ignored advisories (with reasons and re-check dates) live in .cargo/audit.toml.
-      - uses: rustsec/audit-check@v2
+      - uses: taiki-e/install-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ignore: RUSTSEC-2026-0387,RUSTSEC-2026-0118,RUSTSEC-2026-0119
+          tool: cargo-audit
+      # Accepted advisories (each with a reason and a re-check date) live in
+      # .cargo/audit.toml, which cargo-audit reads automatically. Unmaintained-crate
+      # notices are warnings; any other advisory fails the job.
+      - run: cargo audit
 
   contracts:
     name: contracts (foundry)
