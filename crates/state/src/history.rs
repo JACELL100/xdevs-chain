@@ -257,7 +257,7 @@ mod tests {
     fn commit(db: &MemDb, block: u64, diff: &StateDiff, keep: u64) {
         let mut batch = WriteBatch::new();
         record_block_history(&mut batch, db, block, diff, keep).unwrap();
-        write_state_diff(&mut batch, diff);
+        write_state_diff(&mut batch, db, diff).unwrap();
         db.write(batch).unwrap();
     }
 
@@ -411,7 +411,7 @@ mod tests {
         let mut d = StateDiff::new();
         d.set_account(a, AccountInfo::new(0, U256::from(5u64)));
         let mut batch = WriteBatch::new();
-        write_state_diff(&mut batch, &d);
+        write_state_diff(&mut batch, &db, &d).unwrap();
         db.write(batch).unwrap();
         // Pre-history database at head 7: only the head is readable.
         assert_eq!(oldest_available_state(&db, 7).unwrap(), 7);

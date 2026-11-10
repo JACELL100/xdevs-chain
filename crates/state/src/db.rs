@@ -1,9 +1,9 @@
 //! State backed by the flat storage tables.
 //!
-//! Phase-1 implementation: reads go straight to `PlainAccounts` / `PlainStorage` /
-//! `Bytecodes`; the state root is recomputed from scratch with one ordered pass over
-//! the flat tables ([`crate::root::db_state_root`], plan §14.3). Phase 2 can make it
-//! incremental without changing the interface.
+//! Reads go straight to `PlainAccounts` / `PlainStorage` / `Bytecodes`; the state root is
+//! computed incrementally over the Merkle-Patricia tries persisted in `TrieNodes`
+//! ([`crate::trie`], plan §14.3), which [`write_state_diff`] keeps in step with the flat
+//! tables in the same atomic batch.
 
 use crate::{InMemoryState, StateDiff, StateError, StateProvider};
 use xdevs_primitives::{AccountInfo, Address, Bytes, B256, KECCAK256_EMPTY, U256};
@@ -74,12 +74,29 @@ impl<D: DbRead> StateProvider for DbStateProvider<D> {
     }
 
     fn state_root_with(&self, diff: &StateDiff) -> Result<B256, StateError> {
-        Ok(crate::root::db_state_root(&self.db, diff)?)
+        crate::trie::state_root_with(&self.db, diff)
     }
 }
 
-/// Append the writes for `diff` to `batch` (same semantics as [`InMemoryState::apply`]).
-pub fn write_state_diff(batch: &mut WriteBatch, diff: &StateDiff) {
+/// Append the writes for `diff` to `batch` (same semantics as [`InMemoryState::apply`]):
+/// the flat tables **and** the matching trie-node updates (built from the flat state first
+/// if the database has no tries yet, see [`crate::trie`]). Returns the new state root.
+///
+/// `db` must be the latest committed state that `batch` will be applied on top of, and the
+/// batch must not be combined with another state diff before it is written.
+pub fn write_state_diff<D: DbRead + ?Sized>(
+    batch: &mut WriteBatch,
+    db: &D,
+    diff: &StateDiff,
+) -> Result<B256, StateError> {
+    write_flat_state_diff(batch, diff);
+    crate::trie::write_trie_updates(batch, db, diff)
+}
+
+/// Only the flat-table writes of `diff` (no trie nodes): what Phase-1 nodes wrote. Kept for
+/// migration tests; a database written this way must have its tries rebuilt with
+/// [`crate::trie::rebuild_state_trie`] before its tries can be trusted.
+pub(crate) fn write_flat_state_diff(batch: &mut WriteBatch, diff: &StateDiff) {
     for (address, change) in &diff.accounts {
         match change {
             Some(info) => {
@@ -139,7 +156,7 @@ mod tests {
         d.set_storage(c, B256::with_last_byte(2), U256::from(2u64));
 
         let mut batch = WriteBatch::new();
-        write_state_diff(&mut batch, &d);
+        write_state_diff(&mut batch, &db, &d).unwrap();
         db.write(batch).unwrap();
         mem.apply(&d);
 
@@ -164,7 +181,7 @@ mod tests {
             mem.state_root_with(&d2).unwrap()
         );
         let mut batch = WriteBatch::new();
-        write_state_diff(&mut batch, &d2);
+        write_state_diff(&mut batch, &db, &d2).unwrap();
         db.write(batch).unwrap();
         mem.apply(&d2);
         assert_eq!(p.storage(c, B256::with_last_byte(1)).unwrap(), U256::ZERO);
@@ -229,7 +246,7 @@ mod tests {
             assert_eq!(predicted, mem.state_root_with(&d).unwrap());
 
             let mut batch = WriteBatch::new();
-            write_state_diff(&mut batch, &d);
+            write_state_diff(&mut batch, db, &d).unwrap();
             db.write(batch).unwrap();
             mem.apply(&d);
 

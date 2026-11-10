@@ -14,7 +14,7 @@ use xdevs_primitives::{
 };
 use xdevs_state::{
     history::{record_block_history, set_history_start},
-    write_state_diff, DbStateProvider, StateDiff, StateProvider,
+    write_state_diff, StateDiff,
 };
 use xdevs_storage::{
     meta_keys, put_commit_certificate, tables, Database, DbError, DbRead, DbReadExt, WriteBatch,
@@ -112,13 +112,15 @@ pub fn recover_senders(body: &[TxEnvelope]) -> Result<Vec<Address>, DbError> {
         .collect()
 }
 
-/// Write `header`/`body`/`receipts`/`state_diff` of one block and move the head to it.
+/// Write `header`/`body`/`receipts`/`state_diff` (flat state and trie nodes, on top of the
+/// latest state in `db`) of one block and move the head to it.
 fn block_batch(
+    db: &dyn Database,
     header: &Header,
     body: &[TxEnvelope],
     receipts: &[ReceiptEnvelope],
     state_diff: &StateDiff,
-) -> (WriteBatch, B256) {
+) -> anyhow::Result<(WriteBatch, B256)> {
     let number = header.number;
     let hash = header.hash_slow();
     let mut batch = WriteBatch::new();
@@ -136,12 +138,12 @@ fn block_batch(
         );
         batch.put::<tables::Receipts>(&(number, index), receipt);
     }
-    write_state_diff(&mut batch, state_diff);
+    write_state_diff(&mut batch, db, state_diff).context("update state trie")?;
     batch.put::<tables::Meta>(
         &meta_key(meta_keys::LATEST_BLOCK),
         &number.to_be_bytes().to_vec(),
     );
-    (batch, hash)
+    Ok((batch, hash))
 }
 
 /// Commit a built block atomically (one [`WriteBatch`], §14.2), together with its
@@ -170,7 +172,7 @@ pub fn commit_executed_block(
 ) -> anyhow::Result<B256> {
     let header = &block.header;
     let diff = &outcome.state_diff;
-    let (mut batch, hash) = block_batch(header, &block.body, &outcome.receipts, diff);
+    let (mut batch, hash) = block_batch(db, header, &block.body, &outcome.receipts, diff)?;
     if let Some(cert) = certificate {
         put_commit_certificate(&mut batch, header.number, cert);
     }
@@ -280,7 +282,7 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
     if latest_number(db)?.is_some() {
         bail!("database has blocks but no genesis hash (corrupted?)");
     }
-    let (mut batch, _) = block_batch(&block.header, &[], &[], &diff);
+    let (mut batch, _) = block_batch(db, &block.header, &[], &[], &diff)?;
     batch.put::<tables::Meta>(&meta_key(meta_keys::GENESIS_HASH), &hash.to_vec());
     // Nothing exists before genesis: every state from block 0 on is readable.
     set_history_start(&mut batch, 1);
@@ -290,12 +292,13 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
     Ok(hash)
 }
 
-/// Recompute the state root of the stored flat state and compare it with the head
-/// header (detects a torn or corrupted database on start). Returns the head.
+/// Recompute the state root of the stored flat state, check it against the persisted state
+/// trie and compare it with the head header (detects a torn or corrupted database on
+/// start). Returns the head.
 pub fn verify_head(db: &dyn Database) -> anyhow::Result<(u64, Header)> {
     let snapshot = db.snapshot()?;
     let (number, head) = latest_header(&*snapshot)?;
-    let root = DbStateProvider::new(&*snapshot).state_root_with(&StateDiff::default())?;
+    let root = xdevs_state::trie::check_state_root(&*snapshot)?;
     if root != head.state_root {
         bail!(
             "stored state root {root} does not match head block {number} state root {}",

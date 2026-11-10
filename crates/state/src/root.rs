@@ -3,9 +3,10 @@
 //! * account trie: `keccak256(address) -> RLP([nonce, balance, storage_root, code_hash])`
 //! * storage trie (per account): `keccak256(slot) -> RLP(value)`, zero values skipped
 //!
-//! Phase 1 recomputes roots from scratch over the full (flat) state; every function
-//! here is O(n log n) (hash + sort, then one `HashBuilder` pass) and deterministic.
-//! Phase 2 makes this incremental with the `TrieNodes` table.
+//! Every function here recomputes roots from scratch over the full (flat) state: O(n log n)
+//! (hash + sort, then one `HashBuilder` pass) and deterministic. The node computes block
+//! state roots incrementally over the persisted tries ([`crate::trie`]); these full
+//! recomputes are the reference oracle (tests, start-up check, pre-trie databases).
 
 use crate::{InMemoryState, StateDiff};
 use std::collections::{BTreeMap, BTreeSet};
@@ -56,14 +57,16 @@ pub fn in_memory_state_root(state: &InMemoryState) -> B256 {
     state.state_root()
 }
 
-/// State root of the flat state stored in `db` (`PlainAccounts` / `PlainStorage`) with
-/// `diff` applied on top, without writing anything and without loading bytecode.
+/// **Full recompute** (reference oracle): state root of the flat state stored in `db`
+/// (`PlainAccounts` / `PlainStorage`) with `diff` applied on top, without writing anything
+/// and without loading bytecode. O(state); block processing uses the incremental
+/// [`crate::trie::state_root_with`] instead.
 ///
 /// One ordered pass over each table: accounts are collected (O(accounts) memory),
 /// storage is streamed address by address, so only one account's slots are held at a
 /// time. Semantics of `diff` are those documented on [`StateDiff`]; storage of
 /// accounts that do not exist in the resulting state is ignored.
-pub fn db_state_root<D: DbRead + ?Sized>(db: &D, diff: &StateDiff) -> Result<B256, DbError> {
+pub fn full_db_state_root<D: DbRead + ?Sized>(db: &D, diff: &StateDiff) -> Result<B256, DbError> {
     let mut accounts = BTreeMap::new();
     db.walk::<tables::PlainAccounts>(&Address::ZERO, |address, info| {
         accounts.insert(address, info);
@@ -133,7 +136,7 @@ pub(crate) mod tests {
 
     /// Minimal, independent Merkle-Patricia trie (Yellow Paper appendix D), written
     /// straight from the spec with hand-rolled RLP. Used to cross-check `alloy-trie`.
-    mod reference {
+    pub(crate) mod reference {
         use xdevs_primitives::{keccak256, B256};
 
         fn len_prefix(offset: u8, len: usize) -> Vec<u8> {
@@ -332,7 +335,7 @@ pub(crate) mod tests {
         assert_eq!(storage_root(&BTreeMap::new()), expected);
         assert_eq!(in_memory_state_root(&InMemoryState::new()), expected);
         assert_eq!(
-            db_state_root(&xdevs_storage::MemDb::new(), &StateDiff::new()).unwrap(),
+            full_db_state_root(&xdevs_storage::MemDb::new(), &StateDiff::new()).unwrap(),
             expected
         );
     }
@@ -368,7 +371,7 @@ pub(crate) mod tests {
             diff.set_account(*a, *info);
         }
         let db = xdevs_storage::MemDb::new();
-        assert_eq!(db_state_root(&db, &diff).unwrap(), expected);
+        assert_eq!(full_db_state_root(&db, &diff).unwrap(), expected);
         assert_eq!(
             in_memory_state_root(&InMemoryState::from_diff(&diff)),
             expected

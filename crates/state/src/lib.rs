@@ -5,10 +5,13 @@
 //!   block; applied to [`InMemoryState`] or written to storage with [`write_state_diff`].
 //! * [`InMemoryState`] — complete in-memory state with Ethereum MPT root, for tests.
 //! * [`DbStateProvider`] — latest state read from the flat `PlainAccounts` /
-//!   `PlainStorage` / `Bytecodes` tables.
+//!   `PlainStorage` / `Bytecodes` tables, state root from the persisted tries.
 //! * [`history`] — reverse diffs of recent blocks and [`HistoricalStateProvider`] for
 //!   reading the state at a past block (plan §14.1, §14.4).
-//! * [`root`] — Ethereum state/storage root computation (alloy-trie).
+//! * [`root`] — full Ethereum state/storage root recomputation (alloy-trie), the
+//!   reference oracle.
+//! * [`trie`] — incremental state root over Merkle-Patricia tries persisted in the
+//!   `TrieNodes` table, updated in the block's write batch.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -18,6 +21,7 @@ mod diff;
 pub mod history;
 mod memory;
 pub mod root;
+pub mod trie;
 
 pub use db::{write_state_diff, DbStateProvider};
 pub use diff::{StateDiff, StorageDiff};
