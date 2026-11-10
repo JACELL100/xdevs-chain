@@ -6,7 +6,7 @@ xDEVS Chain is an EVM-equivalent, Proof-of-Stake Layer 1 written in Rust, built 
 
 The native coin is **XDS** (testnet: **tXDS**, 18 decimals; the smallest unit is the "dev"). Names end in `.xdevs` (XNS, the xDEVS Name Service).
 
-> **Status: Phase 2 (multi-validator BFT network) working locally; public testnet not live yet.** Validators reach BFT consensus with Malachite, survive one validator going down, halt safely with two down and resume, and late nodes sync from genesis. Hardening from a security review (denial-of-service in proposal streaming and RPC) is in progress before any public network. The system and user-safety contracts, the TypeScript SDK and the faucet are built and tested. The public devnet (Phase 3) is next. Testnet tokens have no value.
+> **Status: Phase 2 (multi-validator BFT network) working locally; public testnet not live yet.** Validators reach BFT consensus with Malachite, survive one validator going down, halt safely with two down and resume, and late nodes sync from genesis. Findings from an internal security review (denial-of-service in proposal streaming, gossip and RPC) are fixed and covered by tests; an external audit is still required before mainnet. The system and user-safety contracts, the TypeScript SDK and the faucet are built and tested. The public devnet (Phase 3) is next. Testnet tokens have no value.
 
 ## Why xDEVS Chain?
 
@@ -41,7 +41,8 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | Guardian freeze (breaks owner-vs-thief recovery stalemates), EOA lock for existing MetaMask addresses | ✅ Contracts built and tested |
 | Node enforcement of the EOA lock ([XIP-0001](docs/specs/xip-0001-eoa-lock.md)) | ✅ Built and tested (dev node: block validity, block building, mempool, RPC) |
 | Multi-validator BFT consensus (Malachite), block sync, P2P tx gossip, incremental state root | ✅ Built and tested locally (Phase 2) |
-| DoS hardening of consensus streaming, gossip and RPC (from the Phase 2 security review) | 🛠 In progress |
+| DoS hardening of consensus streaming, gossip and RPC (from the Phase 2 security review) | ✅ Built and tested |
+| 24-hour soak test of a multi-validator network | 📋 Planned on the testnet VMs (5-hour soaks run in CI) |
 | Staking-driven validator set, public testnet | 📋 Next (Phase 3) |
 | Transaction simulation and recipient-check RPCs, reference wallet | 📋 Planned (Phase 4) |
 | Encrypted mempool, parallel execution, local fee markets | 📋 Planned (Phase 5) |
@@ -64,7 +65,6 @@ Works and is covered by tests (unit tests per crate plus in-process end-to-end t
 
 Not done yet:
 
-- DoS hardening found by the Phase 2 security review: proposal-stream limits per publisher and height window, RPC work isolation from consensus, per-peer gossip rate limits (in progress).
 - Staking-contract-driven validator sets and slashing (Phase 3; Phase 2 uses a static validator set from genesis).
 - Filter methods (`eth_newFilter`, `eth_getFilterChanges`, ...), `eth_getProof`, and `debug_` / `trace_` / `txpool_` namespaces.
 - No pending block: the `pending` tag means `latest`, except that `eth_getTransactionCount` with `pending` counts pool transactions.
