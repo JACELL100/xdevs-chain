@@ -1,0 +1,8 @@
+/target
+/.cargo/config.toml
+**/*.rs.bk
+/data/
+/.xdevs/
+*.keystore.json
+node_modules/
+.env
