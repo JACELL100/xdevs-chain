@@ -51,6 +51,8 @@ jobs:
         env:
           OCI_SSH_PUBKEY: ${{ vars.OCI_SSH_PUBKEY }}
           OCI_MAX_MINUTES: "18"
+          # Oracle answered every other request with 429 at 60 s; 120 s keeps each one useful.
+          OCI_INTERVAL_SECS: "120"
         run: |
           set +e
           python deploy/scripts/oci_a1_retry.py
