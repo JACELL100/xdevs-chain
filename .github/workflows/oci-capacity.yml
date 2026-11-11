@@ -1,0 +1,73 @@
+name: oci-capacity
+
+# Keeps asking Oracle Cloud for the Always-Free Ampere A1 VMs (often "out of host
+# capacity") until they exist, then opens an issue (no IPs) and disables itself.
+# Requires repository variables OCI_USER, OCI_TENANCY, OCI_FINGERPRINT, OCI_REGION,
+# OCI_SSH_PUBKEY and the secret OCI_PRIVATE_KEY (an API key of the tenancy owner).
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oci-capacity
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet oci
+      - name: Write OCI config
+        env:
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.oci
+          printf '%s\n' "$OCI_PRIVATE_KEY" > ~/.oci/key.pem
+          chmod 600 ~/.oci/key.pem
+          cat > ~/.oci/config <<EOF
+          [DEFAULT]
+          user=${{ vars.OCI_USER }}
+          fingerprint=${{ vars.OCI_FINGERPRINT }}
+          tenancy=${{ vars.OCI_TENANCY }}
+          region=${{ vars.OCI_REGION }}
+          key_file=$HOME/.oci/key.pem
+          EOF
+      - name: Try to create the VMs (up to ~18 minutes)
+        id: retry
+        env:
+          OCI_SSH_PUBKEY: ${{ vars.OCI_SSH_PUBKEY }}
+          OCI_MAX_MINUTES: "18"
+        run: |
+          set +e
+          python deploy/scripts/oci_a1_retry.py
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          # 3 = still no capacity: a normal outcome, try again on the next schedule.
+          if [ "$rc" = 3 ]; then exit 0; fi
+          exit $rc
+      - name: Done - notify and disable the schedule
+        if: steps.retry.outputs.rc == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Oracle A1 VMs created" \
+            --body "The oci-capacity workflow created the Always-Free Ampere A1 VMs. Check Compute > Instances in the Oracle console for their public IPs. This workflow has disabled itself."
+          gh workflow disable oci-capacity.yml --repo "$GITHUB_REPOSITORY"
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.oci/key.pem
