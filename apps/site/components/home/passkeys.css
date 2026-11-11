@@ -1,0 +1,227 @@
+.s-pk .grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(40px, 7vw, 112px);
+  align-items: center;
+}
+.s-pk .visual {
+  display: grid;
+  place-items: center;
+  position: relative;
+}
+.s-pk .visual::before {
+  content: '';
+  position: absolute;
+  width: 78%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(200, 212, 228, 0.08), transparent 65%);
+  pointer-events: none;
+}
+.s-pk .phone {
+  position: relative;
+  width: min(300px, 78vw);
+  aspect-ratio: 300 / 610;
+  border-radius: 52px;
+  padding: 12px;
+  background: linear-gradient(150deg, #2b3039 0%, #0e1015 38%, #1c2027 70%, #0b0c10 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12) inset,
+    0 0 0 1px rgba(0, 0, 0, 0.8),
+    0 60px 120px -40px rgba(0, 0, 0, 0.9),
+    0 30px 60px -30px rgba(0, 0, 0, 0.7);
+}
+.s-pk .island {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  width: 92px;
+  height: 26px;
+  transform: translateX(-50%);
+  border-radius: 20px;
+  background: #000;
+  z-index: 2;
+}
+.s-pk .screen {
+  position: relative;
+  height: 100%;
+  border-radius: 41px;
+  background: radial-gradient(120% 70% at 50% 0%, #11141b 0%, #07080c 60%);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 64px 22px 26px;
+}
+.s-pk .sc-head {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--xh-dim);
+}
+.s-pk .scan {
+  margin-top: auto;
+  width: 46%;
+  aspect-ratio: 1;
+}
+.s-pk .scan svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.s-pk .corners {
+  stroke: #e9edf2;
+  transform-origin: 60px 60px;
+  transition: transform 0.6s var(--xh-ease), stroke 0.4s;
+}
+.s-pk .face {
+  stroke: #e9edf2;
+  opacity: 0.85;
+  transition: opacity 0.35s;
+}
+.s-pk .check {
+  stroke: var(--xh-final);
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 0.5s var(--xh-ease) 0.12s;
+}
+.s-pk .beam {
+  fill: var(--xh-final);
+  opacity: 0;
+  filter: drop-shadow(0 0 6px rgba(79, 227, 207, 0.9));
+}
+.s-pk .is-idle .corners {
+  transform: scale(1.12);
+  stroke: rgba(233, 237, 242, 0.5);
+}
+.s-pk .is-idle .face {
+  opacity: 0.35;
+}
+.s-pk .is-scan .corners {
+  animation: pk-breathe 1.1s ease-in-out infinite alternate;
+}
+.s-pk .is-scan .beam {
+  animation: pk-beam 1.6s var(--xh-ease-in-out) forwards;
+}
+.s-pk .is-ok .corners {
+  stroke: var(--xh-final);
+  transform: scale(0.94);
+}
+.s-pk .is-ok .face {
+  opacity: 0;
+}
+.s-pk .is-ok .check {
+  stroke-dashoffset: 0;
+}
+@keyframes pk-breathe {
+to {
+    transform: scale(1.04);
+}
+}
+@keyframes pk-beam {
+0% {
+    opacity: 0;
+    transform: translateY(18px);
+}
+15% {
+    opacity: 0.9;
+}
+85% {
+    opacity: 0.9;
+}
+100% {
+    opacity: 0;
+    transform: translateY(100px);
+}
+}
+.s-pk .sc-copy {
+  margin-top: 26px;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.s-pk .sc-t {
+  display: grid;
+  font-size: 19px;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+}
+.s-pk .lbl {
+  grid-area: 1 / 1;
+  transition: opacity 0.35s var(--xh-ease), transform 0.35s var(--xh-ease);
+}
+.s-pk .lbl-b {
+  opacity: 0;
+  transform: translateY(6px);
+  color: var(--xh-final);
+}
+.s-pk .is-ok .lbl-a {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.s-pk .is-ok .lbl-b {
+  opacity: 1;
+  transform: none;
+}
+.s-pk .sc-s {
+  font-size: 13.5px;
+  color: var(--xh-muted);
+}
+.s-pk .sc-s b {
+  color: var(--xh-text-2);
+  font-weight: 500;
+}
+.s-pk .sc-foot {
+  margin-top: auto;
+  padding-top: 18px;
+  font-size: 10px;
+  color: var(--xh-dim);
+  text-align: center;
+}
+.s-pk .sig {
+  opacity: 0.4;
+  transition: opacity 0.4s;
+}
+.s-pk .is-ok .sig {
+  opacity: 1;
+}
+.s-pk .copy .xh-lede {
+  max-width: 34em;
+}
+.s-pk .feats {
+  list-style: none;
+  margin: 40px 0 32px;
+  padding: 0;
+  border-top: 1px solid var(--xh-line);
+}
+.s-pk .feats li {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 24px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--xh-line);
+}
+.s-pk .feats h3 {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  color: var(--xh-text);
+}
+@media (max-width: 900px) {
+.s-pk .grid {
+    grid-template-columns: minmax(0, 1fr);
+}
+.s-pk .copy {
+    order: -1;
+}
+.s-pk .feats li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+}
+}
+.s-pk .xh-h2 {
+  font-size: clamp(38px, 4.6vw, 68px);
+}

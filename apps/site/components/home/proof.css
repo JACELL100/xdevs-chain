@@ -1,0 +1,108 @@
+.s-proof .head {
+  margin-bottom: clamp(48px, 6vw, 80px);
+}
+.s-proof .stats {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--xh-line-2);
+}
+.s-proof .stat {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: clamp(24px, 3vw, 40px) clamp(16px, 2vw, 28px) clamp(28px, 3.4vw, 44px) 0;
+  border-bottom: 1px solid var(--xh-line);
+}
+.s-proof .stat:not(:nth-child(3n + 1)) {
+  padding-left: clamp(16px, 2.4vw, 32px);
+  border-left: 1px solid var(--xh-line);
+}
+.s-proof .stat dt {
+  font-size: 14.5px;
+  color: var(--xh-muted);
+}
+.s-proof .stat dd {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1;
+}
+.s-proof .val {
+  font-size: clamp(52px, 7.2vw, 104px);
+  font-weight: 500;
+  letter-spacing: -0.055em;
+}
+.s-proof .u {
+  font-size: clamp(22px, 2.4vw, 34px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--xh-muted);
+}
+.s-proof .zero .val .xh-metal {
+  transition: color 0.6s;
+}
+.s-proof .done .zero .val .xh-metal {
+  background: none;
+  color: var(--xh-final);
+}
+.s-proof .foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 40px;
+  margin-top: 40px;
+}
+.s-proof .tests {
+  margin: 0;
+  display: flex;
+  gap: clamp(28px, 5vw, 64px);
+}
+.s-proof .tests > div {
+  display: grid;
+  gap: 4px;
+}
+.s-proof .tests dd {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 560;
+  letter-spacing: -0.03em;
+  color: var(--xh-text);
+}
+.s-proof .tests dt {
+  font-size: 13.5px;
+  color: var(--xh-muted);
+}
+.s-proof .note {
+  margin: 0;
+  max-width: 44ch;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--xh-dim);
+  text-align: right;
+}
+@media (max-width: 860px) {
+.s-proof .stats {
+    grid-template-columns: 1fr 1fr;
+}
+.s-proof .stat:not(:nth-child(3n + 1)) {
+    padding-left: 0;
+    border-left: 0;
+}
+.s-proof .stat:nth-child(2n) {
+    padding-left: 18px;
+    border-left: 1px solid var(--xh-line);
+}
+.s-proof .foot {
+    flex-direction: column;
+    align-items: flex-start;
+}
+.s-proof .tests {
+    flex-wrap: wrap;
+}
+.s-proof .note {
+    text-align: left;
+}
+}

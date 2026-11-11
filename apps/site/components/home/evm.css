@@ -1,0 +1,135 @@
+.s-evm .grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(40px, 6vw, 96px);
+  align-items: center;
+}
+.s-evm .tools {
+  list-style: none;
+  margin: 40px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--xh-line);
+  border-left: 1px solid var(--xh-line);
+  max-width: 420px;
+}
+.s-evm .tools li {
+  flex: 1 0 33.333%;
+  padding: 14px 16px;
+  font-size: 13px;
+  color: var(--xh-text-2);
+  border-right: 1px solid var(--xh-line);
+  border-bottom: 1px solid var(--xh-line);
+}
+.s-evm .eips {
+  margin: 18px 0 32px;
+  font-size: 12px;
+  color: var(--xh-dim);
+}
+.s-evm .code {
+  overflow: hidden;
+  border-radius: 18px;
+  background: #07080c;
+}
+.s-evm .bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 10px 10px;
+  border-bottom: 1px solid var(--xh-line);
+}
+.s-evm .tabs {
+  display: flex;
+  gap: 4px;
+}
+.s-evm .tabs button {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-family: var(--xh-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--xh-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+}
+.s-evm .tabs button:hover {
+  color: var(--xh-text);
+}
+.s-evm .tabs button.on {
+  color: var(--xh-text);
+  background: rgba(255, 255, 255, 0.07);
+}
+.s-evm .file {
+  font-size: 11.5px;
+  color: var(--xh-dim);
+}
+.s-evm pre {
+  margin: 0;
+  padding: 22px 22px 26px;
+  min-height: 330px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: #d9dee5;
+  overflow-x: auto;
+  white-space: pre;
+  scrollbar-width: thin;
+}
+.s-evm .ln.hidden {
+  visibility: hidden;
+}
+.s-evm .ln.out {
+  color: var(--xh-muted);
+}
+.s-evm .ps {
+  color: var(--xh-dim);
+  user-select: none;
+}
+.s-evm .t-c {
+  color: var(--xh-dim);
+}
+.s-evm .t-d {
+  color: var(--xh-dim);
+}
+.s-evm .t-k {
+  color: #9aa3ae;
+}
+.s-evm .t-s {
+  color: #a9e7dc;
+}
+.s-evm .t-n {
+  color: #ffffff;
+}
+.s-evm .t-v {
+  color: #c9cfd8;
+  font-style: italic;
+}
+.s-evm .t-f {
+  color: #f1f3f6;
+}
+.s-evm .cur {
+  display: inline-block;
+  width: 7px;
+  height: 1.15em;
+  margin-bottom: -0.22em;
+  background: var(--xh-final);
+  opacity: 0.85;
+  animation: evm-blink 1s steps(1) infinite;
+}
+@keyframes evm-blink {
+50% {
+    opacity: 0;
+}
+}
+@media (max-width: 960px) {
+.s-evm .grid {
+    grid-template-columns: minmax(0, 1fr);
+}
+.s-evm pre {
+    font-size: 12px;
+    min-height: 0;
+}
+}

@@ -1,0 +1,25 @@
+/* Landing page frame. Section styles live next to each section. */
+
+.xh {
+  position: relative;
+  background: var(--xh-bg);
+  overflow-x: clip;
+  /* slide under the translucent sticky header */
+  margin-top: calc(var(--xh-header-h) * -1);
+}
+
+.xh-section {
+  position: relative;
+  padding: clamp(104px, 13vw, 176px) 0;
+}
+
+.xh-section + .xh-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: min(var(--xh-max), calc(100% - var(--xh-gutter) * 2));
+  transform: translateX(-50%);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--xh-line-2) 20%, var(--xh-line-2) 80%, transparent);
+}

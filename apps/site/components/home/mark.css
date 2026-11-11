@@ -1,0 +1,75 @@
+.xmark {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.xmark.is-anim {
+  animation: xm-in 1.8s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transform-origin: 50% 50%;
+}
+.xmark.is-anim .m-fill {
+  opacity: 0;
+  animation: xm-fade 1.1s ease 1.05s forwards;
+}
+.xmark.is-anim .m-line path {
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  animation:
+    xm-draw 1.25s cubic-bezier(0.65, 0, 0.35, 1) calc(0.12s + var(--i) * 0.12s) forwards,
+    xm-fadeout 0.8s ease 1.75s forwards;
+}
+.xmark .m-sheen {
+  transform: translateX(0);
+  animation: xm-sweep 9s cubic-bezier(0.65, 0, 0.35, 1) 1.7s infinite;
+}
+.xmark .m-sheen.is-paused {
+  animation-play-state: paused;
+}
+
+@keyframes xm-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes xm-fade {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes xm-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes xm-fadeout {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes xm-sweep {
+  0% {
+    transform: translateX(0);
+  }
+  16%,
+  100% {
+    transform: translateX(118px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xmark.is-anim,
+  .xmark.is-anim .m-fill {
+    animation: none;
+    opacity: 1;
+  }
+  .xmark .m-line,
+  .xmark .m-sheen {
+    display: none;
+  }
+}

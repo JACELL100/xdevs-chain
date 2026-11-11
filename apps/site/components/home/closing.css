@@ -1,0 +1,34 @@
+.s-close.closing {
+  text-align: center;
+  overflow: hidden;
+}
+.s-close.closing::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -40%;
+  width: min(1100px, 140%);
+  aspect-ratio: 2 / 1;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse at center, rgba(190, 205, 225, 0.08), transparent 65%);
+  pointer-events: none;
+}
+.s-close .inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.s-close .mark {
+  width: 64px;
+  margin-bottom: 36px;
+}
+.s-close .xh-lede {
+  margin-left: auto;
+  margin-right: auto;
+}
+.s-close .xh-ctas {
+  justify-content: center;
+  margin-top: 36px;
+}

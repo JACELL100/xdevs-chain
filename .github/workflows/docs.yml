@@ -1,9 +1,8 @@
 name: docs
 
-# Builds the VitePress docs site and landing page (apps/docs) on every PR and push to main
-# that touches it (`vitepress build` fails on dead internal links, so this is also the link
-# check), and deploys main to Cloudflare Pages: project `xdevs-chain-docs`, served at
-# https://xdevschain.xdevs.in.
+# Builds the website (landing page + docs, a static Next.js export in apps/site) on every
+# PR and push to main that touches it, and deploys main to Cloudflare Pages: project
+# `xdevs-chain-docs`, served at https://xdevschain.xdevs.in.
 #
 # Needs the repository secret CLOUDFLARE_API_TOKEN (Pages: Edit) and the repository
 # variable CLOUDFLARE_ACCOUNT_ID.
@@ -11,9 +10,9 @@ name: docs
 on:
   push:
     branches: [main]
-    paths: ["apps/docs/**", ".github/workflows/docs.yml"]
+    paths: ["apps/site/**", ".github/workflows/docs.yml"]
   pull_request:
-    paths: ["apps/docs/**", ".github/workflows/docs.yml"]
+    paths: ["apps/site/**", ".github/workflows/docs.yml"]
   workflow_dispatch:
 
 permissions:
@@ -29,20 +28,20 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: apps/docs
+        working-directory: apps/site
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: apps/docs/package-lock.json
+          cache-dependency-path: apps/site/package-lock.json
       - run: npm ci
-      - run: npm run docs:build
+      - run: npm run build
       - uses: actions/upload-artifact@v4
         with:
           name: docs-site
-          path: apps/docs/.vitepress/dist
+          path: apps/site/out
           retention-days: 7
 
   deploy:

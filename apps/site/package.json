@@ -1,0 +1,42 @@
+{
+  "name": "@xdevs/site",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Landing page and documentation for xDEVS Chain (https://xdevschain.xdevs.in). Next.js static export.",
+  "license": "Apache-2.0",
+  "author": "THE xDEVS",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "postbuild": "node lib/docs/build-search.mjs",
+    "start": "npx serve out -l 4173"
+  },
+  "dependencies": {
+    "@shikijs/rehype": "4.6.0",
+    "hast-util-to-jsx-runtime": "2.3.6",
+    "hast-util-to-string": "3.0.1",
+    "mdast-util-to-string": "4.0.0",
+    "next": "16.4.6",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "rehype-raw": "7.0.0",
+    "remark-directive": "4.0.0",
+    "remark-gfm": "4.0.1",
+    "remark-parse": "11.0.0",
+    "remark-rehype": "11.1.2",
+    "shiki": "4.6.0",
+    "unified": "11.0.5",
+    "unist-util-visit": "5.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "pagefind": "1.5.2",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=20.9"
+  }
+}

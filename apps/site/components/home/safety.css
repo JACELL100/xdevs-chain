@@ -1,0 +1,225 @@
+.s-safe .head {
+  margin-bottom: clamp(48px, 6vw, 72px);
+}
+.s-safe .cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.s-safe .card {
+  display: flex;
+  flex-direction: column;
+  padding: clamp(24px, 3vw, 40px);
+}
+.s-safe .card-copy .xh-body {
+  margin-top: 12px;
+  max-width: 44ch;
+}
+.s-safe .widget {
+  margin: 32px 0 28px;
+  padding: 20px;
+  border-radius: 16px;
+  border: 1px solid var(--xh-line);
+  background: rgba(0, 0, 0, 0.25);
+}
+.s-safe .more {
+  margin-top: auto;
+  align-self: flex-start;
+}
+.s-safe .rows {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+.s-safe .rows > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+}
+.s-safe .rows dt {
+  color: var(--xh-dim);
+  font-family: var(--xh-mono);
+  font-size: 12px;
+}
+.s-safe .rows dd {
+  margin: 0;
+  color: var(--xh-text-2);
+  display: grid;
+  justify-items: end;
+  font-size: 12.5px;
+}
+.s-safe .rows dd > span {
+  grid-area: 1 / 1;
+  transition: opacity 0.35s var(--xh-ease);
+}
+.s-safe .tag {
+  color: var(--xh-dim);
+}
+.s-safe .amt-zero,
+.s-safe .exp-zero,
+.s-safe .o-zero {
+  opacity: 0;
+}
+.s-safe .exp-zero {
+  color: var(--xh-final);
+}
+.s-safe .is-expired .amt-live,
+.s-safe .is-expired .exp-live,
+.s-safe .is-expired .o-live {
+  opacity: 0;
+}
+.s-safe .is-expired .amt-zero,
+.s-safe .is-expired .exp-zero,
+.s-safe .is-expired .o-zero {
+  opacity: 1;
+}
+.s-safe .drain {
+  margin: 18px 0 16px;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+.s-safe .drain span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8d95a0, #eef1f5);
+  transform-origin: left;
+  transform: scaleX(1);
+}
+.s-safe .is-reset .drain span {
+  transform: scaleX(1);
+  transition: transform 0.6s var(--xh-ease);
+}
+.s-safe .is-run .drain span {
+  transform: scaleX(0);
+  transition: transform 5.2s linear;
+}
+.s-safe .is-expired .drain span {
+  transform: scaleX(0);
+}
+.s-safe .console {
+  display: grid;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--xh-dim);
+}
+.s-safe .console i {
+  font-style: normal;
+  color: var(--xh-muted);
+  margin-right: 4px;
+}
+.s-safe .console .out {
+  display: grid;
+  padding-left: 14px;
+  color: var(--xh-text-2);
+}
+.s-safe .console .out > span {
+  grid-area: 1 / 1;
+  transition: opacity 0.35s;
+}
+.s-safe .console .err {
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.4s var(--xh-ease) 0.2s, transform 0.4s var(--xh-ease) 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.s-safe .console .err b {
+  font-weight: 400;
+  color: var(--xh-text-2);
+}
+.s-safe .is-expired .console .err {
+  opacity: 1;
+  transform: none;
+}
+.s-safe .taken {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--xh-muted);
+}
+.s-safe .taken li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.s-safe .taken .xh-chip {
+  height: 20px;
+  font-size: 10.5px;
+  color: var(--xh-dim);
+  border-color: var(--xh-line);
+}
+.s-safe .field {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--xh-line-2);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 15px;
+}
+.s-safe .q {
+  color: var(--xh-text);
+  white-space: pre;
+}
+.s-safe .suffix {
+  color: var(--xh-dim);
+}
+.s-safe .caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.1em;
+  margin: 0 1px -0.18em;
+  background: var(--xh-text);
+  animation: safe-caret 1s steps(1) infinite;
+}
+@keyframes safe-caret {
+50% {
+    opacity: 0;
+}
+}
+.s-safe .verdict {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: center;
+  margin-top: 14px;
+  min-height: 42px;
+  color: var(--xh-alert);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.35s var(--xh-ease), transform 0.35s var(--xh-ease);
+}
+.s-safe .verdict.show {
+  opacity: 1;
+  transform: none;
+}
+.s-safe .verdict.ok {
+  color: var(--xh-final);
+}
+.s-safe .verdict svg {
+  width: 15px;
+  height: 15px;
+}
+.s-safe .v-why {
+  font-size: 14px;
+  font-weight: 500;
+}
+.s-safe .v-detail {
+  grid-column: 2;
+  font-size: 11.5px;
+  color: var(--xh-dim);
+}
+@media (max-width: 900px) {
+.s-safe .cols {
+    grid-template-columns: minmax(0, 1fr);
+}
+}

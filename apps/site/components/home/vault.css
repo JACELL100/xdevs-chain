@@ -1,0 +1,477 @@
+.vault {
+  padding-bottom: clamp(72px, 9vw, 120px);
+}
+.vault .intro {
+  margin-bottom: clamp(24px, 4vw, 48px);
+}
+.vault .track {
+  position: relative;
+  height: 420vh;
+}
+.vault .sticky {
+  --p: 0;
+  --left: 1;
+  position: sticky;
+  top: var(--xh-header-h);
+  height: calc(100vh - var(--xh-header-h));
+  height: calc(100svh - var(--xh-header-h));
+  display: flex;
+  align-items: center;
+}
+.vault .grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: clamp(32px, 6vw, 96px);
+  align-items: center;
+}
+.vault .steps {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 28px;
+  display: grid;
+  gap: 30px;
+}
+.vault .steps li {
+  opacity: 0.28;
+  transition: opacity 0.5s var(--xh-ease);
+}
+.vault .steps li.on {
+  opacity: 1;
+}
+.vault .st-t {
+  display: block;
+  font-size: 12px;
+  color: var(--xh-muted);
+  margin-bottom: 8px;
+}
+.vault .st-t i {
+  font-style: normal;
+  color: var(--xh-dim);
+}
+.vault .steps h3 {
+  margin: 0;
+  font-size: clamp(20px, 1.9vw, 26px);
+  line-height: 1.15;
+  font-weight: 560;
+  letter-spacing: -0.025em;
+  color: var(--xh-text);
+}
+.vault .steps p {
+  margin: 8px 0 0;
+  max-width: 38ch;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--xh-muted);
+}
+.vault .rail {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--xh-line-2);
+}
+.vault .rail-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, #fff, var(--xh-final));
+  transform-origin: top;
+  transform: scaleY(var(--p));
+}
+.vault .device {
+  padding: 22px;
+  border-radius: 26px;
+  max-width: 520px;
+  width: 100%;
+  justify-self: end;
+}
+.vault .dv-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.vault .avatar,
+.vault .g-av {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(160deg, #2a2f38, #14171d);
+  border: 1px solid var(--xh-line-2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--xh-text-2);
+  flex: none;
+}
+.vault .who {
+  display: grid;
+  line-height: 1.25;
+}
+.vault .who b {
+  font-weight: 560;
+  font-size: 14.5px;
+}
+.vault .who span {
+  font-size: 11.5px;
+  color: var(--xh-dim);
+}
+.vault .vault-chip {
+  margin-left: auto;
+  color: var(--xh-final);
+  border-color: rgba(79, 227, 207, 0.3);
+}
+.vault .dv-balance {
+  display: grid;
+  gap: 2px;
+  margin: 26px 0 22px;
+  position: relative;
+}
+.vault .cap {
+  font-size: 12.5px;
+  color: var(--xh-dim);
+}
+.vault .amt {
+  font-size: clamp(34px, 3.6vw, 46px);
+  font-weight: 560;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+.vault .dec {
+  color: var(--xh-dim);
+}
+.vault .unit {
+  font-size: 0.42em;
+  letter-spacing: 0;
+  color: var(--xh-muted);
+  font-weight: 500;
+}
+.vault .safe {
+  position: absolute;
+  right: 0;
+  bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--xh-final);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.5s var(--xh-ease), transform 0.5s var(--xh-ease);
+}
+.vault .safe svg {
+  width: 14px;
+  height: 14px;
+}
+.vault .safe.show {
+  opacity: 1;
+  transform: none;
+}
+.vault .tx {
+  border: 1px solid var(--xh-line-2);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.018);
+  padding: 16px;
+  transition: border-color 0.5s var(--xh-ease), background-color 0.5s;
+}
+.vault .tx.s0 {
+  border-color: rgba(255, 122, 102, 0.4);
+  background: rgba(255, 122, 102, 0.035);
+}
+.vault .tx.s3 {
+  border-color: rgba(79, 227, 207, 0.28);
+}
+.vault .tx-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.vault .tx-ico {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--xh-line-2);
+  color: var(--xh-text-2);
+  flex: none;
+}
+.vault .tx-ico svg {
+  width: 14px;
+  height: 14px;
+}
+.vault .tx-main {
+  display: grid;
+  min-width: 0;
+  line-height: 1.3;
+}
+.vault .tx-main b {
+  font-weight: 560;
+  font-size: 15px;
+  position: relative;
+  width: fit-content;
+}
+.vault .tx-main b::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 55%;
+  height: 1.5px;
+  background: var(--xh-text-2);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.6s var(--xh-ease);
+}
+.vault .s3 .tx-main b {
+  color: var(--xh-muted);
+}
+.vault .s3 .tx-main b::after {
+  transform: scaleX(1);
+}
+.vault .tx-main > span {
+  font-size: 11.5px;
+  color: var(--xh-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vault .tx-state {
+  margin-left: auto;
+  display: grid;
+  justify-items: end;
+}
+.vault .tx-state .st {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.35s var(--xh-ease), transform 0.35s var(--xh-ease);
+}
+.vault .s0 .st0,
+.vault .s1 .st1,
+.vault .s2 .st1,
+.vault .s3 .st3 {
+  opacity: 1;
+  transform: none;
+}
+.vault .window,
+.vault .guards {
+  opacity: 0.22;
+  transition: opacity 0.5s var(--xh-ease);
+}
+.vault .tx.s1 .window,
+.vault .tx.s2 .window,
+.vault .tx.s3 .window,
+.vault .tx.s2 .guards,
+.vault .tx.s3 .guards {
+  opacity: 1;
+}
+.vault .win-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--xh-dim);
+}
+.vault .win-meta b {
+  color: var(--xh-text);
+  font-weight: 500;
+}
+.vault .s3 .win-meta b {
+  color: var(--xh-dim);
+  text-decoration: line-through;
+}
+.vault .bar {
+  margin-top: 10px;
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.vault .bar-fill {
+  display: block;
+  height: 100%;
+  background: #dfe3e8;
+  transform-origin: left;
+  transform: scaleX(var(--left));
+  transition: background-color 0.4s;
+}
+.vault .s3 .bar-fill {
+  background: var(--xh-dim);
+}
+.vault .guards {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--xh-line);
+}
+.vault .g-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--xh-dim);
+  margin-bottom: 10px;
+}
+.vault .g-head b {
+  color: var(--xh-text);
+  font-weight: 500;
+}
+.vault .guards ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.vault .guards li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--xh-text-2);
+}
+.vault .g-av {
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+  transition: border-color 0.4s, color 0.4s;
+}
+.vault .g-s {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--xh-dim);
+  transition: color 0.3s;
+}
+.vault .guards li.voted .g-av {
+  border-color: rgba(79, 227, 207, 0.6);
+  color: var(--xh-final);
+}
+.vault .guards li.voted .g-s {
+  color: var(--xh-final);
+}
+.vault .off-try {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px dashed var(--xh-line-2);
+  font-size: 12.5px;
+  color: var(--xh-muted);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.5s var(--xh-ease) 0.15s, transform 0.5s var(--xh-ease) 0.15s;
+}
+.vault .off-try.show {
+  opacity: 1;
+  transform: none;
+}
+.vault .after {
+  margin-top: clamp(40px, 6vw, 72px);
+}
+.vault .after .xh-body {
+  max-width: 62ch;
+}
+.vault .track.is-static {
+  height: auto;
+}
+.vault .track.is-static .sticky {
+  position: static;
+  height: auto;
+  padding: 24px 0;
+}
+@media (max-width: 900px) {
+.vault .track {
+    height: 380vh;
+}
+.vault .grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+    align-content: center;
+}
+.vault .device {
+    order: -1;
+    justify-self: center;
+    padding: 16px;
+    border-radius: 22px;
+}
+.vault .dv-balance {
+    margin: 16px 0 14px;
+}
+.vault .amt {
+    font-size: 32px;
+}
+.vault .tx {
+    padding: 12px;
+}
+.vault .guards ul {
+    gap: 6px;
+}
+.vault .off-try {
+    padding: 10px 14px;
+    margin-top: 10px;
+}
+.vault .steps {
+    padding-left: 0;
+    display: grid;
+    min-height: 132px;
+}
+.vault .steps li {
+    grid-area: 1 / 1;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.4s var(--xh-ease), transform 0.4s var(--xh-ease);
+}
+.vault .steps li.on {
+    opacity: 1;
+    transform: none;
+}
+.vault .steps h3 {
+    font-size: 21px;
+}
+.vault .steps p {
+    font-size: 15px;
+}
+.vault .rail {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: -14px;
+    width: auto;
+    height: 1px;
+}
+.vault .rail-fill {
+    transform-origin: left;
+    transform: scaleX(var(--p));
+}
+.vault .track.is-static .steps {
+    min-height: 0;
+    gap: 24px;
+}
+.vault .track.is-static .steps li {
+    grid-area: auto;
+}
+}
+@media (max-width: 900px) and (max-height: 760px) {
+.vault .dv-top .who span,
+.vault .win-why {
+    display: none;
+}
+.vault .guards li:nth-child(3) {
+    display: none;
+}
+.vault .steps p {
+    font-size: 14px;
+}
+}
+@media (max-width: 480px) {
+  .vault .off-try {
+    font-size: 11px;
+  }
+  .vault .win-why {
+    display: none;
+  }
+}

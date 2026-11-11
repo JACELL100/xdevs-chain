@@ -31,7 +31,7 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: npm
-    directories: ["/sdk/ts", "/apps/faucet", "/apps/docs"]
+    directories: ["/sdk/ts", "/apps/faucet", "/apps/site"]
     schedule:
       interval: weekly
     ignore:
