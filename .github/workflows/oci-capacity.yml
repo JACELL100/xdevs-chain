@@ -51,6 +51,10 @@ jobs:
         env:
           OCI_SSH_PUBKEY: ${{ vars.OCI_SSH_PUBKEY }}
           OCI_MAX_MINUTES: "18"
+          # Always Free Ampere A1 is 2 OCPU / 12 GB per tenancy in total (Oracle docs, 2026):
+          # two validators get 1 OCPU / 6 GB each.
+          OCI_OCPUS: "1"
+          OCI_MEMORY_GB: "6"
           # Oracle answered every other request with 429 at 60 s; 120 s keeps each one useful.
           OCI_INTERVAL_SECS: "120"
         run: |

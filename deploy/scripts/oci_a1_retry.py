@@ -8,8 +8,8 @@ name counts as done. Used by .github/workflows/oci-capacity.yml; also runnable l
 Configuration (environment variables):
   OCI_CONFIG_FILE   OCI config file (default ~/.oci/config)
   OCI_NAMES         comma-separated instance names (default "xdevs-val-3,xdevs-val-4")
-  OCI_OCPUS         OCPUs per instance (default 2)
-  OCI_MEMORY_GB     memory per instance in GB (default 12)
+  OCI_OCPUS         OCPUs per instance (default 1; Always Free A1 is 2 OCPU / 12 GB in total)
+  OCI_MEMORY_GB     memory per instance in GB (default 6)
   OCI_VCN_NAME      VCN whose public subnet is used (default "xdevs-vcn")
   OCI_SSH_PUBKEY    SSH public key (default: contents of ~/.ssh/xdevs_oracle.pub)
   OCI_MAX_MINUTES   stop after this many minutes (default 0 = no limit)
@@ -41,8 +41,8 @@ def log(msg: str) -> None:
 
 def main() -> int:
     names = [n.strip() for n in env("OCI_NAMES", "xdevs-val-3,xdevs-val-4").split(",") if n.strip()]
-    ocpus = float(env("OCI_OCPUS", "2"))
-    memory = float(env("OCI_MEMORY_GB", "12"))
+    ocpus = float(env("OCI_OCPUS", "1"))
+    memory = float(env("OCI_MEMORY_GB", "6"))
     interval = int(env("OCI_INTERVAL_SECS", "60"))
     max_minutes = float(env("OCI_MAX_MINUTES", "0"))
     ssh_key = os.environ.get("OCI_SSH_PUBKEY") or (Path.home() / ".ssh" / "xdevs_oracle.pub").read_text()
