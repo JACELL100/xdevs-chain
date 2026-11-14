@@ -4,7 +4,7 @@
 # the Ansible playbooks; also handy from a laptop against the public endpoint.
 #
 #   check-health.sh                                         # local node, 127.0.0.1:8545
-#   check-health.sh --rpc https://xdevschain-rpc.xdevs.in --chain-id 717171 --min-peers 0
+#   check-health.sh --rpc https://rpc.xdevschain.tech --chain-id 717171 --min-peers 0
 #   check-health.sh --ref-rpc http://10.0.1.12:8545 --max-lag 5   # compare with another node
 #
 # Checks: RPC answers; chain id (--chain-id); head advances within --wait s; net_peerCount

@@ -280,13 +280,13 @@ test('HTTP behaviour: CORS preflight, HEAD, 405, 404, rate limit', async () => {
   assert.equal(rl.take('a').ok, true, 'refills at rps')
   assert.equal(rl.take('a').retryAfter, 1)
 
-  const strict = createApiServer({ db, rpc: chain, cfg: { ...cfg(), rateLimitRps: 1, rateLimitBurst: 2, corsOrigins: ['https://xdevschain-explorer.xdevs.in'] }, now: () => NOW, log: silent })
+  const strict = createApiServer({ db, rpc: chain, cfg: { ...cfg(), rateLimitRps: 1, rateLimitBurst: 2, corsOrigins: ['https://explorer.xdevschain.tech'] }, now: () => NOW, log: silent })
   await new Promise<void>((r) => strict.listen(0, '127.0.0.1', () => r()))
   const url = `http://127.0.0.1:${(strict.address() as AddressInfo).port}/health`
   const codes = []
   for (let i = 0; i < 3; i++) codes.push((await fetch(url, { headers: { origin: 'https://evil.example' } })).status)
   assert.deepEqual(codes, [200, 200, 429])
-  const ok = await fetch(url, { headers: { origin: 'https://xdevschain-explorer.xdevs.in' } })
+  const ok = await fetch(url, { headers: { origin: 'https://explorer.xdevschain.tech' } })
   assert.equal(ok.headers.get('retry-after'), '1')
   const r = await fetch(url, { headers: { origin: 'https://evil.example' } })
   assert.equal(r.headers.get('access-control-allow-origin'), null)

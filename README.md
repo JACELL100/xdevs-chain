@@ -1,6 +1,6 @@
 # xDEVS Chain
 
-**Website:** [xdevschain.xdevs.in](https://xdevschain.xdevs.in) (coming soon) · **Built by [THE xDEVS](https://xdevs.in)**
+**Website:** [xdevschain.tech](https://xdevschain.tech) (coming soon) · **Built by [THE xDEVS](https://xdevs.in)**
 
 xDEVS Chain is an EVM-equivalent, Proof-of-Stake Layer 1 written in Rust, built around one idea: **protecting users at the protocol level** from scams, lost keys, front-running and drained wallets. It runs on `revm` and `alloy`, so Ethereum tooling (MetaMask, Foundry, Hardhat, viem, ethers) works unchanged.
 
@@ -107,17 +107,17 @@ deploy/            dev genesis, systemd unit, local Docker setup
 
 ## Public endpoints (planned)
 
-These are not live yet. They will be announced on [xdevschain.xdevs.in](https://xdevschain.xdevs.in) when the public testnet launches.
+These are not live yet. They will be announced on [xdevschain.tech](https://xdevschain.tech) when the public testnet launches.
 
 | Service | URL |
 |---|---|
-| Website and docs | `https://xdevschain.xdevs.in` |
-| Testnet JSON-RPC | `https://xdevschain-rpc.xdevs.in` |
-| Testnet WebSocket | `wss://xdevschain-ws.xdevs.in` |
-| Block explorer | `https://xdevschain-explorer.xdevs.in` |
-| Faucet | `https://xdevschain-faucet.xdevs.in` |
+| Website and docs | `https://xdevschain.tech` |
+| Testnet JSON-RPC | `https://rpc.xdevschain.tech` |
+| Testnet WebSocket | `wss://ws.xdevschain.tech` |
+| Block explorer | `https://explorer.xdevschain.tech` |
+| Faucet | `https://faucet.xdevschain.tech` |
 
-Service hosts use one subdomain level (`xdevschain-*.xdevs.in`) so they are covered by Cloudflare's free certificate for `*.xdevs.in`. The testnet chain id will be published here once it is registered on [chainlist](https://chainlist.org).
+Service hosts use one subdomain level (`*.xdevschain.tech`) so they are covered by Cloudflare's free certificate for the domain. The testnet chain id will be published here once it is registered on [chainlist](https://chainlist.org).
 
 ## Quickstart (local dev chain)
 

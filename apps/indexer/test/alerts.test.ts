@@ -13,7 +13,7 @@ const payload: AlertPayload = {
   timestamp: 1_800_000_000,
   verified: true,
   details: { id: '0x1', target: '0xb0b0000000000000000000000000000000000002', value: '0x1', valueFormatted: '5000 tXDS', executeAfter: 1_800_086_400 },
-  explorerUrl: 'https://xdevschain-explorer.xdevs.in/address/0xacc0000000000000000000000000000000000004',
+  explorerUrl: 'https://explorer.xdevschain.tech/address/0xacc0000000000000000000000000000000000004',
 }
 
 test('alert text is plain and actionable', () => {
@@ -22,7 +22,7 @@ test('alert text is plain and actionable', () => {
   assert.match(text, /5000 tXDS to 0xb0b0/)
   assert.match(text, /2027-01-16 08:00:00 UTC|UTC/)
   assert.match(text, /cancel it now/)
-  assert.match(text, /xdevschain-explorer/)
+  assert.match(text, /explorer.xdevschain.tech/)
   assert.match(formatAlertText({ ...payload, type: 'account.frozen', verified: false, details: { frozenUntil: 1_800_000_000 } }), /FROZEN[\s\S]*not a verified/)
 })
 

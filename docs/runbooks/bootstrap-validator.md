@@ -21,7 +21,7 @@ There are two cases:
 - [ ] VCN security list updated from
       [`oci/security-list-ingress.example.json`](../../deploy/ansible/oci/security-list-ingress.example.json).
       This is Oracle's **second** firewall; Ansible configures the OS one.
-- [ ] DNS-only A record `xdevschain-valN.xdevs.in` -> public IP
+- [ ] DNS-only A record `valN.xdevschain.tech` -> public IP
       ([dns-records.md](../../deploy/cloudflare/dns-records.md)).
 - [ ] A workstation with `ansible-core` 2.18, `xdevs-cli` from the same release, and an
       encrypted disk or live USB for key generation.

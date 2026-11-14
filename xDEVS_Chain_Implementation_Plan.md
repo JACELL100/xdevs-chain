@@ -1207,7 +1207,7 @@ Bridged tokens deployed via a **canonical token factory** to avoid fake "USDC" c
 | Reference wallet | Next.js + WebAuthn | 4 | Passkey accounts, vault policies, simulation previews, approvals manager |
 | Explorer | Next.js + indexer + Postgres | 3 | Blocks, txs, accounts, tokens, validators, vault queues, spam filtering |
 | Faucet | Cloudflare Worker + Turnstile | 3 | |
-| Docs site | Static Next.js export (apps/site) on Cloudflare Pages, xdevschain.xdevs.in | 3 | Quickstarts: add network, deploy contract, run validator |
+| Docs site | Static Next.js export (apps/site) on Cloudflare Pages, xdevschain.tech | 3 | Quickstarts: add network, deploy contract, run validator |
 | Hardhat/Foundry configs | — | 3 | Sample `foundry.toml` + `hardhat.config.ts` network entries |
 | Status page | UptimeRobot public status page | 3 | |
 

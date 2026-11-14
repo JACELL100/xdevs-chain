@@ -66,7 +66,7 @@ explained in [deploy/ansible/README.md](../../deploy/ansible/README.md#oracle-ha
 - **E2.1.Micro has 1 GB RAM**. `roles/common` adds a 2 GB swap file on hosts under 2 GB. Keep
   the bootnode's mempool small (`group_vars/bootnodes.yml`).
 - **Public IPs**: an ephemeral public IP is released when the instance is terminated (and can
-  change on some stop/start paths). Nodes dial `/dns4/xdevschain-*.xdevs.in`, so an IP change is
+  change on some stop/start paths). Nodes dial `/dns4/*.xdevschain.tech`, so an IP change is
   one DNS edit plus `hosts.yml`. Reserved public IPs avoid this, if your free quota has them.
 - **Private IPs** are stable for the life of the VNIC. Validators peer over them. If you
   re-create an instance, update `private_ip` and re-run `site.yml`.

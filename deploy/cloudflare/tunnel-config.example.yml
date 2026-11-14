@@ -3,8 +3,8 @@
 # deploy/ansible/roles/cloudflared/templates/config.yml.j2 from vault values.
 #
 # Changes from §33.5:
-#   - one-level hostnames xdevschain-rpc / xdevschain-ws .xdevs.in, which the free Universal SSL
-#     certificate (*.xdevs.in) covers; rpc.testnet.<domain> would need a paid certificate;
+#   - one-level hostnames rpc / ws .xdevschain.tech, which the free Universal SSL
+#     certificate (*.xdevschain.tech) covers; rpc.testnet.<domain> would need a paid certificate;
 #   - WS goes to the node's separate [rpc] ws listener (127.0.0.1:8546);
 #   - metrics on localhost, auto-update off (upgrades go through apt / Ansible).
 tunnel: 00000000-0000-0000-0000-000000000000          # vault_cloudflared_tunnel_id
@@ -19,9 +19,9 @@ originRequest:
   keepAliveTimeout: 90s
 
 ingress:
-  - hostname: xdevschain-rpc.xdevs.in
+  - hostname: rpc.xdevschain.tech
     service: http://127.0.0.1:8545
-  - hostname: xdevschain-ws.xdevs.in
+  - hostname: ws.xdevschain.tech
     service: http://127.0.0.1:8546
     originRequest:
       keepAliveTimeout: 10m

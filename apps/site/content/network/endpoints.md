@@ -8,14 +8,14 @@
 
 | Service | URL | Status |
 |---|---|---|
-| Website and docs | `https://xdevschain.xdevs.in` | This site |
-| JSON-RPC (HTTPS) | `https://xdevschain-rpc.xdevs.in` | <span class="status next">Coming soon</span> |
-| WebSocket | `wss://xdevschain-ws.xdevs.in` | <span class="status next">Coming soon</span> |
-| Block explorer | `https://xdevschain-explorer.xdevs.in` | <span class="status next">Coming soon</span> |
-| Faucet | `https://xdevschain-faucet.xdevs.in` | <span class="status next">Coming soon</span> |
+| Website and docs | `https://xdevschain.tech` | This site |
+| JSON-RPC (HTTPS) | `https://rpc.xdevschain.tech` | <span class="status next">Coming soon</span> |
+| WebSocket | `wss://ws.xdevschain.tech` | <span class="status next">Coming soon</span> |
+| Block explorer | `https://explorer.xdevschain.tech` | <span class="status next">Coming soon</span> |
+| Faucet | `https://faucet.xdevschain.tech` | <span class="status next">Coming soon</span> |
 | Chain id | To be announced | <span class="status next">Coming soon</span> |
 
-Service hosts use one subdomain level (`xdevschain-*.xdevs.in`) so they are covered by a single wildcard certificate for `*.xdevs.in`.
+Service hosts use one subdomain level (`*.xdevschain.tech`) so they are covered by a single wildcard certificate for the domain.
 
 When the testnet launches, the chain id will be published here and registered on [chainlist](https://chainlist.org), and this page will have an **Add to MetaMask** button.
 

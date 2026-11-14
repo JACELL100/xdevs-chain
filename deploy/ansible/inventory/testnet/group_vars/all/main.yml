@@ -59,7 +59,7 @@ snapshot_access_key_id: "{{ vault_oci_s3_access_key_id }}"
 snapshot_secret_access_key: "{{ vault_oci_s3_secret_access_key }}"
 
 # ---- public endpoints (roles/cloudflared, docs) -------------------------------------------
-xdevs_public_rpc_hostname: xdevschain-rpc.xdevs.in
-xdevs_public_ws_hostname: xdevschain-ws.xdevs.in
+xdevs_public_rpc_hostname: rpc.xdevschain.tech
+xdevs_public_ws_hostname: ws.xdevschain.tech
 cloudflared_tunnel_id: "{{ vault_cloudflared_tunnel_id }}"
 cloudflared_credentials_json: "{{ vault_cloudflared_credentials_json }}"

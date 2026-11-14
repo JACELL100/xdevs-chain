@@ -13,7 +13,7 @@ v0.9 bundler). Tests: `apps/wallet/test/`, `apps/bundler/test/`.
 
 | Piece | Role | Production-ready? |
 |---|---|---|
-| `apps/wallet` | Static SPA: passkey sign-up, send, Guardian Vault, approvals, guardian tools, EIP-7702 / EOA lock | Reference / testnet. Planned host: Cloudflare Pages (`xdevschain-wallet.xdevs.in`), with a real bundler |
+| `apps/wallet` | Static SPA: passkey sign-up, send, Guardian Vault, approvals, guardian tools, EIP-7702 / EOA lock | Reference / testnet. Planned host: Cloudflare Pages (`wallet.xdevschain.tech`), with a real bundler |
 | `apps/wallet/src/lib` | Framework-free logic (also used by the Node tests): UserOp encoding, WebAuthn encoding, account state, vault outcome, preview, recipient checks, approvals, 7702 | — |
 | `apps/bundler` | Single-operator ERC-4337 v0.9 bundler for dev chains | **No** (dev only, see §8) |
 | `@xdevs/sdk` (`sdk/ts`, linked with `file:`) | `xdevs_*` RPC actions, XNS normalization / namehash, look-alike helpers | — |

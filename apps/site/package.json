@@ -2,7 +2,7 @@
   "name": "@xdevs/site",
   "version": "0.2.0",
   "private": true,
-  "description": "Landing page and documentation for xDEVS Chain (https://xdevschain.xdevs.in). Next.js static export.",
+  "description": "Landing page and documentation for xDEVS Chain (https://xdevschain.tech). Next.js static export.",
   "license": "Apache-2.0",
   "author": "THE xDEVS",
   "type": "module",

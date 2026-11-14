@@ -121,7 +121,7 @@ when idle would stop indexing and alerting. Honest options:
 
 1. **On the machine that runs the public RPC node** (the home PC behind the Cloudflare Tunnel, plan §24.2). The
    indexer then reads the node on `127.0.0.1` with no public RPC limits, and the API is published through the same
-   tunnel (for example `xdevschain-explorer-api.xdevs.in` → `127.0.0.1:8080`). Uptime is the home machine's uptime.
+   tunnel (for example `explorer-api.xdevschain.tech` → `127.0.0.1:8080`). Uptime is the home machine's uptime.
 2. **An Oracle Cloud Always Free VM** (the Ampere A1 shape or an AMD micro; see
    [docs/runbooks/oracle-always-free.md](../../docs/runbooks/oracle-always-free.md)). Point `RPC_URL` at a validator or
    full node over the private network. Keep `MODE=all` on a 1 GB micro VM; Node uses about 100–150 MB.

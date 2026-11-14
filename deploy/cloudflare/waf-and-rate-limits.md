@@ -1,7 +1,7 @@
 # WAF and rate limiting for the public RPC
 
 Plan §19.3: a read-only public endpoint, rate-limited at Cloudflare, with the node's own caps
-as the second layer. These rules apply to `xdevschain-rpc.xdevs.in` and `xdevschain-ws.xdevs.in`
+as the second layer. These rules apply to `rpc.xdevschain.tech` and `ws.xdevschain.tech`
 on the **free plan**. Check the current free-plan quotas in the dashboard. When these notes were
 written, the free plan included 5 WAF custom rules, 1 rate-limiting rule (counted per IP, 10 s
 period), and the Free Managed Ruleset.
@@ -14,7 +14,7 @@ browsers. They cannot solve a JavaScript challenge or a CAPTCHA.
 | Setting | Where | For the RPC hosts |
 |---|---|---|
 | **Bot Fight Mode** | Security -> Bots | **Off.** It is zone-wide on the free plan and cannot be scoped to a host. Leave it off while the zone serves the RPC. |
-| **Browser Integrity Check** | Configuration Rule: `http.host in {"xdevschain-rpc.xdevs.in" "xdevschain-ws.xdevs.in"}` -> Browser Integrity Check **Off** | Off |
+| **Browser Integrity Check** | Configuration Rule: `http.host in {"rpc.xdevschain.tech" "ws.xdevschain.tech"}` -> Browser Integrity Check **Off** | Off |
 | **Security Level / "I'm Under Attack"** | Same Configuration Rule -> Security Level **Essentially Off** (never use Under Attack on these hosts) | Off |
 | **Caching** | Default is fine: POST is never cached. Do not add a "Cache Everything" rule that matches these hosts. | No cache |
 | **Rocket Loader / Auto Minify / Email obfuscation** | They only touch HTML. Leave them off for these hosts anyway. | Off |
@@ -24,21 +24,21 @@ browsers. They cannot solve a JavaScript challenge or a CAPTCHA.
 
 1. **Only JSON-RPC methods on the RPC hosts.** Action: *Block*
    ```text
-   (http.host in {"xdevschain-rpc.xdevs.in" "xdevschain-ws.xdevs.in"})
+   (http.host in {"rpc.xdevschain.tech" "ws.xdevschain.tech"})
    and not (http.request.method in {"POST" "OPTIONS" "GET"})
    ```
    GET stays open because WebSocket upgrades are GET requests.
 2. **WS host: only WebSocket upgrades.** Action: *Block*
    ```text
-   (http.host eq "xdevschain-ws.xdevs.in")
+   (http.host eq "ws.xdevschain.tech")
    and not any(lower(http.request.headers["upgrade"][*])[*] eq "websocket")
    and http.request.method ne "OPTIONS"
    ```
    If your plan rejects this expression, use
-   `(http.host eq "xdevschain-ws.xdevs.in" and http.request.method eq "POST")` instead.
+   `(http.host eq "ws.xdevschain.tech" and http.request.method eq "POST")` instead.
 3. **RPC host: GET only on `/`** (health probes, browsers that open the URL). Action: *Block*
    ```text
-   (http.host eq "xdevschain-rpc.xdevs.in" and http.request.method eq "GET"
+   (http.host eq "rpc.xdevschain.tech" and http.request.method eq "GET"
     and http.request.uri.path ne "/")
    ```
 4. *(Optional)* **Known-abusive ASNs or countries.** Add one only after the logs show abuse.
@@ -51,7 +51,7 @@ real control. Body-matching WAF fields are not available on every plan, so do no
 ## Rate-limiting rule (Security -> WAF -> Rate limiting rules): the free plan has one
 
 ```text
-If incoming requests match:  (http.host in {"xdevschain-rpc.xdevs.in" "xdevschain-ws.xdevs.in"})
+If incoming requests match:  (http.host in {"rpc.xdevschain.tech" "ws.xdevschain.tech"})
 Characteristics:             IP                          (free plan: IP only)
 Period:                      10 seconds                  (free plan: 10 s)
 Requests:                    100                         (= 10 req/s per IP, bursts allowed)

@@ -17,7 +17,7 @@ Work top-down, and stop at the first cause you find. Write down times and findin
 ```bash
 cd deploy/ansible
 ansible validators -b -m command -a "xdevs-check-health --chain-id 717171 --min-peers 2" -o
-deploy/scripts/check-health.sh --rpc https://xdevschain-rpc.xdevs.in --chain-id 717171 --min-peers 0
+deploy/scripts/check-health.sh --rpc https://rpc.xdevschain.tech --chain-id 717171 --min-peers 0
 ```
 
 | What you see | Meaning | Go to |

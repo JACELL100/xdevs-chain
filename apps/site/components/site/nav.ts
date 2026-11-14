@@ -1,6 +1,6 @@
 /** Site-wide constants and the top navigation (same structure as the old VitePress nav). */
 
-export const SITE_URL = 'https://xdevschain.xdevs.in'
+export const SITE_URL = 'https://xdevschain.tech'
 export const SITE_NAME = 'xDEVS Chain'
 export const TAGLINE = 'The chain that has your back'
 export const SITE_DESCRIPTION =

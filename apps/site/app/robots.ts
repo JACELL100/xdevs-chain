@@ -2,7 +2,7 @@ import type { MetadataRoute } from 'next'
 
 export const dynamic = 'force-static'
 
-const SITE = 'https://xdevschain.xdevs.in'
+const SITE = 'https://xdevschain.tech'
 
 export default function robots(): MetadataRoute.Robots {
   return {

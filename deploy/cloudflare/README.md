@@ -1,9 +1,10 @@
-# Cloudflare: xdevs.in for xDEVS Chain
+# Cloudflare: xdevschain.tech for xDEVS Chain
 
-`xdevs.in` is on Cloudflare (free plan). Every public xDEVS Chain host is **one level below
-`xdevs.in`** (`xdevschain-*.xdevs.in`), so the free Universal SSL certificate (`xdevs.in` +
-`*.xdevs.in`) covers it. A name like `rpc.testnet.xdevs.in` would need Advanced Certificate
-Manager (paid).
+`xdevschain.tech` is on Cloudflare (free plan). Every public xDEVS Chain host is **one level below
+`xdevschain.tech`** (`rpc.xdevschain.tech`, `explorer.xdevschain.tech`, ...), so the free Universal
+SSL certificate (`xdevschain.tech` + `*.xdevschain.tech`) covers it. A two-level name like
+`rpc.testnet.xdevschain.tech` would need Advanced Certificate Manager (paid).
+The old website address `xdevschain.xdevs.in` (zone `xdevs.in`) redirects to `https://xdevschain.tech`.
 
 | File | What |
 |---|---|
@@ -14,16 +15,16 @@ Manager (paid).
 ## Public RPC through Cloudflare Tunnel (plan §24.2)
 
 The RPC full node runs on a home machine. It opens **no inbound port**: `cloudflared` keeps an
-outbound connection to Cloudflare, and Cloudflare forwards `xdevschain-rpc` / `xdevschain-ws`
+outbound connection to Cloudflare, and Cloudflare forwards `rpc` / `ws`
 to `127.0.0.1:8545` / `127.0.0.1:8546` on that machine.
 
 One-time setup, from a workstation with `cloudflared` installed:
 
 ```bash
-cloudflared tunnel login                                   # pick the xdevs.in zone
+cloudflared tunnel login                                   # pick the xdevschain.tech zone
 cloudflared tunnel create xdevschain-rpc                   # prints <tunnel-id>, writes ~/.cloudflared/<tunnel-id>.json
-cloudflared tunnel route dns xdevschain-rpc xdevschain-rpc.xdevs.in
-cloudflared tunnel route dns xdevschain-rpc xdevschain-ws.xdevs.in
+cloudflared tunnel route dns xdevschain-rpc rpc.xdevschain.tech
+cloudflared tunnel route dns xdevschain-rpc ws.xdevschain.tech
 ```
 
 1. Put `<tunnel-id>` and the JSON file's content into `vault.yml`
@@ -35,10 +36,10 @@ cloudflared tunnel route dns xdevschain-rpc xdevschain-ws.xdevs.in
    endpoints.
 4. Check:
    ```bash
-   curl -s https://xdevschain-rpc.xdevs.in -H 'content-type: application/json' \
+   curl -s https://rpc.xdevschain.tech -H 'content-type: application/json' \
      --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
-   deploy/scripts/check-health.sh --rpc https://xdevschain-rpc.xdevs.in --chain-id 717171 --min-peers 0
-   websocat wss://xdevschain-ws.xdevs.in   # then: {"jsonrpc":"2.0","id":1,"method":"eth_subscribe","params":["newHeads"]}
+   deploy/scripts/check-health.sh --rpc https://rpc.xdevschain.tech --chain-id 717171 --min-peers 0
+   websocat wss://ws.xdevschain.tech   # then: {"jsonrpc":"2.0","id":1,"method":"eth_subscribe","params":["newHeads"]}
    ```
 
 **Fallback during the early devnet** (plan §24.2): run `cloudflared` on one validator, pointing
@@ -53,10 +54,10 @@ the RPC node. Per-client limits live at Cloudflare. The node's global caps still
 
 ## Other hosts
 
-- **Website** `xdevschain.xdevs.in`: Cloudflare Pages custom domain (docs site).
-- **Explorer** `xdevschain-explorer.xdevs.in`: wherever the explorer UI is hosted (Cloudflare
+- **Website** `xdevschain.tech`: Cloudflare Pages custom domain (docs site).
+- **Explorer** `explorer.xdevschain.tech`: wherever the explorer UI is hosted (Cloudflare
   Pages / Vercel). See [dns-records.md](dns-records.md).
-- **Faucet** `xdevschain-faucet.xdevs.in`: Workers custom domain of `apps/faucet`. Turnstile is
+- **Faucet** `faucet.xdevschain.tech`: Workers custom domain of `apps/faucet`. Turnstile is
   already in the Worker. See [faucet.md](../../docs/runbooks/faucet.md).
 
 Free-plan limits and features change. Re-check them in the dashboard before relying on a number

@@ -4,7 +4,7 @@ xdevs_role: rpc
 xdevs_pruning: full
 # Public namespaces only: never debug_, txpool_ or admin_ (plan §19.3).
 xdevs_rpc_namespaces: ["eth", "net", "web3", "xdevs"]
-# Separate WS listener so Cloudflare can route xdevschain-ws to it.
+# Separate WS listener so Cloudflare can route ws.xdevschain.tech to it.
 xdevs_rpc_ws_enabled: true
 # Every request arrives from cloudflared on 127.0.0.1, so the node's per-IP limiter would
 # throttle all users together: keep it off and rate-limit at Cloudflare instead

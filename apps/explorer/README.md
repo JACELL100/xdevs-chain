@@ -58,13 +58,13 @@ if its `dist/` is missing.
 - Project root: `apps/explorer`. Build command: `npm ci && npm run build`. Output directory: `dist`. Node 24
   (`NODE_VERSION=24`). Because `@xdevs/sdk` is a `file:` link to `../../sdk/ts`, connect the whole repository and add
   `cd ../../sdk/ts && npm ci && npm run build && cd - && ` in front of the build command if `sdk/ts/dist` is not committed.
-- Set `VITE_API_URL` (for example `https://xdevschain-explorer-api.xdevs.in`), `VITE_RPC_URL`
-  (`https://xdevschain-rpc.xdevs.in`) and `VITE_CHAIN_ID` as build environment variables.
-- Custom domain: `xdevschain-explorer.xdevs.in` (one subdomain level, covered by the free `*.xdevs.in` certificate).
+- Set `VITE_API_URL` (for example `https://explorer-api.xdevschain.tech`), `VITE_RPC_URL`
+  (`https://rpc.xdevschain.tech`) and `VITE_CHAIN_ID` as build environment variables.
+- Custom domain: `explorer.xdevschain.tech` (one subdomain level, covered by the free `*.xdevschain.tech` certificate).
 - Deep links work without a redirect file: Pages serves `index.html` for unknown paths when the build has no
   `404.html`. `public/_headers` sets a strict CSP (`script-src 'self'`, `connect-src 'self' https: wss:`), no framing,
   and long caching for hashed assets. If the API or RPC is served over plain `http:`, extend `connect-src`.
-- Then set the indexer's `CORS_ORIGINS=https://xdevschain-explorer.xdevs.in`.
+- Then set the indexer's `CORS_ORIGINS=https://explorer.xdevschain.tech`.
 
 ## Accessibility and design notes
 

@@ -57,7 +57,7 @@ all:
         validator-1:
           ansible_host: 203.0.113.11
           private_ip: 10.0.1.11
-          p2p_host: xdevschain-val1.xdevs.in
+          p2p_host: val1.xdevschain.tech
           p2p_peer_id: ""
           voting_power: 1
           keys_node: node0
@@ -65,21 +65,21 @@ all:
         validator-2:
           ansible_host: 203.0.113.12
           private_ip: 10.0.1.12
-          p2p_host: xdevschain-val2.xdevs.in
+          p2p_host: val2.xdevschain.tech
           p2p_peer_id: ""
           voting_power: 1
           keys_node: node1
         validator-3:
           ansible_host: 203.0.113.13
           private_ip: 10.0.1.13
-          p2p_host: xdevschain-val3.xdevs.in
+          p2p_host: val3.xdevschain.tech
           p2p_peer_id: ""
           voting_power: 1
           keys_node: node2
         validator-4:
           ansible_host: 203.0.113.14
           private_ip: 10.0.1.14
-          p2p_host: xdevschain-val4.xdevs.in
+          p2p_host: val4.xdevschain.tech
           p2p_peer_id: ""
           voting_power: 1
           keys_node: node3
@@ -96,13 +96,13 @@ all:
         bootnode-1:
           ansible_host: 203.0.113.21
           private_ip: 10.0.1.21
-          p2p_host: xdevschain-boot1.xdevs.in
+          p2p_host: boot1.xdevschain.tech
           p2p_peer_id: ""
           keys_node: node5
         bootnode-2:
           ansible_host: 198.51.100.22
           ansible_user: xdevsadmin
-          p2p_host: xdevschain-boot2.xdevs.in
+          p2p_host: boot2.xdevschain.tech
           p2p_peer_id: ""
           keys_node: node6
     # Optional: host that runs scripts/soak.sh in host mode (docs/runbooks/soak-oracle.md).

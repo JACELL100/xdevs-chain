@@ -1,6 +1,6 @@
 # {{ ansible_managed }}
 # /etc/cloudflared/config.yml: plan §33.5 adapted to the one-level hostnames that the free
-# Cloudflare certificate (*.xdevs.in) covers. Reference copy: deploy/cloudflare/tunnel-config.example.yml
+# Cloudflare certificate (*.xdevschain.tech) covers. Reference copy: deploy/cloudflare/tunnel-config.example.yml
 tunnel: {{ cloudflared_tunnel_id }}
 credentials-file: /etc/cloudflared/{{ cloudflared_tunnel_id }}.json
 metrics: {{ cloudflared_metrics_addr }}
