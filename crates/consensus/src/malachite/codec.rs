@@ -1158,11 +1158,15 @@ mod tests {
     #[test]
     fn block_with_consensus_data_roundtrip() {
         let consensus = Bytes::from_static(b"consensus data");
-        let header = Header {
+        // A real header: every post-merge field present (as `set_compat_header_fields`
+        // makes them), then the commitment in `requests_hash`.
+        let mut header = Header {
             number: 4,
-            requests_hash: Some(xdevs_primitives::consensus_data_hash(&consensus)),
+            base_fee_per_gas: Some(7),
             ..Default::default()
         };
+        xdevs_primitives::set_compat_header_fields(&mut header);
+        header.requests_hash = Some(xdevs_primitives::consensus_data_hash(&consensus));
         let block = Block::with_consensus(header.clone(), vec![], consensus);
         let bytes = encode_block(&block);
         assert_ne!(bytes, encode_block(&Block::new(header.clone(), vec![])));

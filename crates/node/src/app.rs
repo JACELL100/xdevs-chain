@@ -871,3 +871,7 @@ impl ConsensusApp for ChainApp {
 #[cfg(test)]
 #[path = "app_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "app_staking_tests.rs"]
+mod staking_tests;
