@@ -1,4 +1,4 @@
-# tXDS faucet — Cloudflare Worker config. NOT DEPLOYED YET.
+# tXDS faucet — Cloudflare Worker config (deployed for the Enclave testnet).
 # Deploy steps, secrets and incident response: docs/runbooks/faucet.md
 #
 # Secrets (never put these in this file; set with `wrangler secret put <NAME>`):
@@ -28,8 +28,7 @@ TURNSTILE_EXPECTED_HOSTNAME = "faucet.xdevschain.tech" # empty = not checked (us
 # Rate-limit markers (addr:<address>, ip:<ipv4>, ip6:<prefix>/64), 24 h TTL.
 [[kv_namespaces]]
 binding = "RATE_LIMIT"
-id = "00000000000000000000000000000000"                # placeholder: `wrangler kv namespace create RATE_LIMIT`
-preview_id = "11111111111111111111111111111111"        # placeholder: `wrangler kv namespace create RATE_LIMIT --preview`
+id = "e9dea4b4200a4f64b0ee7e80df702097"                # xdevs-faucet-RATE_LIMIT
 
 # Single Durable Object that serializes signing so nonces never collide.
 [[durable_objects.bindings]]
