@@ -16,7 +16,7 @@ export default function RpcLiveCheck() {
   const [c, setC] = useState<Check>({ kind: 'checking' })
   useEffect(() => {
     if (config.demo) {
-      setC({ kind: 'live', chainId: 717171, block: 1_289_342, ms: 84 })
+      setC({ kind: 'live', chainId: config.chainId, block: 1_289_342, ms: 84 })
       return
     }
     let alive = true

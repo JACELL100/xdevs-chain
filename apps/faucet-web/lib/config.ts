@@ -19,7 +19,7 @@ export const config = {
   /** Accept .xdevs names (only once XNS and the Worker's resolveName() are live). */
   xnsEnabled: process.env.NEXT_PUBLIC_XNS_ENABLED === '1',
   /** Labeled fixture data instead of real API calls, for design review. */
-  demo: process.env.NEXT_PUBLIC_DEMO === '1',
+  demo: process.env.NEXT_PUBLIC_DEMO === '1' || process.env.NEXT_PUBLIC_DEMO === 'true',
 } as const
 
 export const COOLDOWN_SECONDS = 24 * 60 * 60

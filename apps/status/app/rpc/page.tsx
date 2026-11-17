@@ -2,14 +2,15 @@
 // browser GETs on the RPC host here (JSON-RPC POSTs keep going to the node).
 
 import type { Metadata } from 'next'
-import { AddToWallet, Button, Card, CopyButton, ENCLAVE, ExternalIcon } from '@xdevs/ui'
+import { Button, Card, CopyButton, ExternalIcon } from '@xdevs/ui'
+import WalletButton from '@/components/WalletButton'
 import ChainParams from '@/components/ChainParams'
 import RpcLiveCheck from '@/components/RpcLiveCheck'
 import { config, docsLinks } from '@/lib/config'
 
 export const metadata: Metadata = {
   title: 'JSON-RPC endpoint',
-  description: `The public JSON-RPC endpoint of ${ENCLAVE.name}: ${config.rpcUrl}. Add it to your wallet or point your tooling at it.`,
+  description: `The public JSON-RPC endpoint of ${config.networkName}: ${config.rpcUrl}. Add it to your wallet or point your tooling at it.`,
 }
 
 const CURL = `curl -s ${config.rpcUrl} \\
@@ -54,9 +55,9 @@ export default function RpcPage() {
         <p className="xh-label">
           <b>JSON-RPC</b>
           <i>/</i>
-          {ENCLAVE.name}
+          {config.networkName}
         </p>
-        <h1 className="st-rpc-title">This is the JSON-RPC endpoint for xDEVS Chain Enclave.</h1>
+        <h1 className="st-rpc-title">This is the JSON-RPC endpoint for {config.networkName}.</h1>
         <p className="st-rpc-lede">
           You opened it in a browser tab, but it is meant for machines: it answers JSON-RPC over HTTPS POST. Use it in your
           wallet, or point Foundry, Hardhat, viem or ethers at it.
@@ -66,7 +67,7 @@ export default function RpcPage() {
           <CopyButton value={config.rpcUrl} label="Copy URL" />
         </div>
         <div className="st-rpc-actions">
-          <AddToWallet label="Add Enclave to wallet" variant="primary" size="md" />
+          <WalletButton variant="primary" size="md" />
           <Button href="/" variant="ghost" size="md">
             Network status
           </Button>
@@ -115,7 +116,7 @@ export default function RpcPage() {
             </Button>
           </div>
           <p className="st-warn-line">
-            {ENCLAVE.nativeCurrency.name} (tXDS) has no monetary value. Never buy it; get it free from the{' '}
+            {config.currencyName} ({config.symbol}) has no monetary value. Never buy it; get it free from the{' '}
             <a className="xh-textlink" href={config.faucetUrl}>
               faucet
             </a>

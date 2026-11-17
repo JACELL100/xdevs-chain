@@ -150,7 +150,7 @@ export function useNetwork(): NetworkState {
         ...s,
         phase: 'live',
         everReached: true,
-        chainId: 717171,
+        chainId: config.chainId,
         blocks: chain.blocks,
         head: chain.blocks[chain.blocks.length - 1]!,
         certs: chain.certs.slice(-CERT_WINDOW),
@@ -212,7 +212,7 @@ export function useNetwork(): NetworkState {
         setComponent('rpc', {
           health: chainId === null ? 'degraded' : probeHealth(true, latencyMs),
           latencyMs,
-          detail: chainId === null ? 'eth_chainId failed' : `chain ${chainId}${chainId !== 717171 ? ' (unexpected)' : ''}`,
+          detail: chainId === null ? 'eth_chainId failed' : `chain ${chainId}${chainId !== config.chainId ? ` (expected ${config.chainId})` : ''}`,
         })
 
         // New blocks + certificates for heights we do not have yet.

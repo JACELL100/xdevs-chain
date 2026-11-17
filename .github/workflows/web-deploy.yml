@@ -75,7 +75,7 @@ jobs:
           INPUT_APP: ${{ inputs.app }}
           CHANGED: ${{ steps.filter.outputs.changes }}
           REF: ${{ github.ref_name }}
-          READY_ON_BRANCH: "explorer,wallet"
+          READY_ON_BRANCH: "explorer,wallet,faucet-web,status"
         run: |
           node -e '
             const projects = { explorer: "xdevs-explorer", wallet: "xdevs-wallet", "faucet-web": "xdevs-faucet", status: "xdevs-status" }

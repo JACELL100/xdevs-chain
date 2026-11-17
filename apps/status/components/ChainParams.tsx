@@ -1,18 +1,17 @@
 import { Hash } from '@xdevs/ui'
-import { ENCLAVE } from '@xdevs/ui/network'
 import { config, docsLinks, PLANNED } from '@/lib/config'
 
 /** Network parameters as a definition list (used on the dashboard and on /rpc). */
 export default function ChainParams({ compact = false }: { compact?: boolean }) {
   const rows: [string, React.ReactNode][] = [
-    ['Network', ENCLAVE.name],
+    ['Network', config.networkName],
     [
       'Chain id',
       <span key="cid" className="xh-num">
-        {ENCLAVE.chainId} <span className="xh-quiet">({ENCLAVE.chainIdHex})</span>
+        {config.chainId} <span className="xh-quiet">({config.chainIdHex})</span>
       </span>,
     ],
-    ['Currency', `${ENCLAVE.nativeCurrency.name} (${ENCLAVE.nativeCurrency.symbol}), 18 decimals`],
+    ['Currency', `${config.currencyName} (${config.symbol}), 18 decimals`],
     ['JSON-RPC', <Hash key="rpc" value={config.rpcUrl} full />],
     ['WebSocket', <Hash key="ws" value={config.wsUrl} full />],
     [

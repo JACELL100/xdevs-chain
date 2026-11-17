@@ -1,6 +1,6 @@
 'use client'
 
-import { AddToWallet, Badge, Button, Card, ENCLAVE, ExternalIcon, Stat } from '@xdevs/ui'
+import { Badge, Button, Card, ExternalIcon, Stat } from '@xdevs/ui'
 import { truncateHex } from '@xdevs/ui/format'
 import { useEffect, useMemo, useState } from 'react'
 import { config, docsLinks, PLANNED } from '@/lib/config'
@@ -21,6 +21,7 @@ import incidentsJson from '@/content/incidents.json'
 import validatorsJson from '@/content/validators.json'
 import BlockTimeChart from './BlockTimeChart'
 import ChainParams from './ChainParams'
+import WalletButton from './WalletButton'
 import Incidents from './Incidents'
 
 const HEALTH_TONE: Record<Health, 'final' | 'warn' | 'alert' | 'dim'> = { up: 'final', degraded: 'warn', down: 'alert', unknown: 'dim' }
@@ -84,14 +85,14 @@ export default function Dashboard() {
               <>Contacting {config.rpcUrl.replace(/^https?:\/\//, '')}…</>
             ) : (
               <>
-                {ENCLAVE.name} · chain {net.chainId ?? ENCLAVE.chainId}
+                {config.networkName} · chain {net.chainId ?? config.chainId}
                 {net.updatedAt ? ` · checked ${formatAgo((now - net.updatedAt) / 1000)} ago from your browser` : ''}
               </>
             )}
           </p>
         </div>
         <div className="st-hero-actions">
-          <AddToWallet label="Add Enclave to wallet" size="sm" />
+          <WalletButton size="sm" />
         </div>
       </section>
 
@@ -314,8 +315,8 @@ function ComponentCard({ c, prelaunch }: { c: ComponentState; prelaunch: boolean
 
 function Prelaunch() {
   const items: [string, string][] = [
-    ['chain id', `${ENCLAVE.chainId}`],
-    ['currency', `${ENCLAVE.nativeCurrency.symbol}`],
+    ['chain id', `${config.chainId}`],
+    ['currency', config.symbol],
     ['block time', `${PLANNED.blockTimeSeconds} s`],
     ['validators', `${PLANNED.validators} at genesis`],
   ]
