@@ -17,6 +17,7 @@ xdevs-crypto = { path = "crates/crypto" }
 xdevs-storage = { path = "crates/storage" }
 xdevs-state = { path = "crates/state" }
 xdevs-execution = { path = "crates/execution" }
+xdevs-simulator = { path = "crates/simulator" }
 xdevs-genesis = { path = "crates/genesis" }
 xdevs-mempool = { path = "crates/mempool" }
 xdevs-rpc = { path = "crates/rpc" }
