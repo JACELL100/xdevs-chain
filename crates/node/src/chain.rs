@@ -78,13 +78,16 @@ pub fn body<R: DbRead + ?Sized>(db: &R, number: u64) -> Result<Option<Vec<TxEnve
     db.get::<tables::Bodies>(&number)
 }
 
-/// Full block `number`.
+/// Full block `number` (with its consensus data, Phase 3).
 pub fn block<R: DbRead + ?Sized>(db: &R, number: u64) -> Result<Option<Block>, DbError> {
     let Some(header) = header(db, number)? else {
         return Ok(None);
     };
     let body = body(db, number)?.unwrap_or_default();
-    Ok(Some(Block::new(header, body)))
+    let consensus = db
+        .get::<tables::BlockConsensus>(&number)?
+        .unwrap_or_default();
+    Ok(Some(Block::with_consensus(header, body, consensus)))
 }
 
 /// Receipts of block `number`, in transaction order.
@@ -170,11 +173,31 @@ pub fn commit_executed_block(
     certificate: Option<&[u8]>,
     state_history: u64,
 ) -> anyhow::Result<B256> {
+    commit_consensus_block(db, block, outcome, certificate, None, state_history)
+}
+
+/// [`commit_executed_block`] for consensus blocks from the staking activation on: the
+/// block's consensus data and, for an epoch-boundary block, the validator set of the
+/// next epoch (`next_set`, the node's encoding) are written in the same batch.
+pub fn commit_consensus_block(
+    db: &dyn Database,
+    block: &Block,
+    outcome: &ExecutionOutcome,
+    certificate: Option<&[u8]>,
+    next_set: Option<&[u8]>,
+    state_history: u64,
+) -> anyhow::Result<B256> {
     let header = &block.header;
     let diff = &outcome.state_diff;
     let (mut batch, hash) = block_batch(db, header, &block.body, &outcome.receipts, diff)?;
     if let Some(cert) = certificate {
         put_commit_certificate(&mut batch, header.number, cert);
+    }
+    if !block.consensus.is_empty() {
+        batch.put::<tables::BlockConsensus>(&header.number, &block.consensus);
+    }
+    if let Some(set) = next_set {
+        batch.put::<tables::ValidatorSets>(&header.number, &Bytes::copy_from_slice(set));
     }
     record_block_history(&mut batch, db, header.number, diff, state_history)
         .context("record state history")?;
@@ -269,7 +292,36 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
         if let Some(stored) = db.get::<tables::Meta>(&meta_key(meta_keys::CHAIN_CONFIG))? {
             let stored: ChainConfig =
                 serde_json::from_slice(&stored).context("decode stored chain config")?;
-            if stored != genesis.chain_config() {
+            let configured = genesis.chain_config();
+            if stored != configured && same_but_staking_schedule(&stored, &configured) {
+                // A coordinated upgrade schedules (or reschedules) the staking-driven
+                // validator set: allowed only while the chain is below both the stored
+                // and the new activation height, so no executed block changes meaning.
+                let head = latest_number(db)?.unwrap_or_default();
+                if stored.staking_active(head) || configured.staking_active(head) {
+                    bail!(
+                        "the staking fork schedule (stakingValidatorsBlock, epochLength, \
+                         blockReward) cannot change once it is active: head {head}, stored \
+                         activation {:?}, configured {:?}",
+                        stored.staking_validators_block,
+                        configured.staking_validators_block
+                    );
+                }
+                let mut batch = WriteBatch::new();
+                let cfg = serde_json::to_vec(&configured).context("serialize chain config")?;
+                batch.put::<tables::Meta>(&meta_key(meta_keys::CHAIN_CONFIG), &cfg);
+                db.write(batch)?;
+                tracing::warn!(
+                    target: "xdevs::node",
+                    head,
+                    activation = ?configured.staking_validators_block,
+                    epoch_length = configured.epoch_length,
+                    block_reward = %configured.block_reward,
+                    "staking fork schedule updated from the genesis config"
+                );
+                return Ok(hash);
+            }
+            if stored != configured {
                 bail!(
                     "database was created with a different chain config (stored chain id {},                      configured chain id {}); use another data dir or the original genesis",
                     stored.chain_id,
@@ -290,6 +342,18 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
     batch.put::<tables::Meta>(&meta_key(meta_keys::CHAIN_CONFIG), &cfg);
     db.write(batch)?;
     Ok(hash)
+}
+
+/// `true` if `a` and `b` differ at most in the staking fork schedule
+/// (`stakingValidatorsBlock`, `epochLength`, `blockReward`).
+fn same_but_staking_schedule(a: &ChainConfig, b: &ChainConfig) -> bool {
+    let strip = |c: &ChainConfig| ChainConfig {
+        staking_validators_block: None,
+        epoch_length: 0,
+        block_reward: Default::default(),
+        ..c.clone()
+    };
+    strip(a) == strip(b)
 }
 
 /// Recompute the state root of the stored flat state, check it against the persisted state
@@ -339,6 +403,42 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("different chain config"), "{err}");
+    }
+
+    #[test]
+    fn staking_schedule_can_be_added_before_activation_only() {
+        let db = MemDb::new();
+        let g = Genesis::dev(DEV_CHAIN_ID);
+        init_genesis(&db, &g).unwrap();
+        // Schedule the activation at block 10 on a chain at height 0: accepted, stored.
+        let mut scheduled = g.clone();
+        scheduled.config.staking_validators_block = Some(10);
+        scheduled.config.epoch_length = 20;
+        init_genesis(&db, &scheduled).unwrap();
+        let stored: ChainConfig = serde_json::from_slice(
+            &db.get::<tables::Meta>(&meta_key(meta_keys::CHAIN_CONFIG))
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(stored.staking_validators_block, Some(10));
+        init_genesis(&db, &scheduled).unwrap();
+        // Any other difference is still refused.
+        let mut other = scheduled.clone();
+        other.config.base_fee.burn_bps = 1;
+        assert!(init_genesis(&db, &other).is_err());
+
+        // Once the head is at/after the activation the schedule is frozen.
+        let mut batch = WriteBatch::new();
+        batch.put::<tables::Meta>(
+            &meta_key(meta_keys::LATEST_BLOCK),
+            &10u64.to_be_bytes().to_vec(),
+        );
+        db.write(batch).unwrap();
+        let mut moved = scheduled.clone();
+        moved.config.staking_validators_block = Some(50);
+        let err = init_genesis(&db, &moved).unwrap_err().to_string();
+        assert!(err.contains("cannot change once it is active"), "{err}");
     }
 
     #[test]

@@ -254,6 +254,23 @@ impl Genesis {
                 None => return invalid("total validator power overflows u64"),
             };
         }
+        if self.config.staking_validators_block.is_some() {
+            // Phase 3: the set comes from the Staking predeploy, epoch by epoch.
+            if self.config.epoch_length == 0 {
+                return invalid("epochLength must be > 0 when stakingValidatorsBlock is set");
+            }
+            if self.validators.is_empty() {
+                return invalid("stakingValidatorsBlock needs genesis validators (consensus)");
+            }
+            let staking = self
+                .alloc
+                .get(&xdevs_primitives::constants::STAKING_ADDRESS);
+            if !staking.is_some_and(|a| a.code.as_ref().is_some_and(|c| !c.is_empty())) {
+                return invalid(
+                    "stakingValidatorsBlock needs the Staking predeploy (code at 0x…1000) in alloc",
+                );
+            }
+        }
         Ok(())
     }
 
@@ -454,6 +471,26 @@ mod tests {
             r#""x": "ed25519:0x0101"#,
         );
         assert!(Genesis::from_json_str(&missing_key).is_err());
+    }
+
+    #[test]
+    fn staking_schedule_needs_the_staking_predeploy() {
+        let g = Genesis::from_json_str(SAMPLE).unwrap();
+        let mut s = g.clone();
+        s.config.staking_validators_block = Some(100);
+        let err = s.validate().unwrap_err().to_string();
+        assert!(err.contains("Staking predeploy"), "{err}");
+        s.alloc
+            .entry(xdevs_primitives::constants::STAKING_ADDRESS)
+            .or_default()
+            .code = Some(Bytes::from_static(&[0x00]));
+        s.validate().unwrap();
+        let mut no_epochs = s.clone();
+        no_epochs.config.epoch_length = 0;
+        assert!(no_epochs.validate().is_err());
+        let mut no_validators = s;
+        no_validators.validators.clear();
+        assert!(no_validators.validate().is_err());
     }
 
     #[test]

@@ -10,6 +10,11 @@
 //!   `WriteBatch`, from the cached outcome (re-executing once on a cache miss), then
 //!   updates the pool. It is idempotent: a second call for a committed block only
 //!   replaces the certificate when the new one carries more signatures.
+//! * **Phase 3** (from `stakingValidatorsBlock`, see [`crate::staking`]): proposals carry
+//!   consensus data (proposer, parent commit certificate, double-sign evidence) that
+//!   validators verify before executing the Staking system calls; an epoch-boundary
+//!   commit stores the next epoch's validator set; `validator_set(h)` follows the epoch
+//!   sets; reported / submitted evidence is verified and pooled for inclusion.
 //!
 //! Every storage / EVM step runs on the app's own [`WorkerPool`] threads, never on
 //! tokio's shared blocking pool: RPC requests (`eth_call`, `eth_estimateGas`, ...) use
@@ -30,24 +35,31 @@
 use crate::{
     chain::{self, Db},
     producer::{after_commit, build_next_block, drop_rejected, unix_now, NextBlock},
+    staking::{self, EvidencePool, MAX_EVIDENCE_AGE_BLOCKS, MAX_EVIDENCE_PER_BLOCK},
     workers::WorkerPool,
 };
 use anyhow::{bail, ensure, Context};
 use parking_lot::Mutex;
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::Arc,
+    time::Instant,
+};
 use xdevs_consensus::{
-    BlockOrigin, CommitCertificate, ConsensusApp, Evidence, ValidatorSet, Validity,
+    BlockConsensusData, BlockOrigin, CommitCertificate, ConflictingVotes, ConsensusApp, Evidence,
+    ValidatorAddress, ValidatorSet, Validity,
 };
 use xdevs_execution::{
-    next_base_fee, BlockExecutor, EvmExecutor, ExecutionError, ExecutionOutcome,
+    next_base_fee, EvmExecutor, ExecutionError, ExecutionOutcome, SlashEvidence, StakingInputs,
 };
 use xdevs_mempool::Pool;
 use xdevs_primitives::{
-    constants::MAX_EXTRA_DATA_SIZE, set_compat_header_fields, Address, Block, Bytes, ChainConfig,
-    Encodable2718, Header, Transaction, Typed2718, B256,
+    consensus_data_hash, constants::MAX_EXTRA_DATA_SIZE, set_compat_header_fields, Address, Block,
+    Bytes, ChainConfig, Encodable2718, Header, Transaction, Typed2718, B256,
 };
 use xdevs_rpc::ChainEvents;
 use xdevs_state::DbStateProvider;
+use xdevs_storage::DbRead;
 
 pub use crate::producer::MAX_BLOCK_BYTES;
 
@@ -71,6 +83,9 @@ pub struct ChainAppConfig {
     pub state_history: u64,
     /// Max seconds a live proposal may run ahead of the local clock (rule 3).
     pub max_timestamp_drift_secs: u64,
+    /// This node's consensus address (validators): named as the proposer in the
+    /// consensus data of the blocks it builds (Phase 3). `None` on full nodes.
+    pub validator_address: Option<ValidatorAddress>,
 }
 
 impl Default for ChainAppConfig {
@@ -80,6 +95,7 @@ impl Default for ChainAppConfig {
             extra_data: Bytes::from_static(PROPOSAL_EXTRA_DATA),
             state_history: xdevs_state::history::DEFAULT_STATE_HISTORY_BLOCKS,
             max_timestamp_drift_secs: crate::config::DEFAULT_MAX_TIMESTAMP_DRIFT_SECS,
+            validator_address: None,
         }
     }
 }
@@ -108,7 +124,12 @@ struct Inner {
     pool: Arc<Pool>,
     executor: Arc<EvmExecutor>,
     cfg: ChainConfig,
+    /// The genesis validator set (in force until the first epoch boundary).
     set: ValidatorSet,
+    /// Epoch sets read so far, by boundary block (immutable once stored).
+    epoch_sets: Mutex<BTreeMap<u64, ValidatorSet>>,
+    /// Verified double-sign evidence waiting for a block.
+    evidence: EvidencePool,
     app: ChainAppConfig,
     /// block hash -> (block number, verdict).
     verdicts: Mutex<HashMap<B256, (u64, Verdict)>>,
@@ -136,8 +157,9 @@ impl std::fmt::Debug for ChainApp {
 }
 
 impl ChainApp {
-    /// A chain app over an initialised database. `set` is the static genesis validator
-    /// set (Phase 2: active at every height).
+    /// A chain app over an initialised database. `set` is the genesis validator set: in
+    /// force at every height (Phase 2), or until the first epoch boundary once the
+    /// staking-driven set is scheduled (Phase 3).
     pub fn new(
         db: Db,
         pool: Arc<Pool>,
@@ -153,6 +175,8 @@ impl ChainApp {
                 executor,
                 cfg,
                 set,
+                epoch_sets: Mutex::new(BTreeMap::new()),
+                evidence: EvidencePool::default(),
                 app,
                 verdicts: Mutex::new(HashMap::new()),
                 commit_lock: Mutex::new(()),
@@ -170,6 +194,24 @@ impl ChainApp {
     pub fn with_events(self, events: Arc<ChainEvents>) -> Self {
         let _ = self.inner.events.set(events);
         self
+    }
+
+    /// The validator set in force at `height` (see [`crate::staking`]).
+    pub async fn validator_set_at(&self, height: u64) -> anyhow::Result<ValidatorSet> {
+        self.blocking(move |s| s.set_at(height)).await
+    }
+
+    /// Verify double-sign evidence (`xdevs_consensus::ConflictingVotes` RLP) and queue it
+    /// for inclusion in a block. Returns the evidence hash.
+    pub async fn submit_evidence(&self, raw: &[u8]) -> anyhow::Result<B256> {
+        let evidence = ConflictingVotes::from_bytes(raw)
+            .map_err(|e| anyhow::anyhow!("undecodable evidence: {e}"))?;
+        self.blocking(move |s| s.add_evidence(evidence)).await
+    }
+
+    /// Double-sign evidence waiting for inclusion.
+    pub fn pending_evidence(&self) -> usize {
+        self.inner.evidence.len()
     }
 
     /// Run `f` on a consensus worker thread.
@@ -201,15 +243,202 @@ impl Inner {
         cache.insert(hash, (number, verdict));
     }
 
+    /// The validator set in force at `height` (cached per epoch).
+    fn set_at(&self, height: u64) -> anyhow::Result<ValidatorSet> {
+        let Some(boundary) = self.cfg.validator_set_boundary(height) else {
+            return Ok(self.set.clone());
+        };
+        if let Some(set) = self.epoch_sets.lock().get(&boundary) {
+            return Ok(set.clone());
+        }
+        let set = staking::validator_set_at(&*self.db, &self.cfg, &self.set, height)?;
+        let mut cache = self.epoch_sets.lock();
+        // A handful of epochs is plenty (current, previous, evidence heights).
+        while cache.len() >= 8 {
+            cache.pop_first();
+        }
+        cache.insert(boundary, set.clone());
+        Ok(set)
+    }
+
+    /// Verify `evidence` against the validator set of its height and pool it.
+    fn add_evidence(&self, evidence: ConflictingVotes) -> anyhow::Result<B256> {
+        let evidence = evidence.canonical();
+        let height = evidence.first.height;
+        let (head, _) = chain::latest_header(&*self.db)?;
+        ensure!(
+            height >= 1 && height <= head + 1,
+            "evidence height {height} is not at or below the next height {}",
+            head + 1
+        );
+        ensure!(
+            head + 1 - height <= MAX_EVIDENCE_AGE_BLOCKS,
+            "evidence height {height} is older than {MAX_EVIDENCE_AGE_BLOCKS} blocks"
+        );
+        let set = self.set_at(height)?;
+        ensure!(
+            evidence.is_valid(self.cfg.chain_id, &set),
+            "invalid double-sign evidence: the votes do not conflict or the signatures of \
+             a validator at height {height} do not verify"
+        );
+        let hash = evidence.hash();
+        if self.cfg.staking_validators_block.is_none() {
+            tracing::warn!(target: LOG, validator = %evidence.first.validator, height, %hash,
+                           "double-sign evidence verified; not slashable (staking-driven set not scheduled)");
+            return Ok(hash);
+        }
+        if self.evidence.add(evidence) {
+            tracing::warn!(target: LOG, validator = %evidence.first.validator, height, %hash,
+                           "double-sign evidence verified and queued for slashing");
+        }
+        Ok(hash)
+    }
+
+    /// Consensus data of the block this node proposes at `height` (Phase 3).
+    fn consensus_data(
+        &self,
+        snapshot: &dyn DbRead,
+        height: u64,
+    ) -> anyhow::Result<BlockConsensusData> {
+        let proposer = self
+            .app
+            .validator_address
+            .context("only a validator proposes blocks")?;
+        let last_commit = if height >= 2 {
+            let raw = chain::commit_certificate(snapshot, height - 1)?
+                .with_context(|| format!("no commit certificate for block {}", height - 1))?;
+            vec![CommitCertificate::from_bytes(&raw).map_err(|e| {
+                anyhow::anyhow!("stored certificate of block {}: {e:?}", height - 1)
+            })?]
+        } else {
+            Vec::new()
+        };
+        let oldest = height.saturating_sub(MAX_EVIDENCE_AGE_BLOCKS).max(1);
+        let evidence = self.evidence.select(MAX_EVIDENCE_PER_BLOCK, |e| {
+            (oldest..height).contains(&e.first.height)
+        });
+        Ok(BlockConsensusData {
+            proposer,
+            last_commit,
+            evidence,
+        })
+    }
+
+    /// The consensus-data rules of block `height` (child of `parent_hash`) and the Staking
+    /// inputs they yield. `Ok(Err(reason))` = the block is invalid; `Err` = local failure.
+    fn check_consensus_data(
+        &self,
+        height: u64,
+        parent_hash: B256,
+        data: &BlockConsensusData,
+    ) -> anyhow::Result<Result<StakingInputs, String>> {
+        // The parent's commit certificate: its signers are the liveness bits.
+        let mut signers = Vec::new();
+        match (height, data.last_commit.as_slice()) {
+            (1, []) => {}
+            (1, _) => return Ok(Err("block 1 cannot carry a last commit".into())),
+            (_, [cert]) => {
+                if cert.height != height - 1 || cert.block_hash != parent_hash {
+                    return Ok(Err(format!(
+                        "last commit is for block {} {}, parent is {} {parent_hash}",
+                        cert.height,
+                        cert.block_hash,
+                        height - 1
+                    )));
+                }
+                let set = self.set_at(height - 1)?;
+                if let Err(e) = cert.verify(self.cfg.chain_id, &set) {
+                    return Ok(Err(format!("last commit does not verify: {e}")));
+                }
+                signers = cert
+                    .signatures
+                    .iter()
+                    .filter_map(|s| set.get(&s.validator))
+                    .map(|v| B256::from(v.public_key.0))
+                    .collect();
+            }
+            (_, list) => {
+                return Ok(Err(format!(
+                    "{} last commits, expected exactly one",
+                    list.len()
+                )))
+            }
+        }
+        // The proposer must be a member of the set of this height.
+        let set = self.set_at(height)?;
+        let Some(proposer) = set.get(&data.proposer) else {
+            return Ok(Err(format!(
+                "proposer {} is not a validator at height {height}",
+                data.proposer
+            )));
+        };
+        let proposer = B256::from(proposer.public_key.0);
+        // Evidence: bounded, canonical, unique, recent and valid.
+        if data.evidence.len() > MAX_EVIDENCE_PER_BLOCK {
+            return Ok(Err(format!(
+                "{} evidence items, at most {MAX_EVIDENCE_PER_BLOCK}",
+                data.evidence.len()
+            )));
+        }
+        let mut seen = BTreeSet::new();
+        let mut evidence = Vec::with_capacity(data.evidence.len());
+        for ev in &data.evidence {
+            let h = ev.first.height;
+            if h == 0 || h >= height || height - h > MAX_EVIDENCE_AGE_BLOCKS {
+                return Ok(Err(format!("evidence height {h} out of range")));
+            }
+            if *ev != ev.canonical() {
+                return Ok(Err("evidence votes not in canonical order".into()));
+            }
+            let hash = ev.hash();
+            if !seen.insert(hash) {
+                return Ok(Err(format!("duplicate evidence {hash}")));
+            }
+            let ev_set = self.set_at(h)?;
+            let Some(offender) = ev_set
+                .get(&ev.first.validator)
+                .filter(|_| ev.is_valid(self.cfg.chain_id, &ev_set))
+            else {
+                return Ok(Err(format!("invalid evidence {hash}")));
+            };
+            evidence.push(SlashEvidence {
+                consensus_key: B256::from(offender.public_key.0),
+                height: h,
+                reference: hash,
+            });
+        }
+        Ok(Ok(StakingInputs {
+            proposer: Some(proposer),
+            signers,
+            evidence,
+        }))
+    }
+
     /// Build and execute block `height` on the committed head (no commit).
     fn build(&self, height: u64, with_txs: bool) -> anyhow::Result<Block> {
         let snapshot = self.db.snapshot()?;
-        let (head, _) = chain::latest_header(&*snapshot)?;
+        let (head, parent) = chain::latest_header(&*snapshot)?;
         ensure!(
             height == head + 1,
             "cannot propose height {height}: committed head is {head}"
         );
-        let (_, built) = build_next_block(
+        // Phase 3: consensus data and the Staking inputs it yields (checked like any
+        // other proposal, so a bad local certificate or evidence never reaches a block).
+        let consensus = if self.cfg.staking_active(height) {
+            let data = self.consensus_data(&*snapshot, height)?;
+            let inputs = match self.check_consensus_data(height, parent.hash_slow(), &data)? {
+                Ok(inputs) => inputs,
+                Err(reason) => bail!("own consensus data for block {height} is invalid: {reason}"),
+            };
+            Some((data, inputs))
+        } else {
+            None
+        };
+        let inputs = consensus
+            .as_ref()
+            .map(|(_, i)| i.clone())
+            .unwrap_or_default();
+        let (_, mut built) = build_next_block(
             &*snapshot,
             &self.pool,
             &self.executor,
@@ -220,8 +449,14 @@ impl Inner {
                 extra_data: self.app.extra_data.clone(),
                 with_txs,
             },
+            &inputs,
         )?;
         drop(snapshot);
+        if let Some((data, _)) = consensus {
+            let bytes = Bytes::from(data.to_bytes());
+            built.block.header.requests_hash = Some(consensus_data_hash(&bytes));
+            built.block.consensus = bytes;
+        }
         drop_rejected(&self.pool, &built);
         let hash = built.block.hash();
         self.remember(height, hash, Verdict::Valid(Arc::new(built.outcome)));
@@ -244,11 +479,12 @@ impl Inner {
             "cannot validate height {height}: committed head is {head}"
         );
         let header = &block.header;
-        // The cache is keyed by the header hash: the body must belong to that header
-        // first (a proposer could pair a known header with another body).
+        // The cache is keyed by the header hash: the body (and the consensus data) must
+        // belong to that header first (a proposer could pair a known header with another
+        // body).
         if !body_matches_header(block) {
             return Ok(Verdict::invalid(
-                "transactions root does not match the body",
+                "transactions root does not match the body (or requests hash the consensus data)",
             ));
         }
         let hash = block.hash();
@@ -270,11 +506,15 @@ impl Inner {
                 )));
             }
         }
-        let verdict = match self.check_shape(height, &parent, block) {
+        let inputs = match self.check_shape(height, &parent, block) {
+            Err(reason) => Err(reason),
+            Ok(()) => self.staking_inputs(height, &parent, block)?,
+        };
+        let verdict = match inputs {
             Err(reason) => Verdict::invalid(reason),
-            Ok(()) => {
+            Ok(inputs) => {
                 let state = DbStateProvider::new(&*snapshot);
-                match self.executor.execute(&parent, block, &state) {
+                match self.executor.execute_with(&parent, block, &state, &inputs) {
                     Ok(outcome) => match compare_outcome(header, &outcome) {
                         Ok(()) => Verdict::Valid(Arc::new(outcome)),
                         Err(reason) => Verdict::invalid(reason),
@@ -289,6 +529,32 @@ impl Inner {
         };
         self.remember(header.number, hash, verdict.clone());
         Ok(verdict)
+    }
+
+    /// The Staking inputs of `block` (Phase 3): its consensus data is required from the
+    /// activation on and forbidden before. `Ok(Err(reason))` = invalid block.
+    fn staking_inputs(
+        &self,
+        height: u64,
+        parent: &Header,
+        block: &Block,
+    ) -> anyhow::Result<Result<StakingInputs, String>> {
+        if !self.cfg.staking_active(height) {
+            if !block.consensus.is_empty() {
+                return Ok(Err("consensus data before the staking activation".into()));
+            }
+            return Ok(Ok(StakingInputs::default()));
+        }
+        if block.consensus.is_empty() {
+            return Ok(Err(
+                "missing consensus data (staking-driven validator set active)".into(),
+            ));
+        }
+        let data = match BlockConsensusData::from_bytes(&block.consensus) {
+            Ok(data) => data,
+            Err(e) => return Ok(Err(format!("undecodable consensus data: {e}"))),
+        };
+        self.check_consensus_data(height, parent.hash_slow(), &data)
     }
 
     /// Rules 1, 2 and 4 (everything but the clock and execution).
@@ -328,6 +594,10 @@ impl Inner {
         }
         let mut compat = h.clone();
         set_compat_header_fields(&mut compat);
+        if !block.consensus.is_empty() {
+            // Bound to the consensus data instead (checked with the body).
+            compat.requests_hash = h.requests_hash;
+        }
         if compat != *h {
             return Err("compat header fields differ from the protocol values".into());
         }
@@ -365,7 +635,7 @@ impl Inner {
             cert.height,
             cert.block_hash
         );
-        cert.verify_at(self.cfg.chain_id, number, &self.set)
+        cert.verify_at(self.cfg.chain_id, number, &self.set_at(number)?)
             .map_err(|e| anyhow::anyhow!("invalid commit certificate for block {number}: {e:?}"))?;
         let (head, head_header) = chain::latest_header(&*self.db)?;
 
@@ -416,13 +686,51 @@ impl Inner {
                 }
             },
         };
-        chain::commit_executed_block(
+        // Phase 3: an epoch boundary fixes the set of the next epoch (the current set is
+        // kept if the contract has no usable member: the chain must not lose its set).
+        let next_set = if self.cfg.is_epoch_boundary(number) {
+            let set = match outcome
+                .next_validators
+                .as_deref()
+                .and_then(staking::set_from_staking)
+            {
+                Some(set) => set,
+                None => {
+                    tracing::error!(target: LOG, number,
+                                    "Staking returned no usable validator; keeping the current set");
+                    self.set_at(number)?
+                }
+            };
+            Some(set)
+        } else {
+            None
+        };
+        chain::commit_consensus_block(
             &*self.db,
             &block,
             &outcome,
             Some(&cert.to_bytes()),
+            next_set.as_ref().map(staking::encode_set).as_deref(),
             self.app.state_history,
         )?;
+        if let Some(set) = next_set {
+            tracing::info!(
+                target: LOG,
+                epoch_block = number,
+                first_height = number + 1,
+                validators = set.len(),
+                total_power = set.total_voting_power(),
+                "epoch boundary: validator set of the next epoch fixed"
+            );
+            self.epoch_sets.lock().insert(number, set);
+        }
+        if !block.consensus.is_empty() {
+            let included: Vec<B256> = BlockConsensusData::from_bytes(&block.consensus)
+                .map(|d| d.evidence.iter().map(ConflictingVotes::hash).collect())
+                .unwrap_or_default();
+            self.evidence
+                .prune(&included, number.saturating_sub(MAX_EVIDENCE_AGE_BLOCKS));
+        }
         crate::events::publish_block(
             self.events.get().map(|e| &**e),
             &block,
@@ -445,9 +753,11 @@ impl Inner {
     }
 }
 
-/// The body hashes to the header's `transactions_root`.
+/// The body hashes to the header's `transactions_root` and the consensus data to its
+/// `requests_hash`.
 fn body_matches_header(block: &Block) -> bool {
     block.header.transactions_root == block.compute_transactions_root()
+        && block.consensus_matches_header()
 }
 
 /// Rule 5: the re-execution results must equal the header.
@@ -486,8 +796,11 @@ impl ConsensusApp for ChainApp {
         .await
     }
 
-    async fn validator_set(&self, _height: u64) -> anyhow::Result<ValidatorSet> {
-        Ok(self.inner.set.clone())
+    async fn validator_set(&self, height: u64) -> anyhow::Result<ValidatorSet> {
+        if self.inner.cfg.staking_validators_block.is_none() {
+            return Ok(self.inner.set.clone());
+        }
+        self.validator_set_at(height).await
     }
 
     async fn propose(&self, height: u64, round: u32, deadline: Instant) -> anyhow::Result<Block> {
@@ -547,6 +860,10 @@ impl ConsensusApp for ChainApp {
 
     async fn report_evidence(&self, e: Evidence) -> anyhow::Result<()> {
         tracing::warn!(target: LOG, validator = %e.validator(), height = e.height(), "equivocation evidence: {e:?}");
+        if let Evidence::DoubleVote(votes) = e {
+            // Slashable from the staking activation on: verify and queue for inclusion.
+            self.blocking(move |s| s.add_evidence(votes)).await?;
+        }
         Ok(())
     }
 }

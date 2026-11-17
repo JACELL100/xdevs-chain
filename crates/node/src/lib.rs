@@ -5,7 +5,9 @@
 //! * **dev** (Phase 1): single node, a local producer seals a block every
 //!   `block_time_ms`.
 //! * **validator** (Phase 2): [`ChainApp`] driven by the Malachite BFT engine with the
-//!   node's Ed25519 consensus key; tx gossip over `xdevs-network`.
+//!   node's Ed25519 consensus key; tx gossip over `xdevs-network`. From the genesis
+//!   config's `stakingValidatorsBlock` on (Phase 3) the validator set follows the Staking
+//!   contract epoch by epoch ([`staking`]).
 //! * **full node** (Phase 2): the same engine without a key: follows the chain through
 //!   consensus messages and block sync, never signs.
 //! * **RPC only**: serves the stored chain.
@@ -31,6 +33,7 @@ pub mod consensus;
 mod events;
 mod metrics;
 mod producer;
+pub mod staking;
 mod workers;
 
 pub use app::{ChainApp, ChainAppConfig, MAX_BLOCK_BYTES, PROPOSAL_EXTRA_DATA};
@@ -213,6 +216,7 @@ impl Node {
             producer: None,
             consensus: None,
             consensus_status: None,
+            chain_app: None,
             gossip: None,
             shutdown_tx,
             metrics: None,
@@ -290,6 +294,9 @@ impl Node {
         if let Some(status) = &handle.consensus_status {
             backend = backend.with_consensus(status.clone(), self.head_number);
         }
+        if let Some(app) = &handle.chain_app {
+            backend = backend.with_chain_app(app.clone());
+        }
         let backend = Arc::new(backend);
         let rpc_config = RpcServerConfig {
             http: self.config.rpc.http,
@@ -345,17 +352,29 @@ impl Node {
             let key = consensus::load_consensus_key(&self.config.validator)?;
             let address = xdevs_consensus::ValidatorKey(key.public_key()).address();
             if set.get(&address).is_none() {
-                tracing::warn!(
-                    target: "xdevs::node",
-                    %address,
-                    "the consensus key is not in the genesis validator set: its votes \
-                     never count towards a quorum"
-                );
+                if self.cfg.staking_validators_block.is_some() {
+                    tracing::info!(
+                        target: "xdevs::node",
+                        %address,
+                        "the consensus key is not in the genesis validator set: it signs \
+                         once Staking selects it at an epoch boundary"
+                    );
+                } else {
+                    tracing::warn!(
+                        target: "xdevs::node",
+                        %address,
+                        "the consensus key is not in the genesis validator set: its votes \
+                         never count towards a quorum"
+                    );
+                }
             }
             Some(key)
         } else {
             None
         };
+        let validator_address = consensus_key
+            .as_ref()
+            .map(|k| xdevs_consensus::ValidatorKey(k.public_key()).address());
         let node_key = consensus::load_node_key(self.config.p2p.node_key_file.as_deref())?;
 
         if self.config.gossip.enabled {
@@ -400,9 +419,21 @@ impl Node {
                 extra_data: Bytes::from_static(PROPOSAL_EXTRA_DATA),
                 state_history: self.config.chain.state_history_blocks()?,
                 max_timestamp_drift_secs: self.config.validator.max_timestamp_drift_secs,
+                validator_address,
             },
         )
         .with_events(events);
+        if let Some(start) = self.cfg.staking_validators_block {
+            tracing::info!(
+                target: "xdevs::node",
+                activation = start,
+                epoch_length = self.cfg.epoch_length,
+                first_epoch_block = ?self.cfg.next_epoch_boundary(start),
+                block_reward = %self.cfg.block_reward,
+                "staking-driven validator set scheduled"
+            );
+        }
+        handle.chain_app = Some(app.clone());
         tracing::info!(
             target: "xdevs::node",
             mode = ?self.mode,
@@ -491,6 +522,7 @@ pub struct NodeHandle {
     producer: Option<JoinHandle<()>>,
     consensus: Option<JoinHandle<anyhow::Result<()>>>,
     consensus_status: Option<EngineStatus>,
+    chain_app: Option<ChainApp>,
     gossip: Option<Arc<NetworkHandle>>,
     shutdown_tx: watch::Sender<bool>,
     metrics: Option<metrics::NodeMetrics>,
@@ -538,6 +570,27 @@ impl NodeHandle {
     /// Live consensus status (validator / full-node mode).
     pub fn consensus_status(&self) -> Option<&EngineStatus> {
         self.consensus_status.as_ref()
+    }
+
+    /// The consensus validator set in force at `height` (validator / full-node mode;
+    /// Phase 3: follows the epoch sets). Errors for a height whose epoch set is not known
+    /// yet, or without consensus.
+    pub async fn validator_set_at(&self, height: u64) -> anyhow::Result<ValidatorSet> {
+        self.chain_app
+            .as_ref()
+            .context("no consensus in this mode")?
+            .validator_set_at(height)
+            .await
+    }
+
+    /// Submit double-sign evidence (RLP of `xdevs_consensus::ConflictingVotes`), as
+    /// `xdevs_submitEvidence` does. Returns the evidence hash.
+    pub async fn submit_evidence(&self, raw: &[u8]) -> anyhow::Result<B256> {
+        self.chain_app
+            .as_ref()
+            .context("no consensus in this mode")?
+            .submit_evidence(raw)
+            .await
     }
 
     /// Inbound tx-gossip counters (validator / full-node mode with `[gossip]` enabled).
