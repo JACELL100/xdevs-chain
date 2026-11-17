@@ -114,9 +114,10 @@ await addXdevsChainToWallet(wallet, xdevsEnclave) // wallet_addEthereumChain (pl
 | `getValidators()` | `xdevs_validators` | 3 |
 | `getEpochInfo()` | `xdevs_epochInfo` | 3 |
 | `simulateTransaction(tx)` | `xdevs_simulateTransaction` | 4 |
-| `checkRecipient({ from, to })` | `xdevs_checkRecipient` | 4 |
-| `getApprovals({ owner })` | `xdevs_getApprovals` | 4 |
+| `checkRecipient({ from?, to })` (`to`: address or XNS name) | `xdevs_checkRecipient` | 4 |
+| `getApprovals({ owner, tokens?, fromBlock? })` | `xdevs_getApprovals` | 4 |
 | `getVaultQueue({ vault })` | `xdevs_getVaultQueue` | 4 |
+| `watchVaultEvents({ account, onEvent })` (WebSocket transport) | `eth_subscribe("vaultEvents")` | 4 |
 | `resolveXnsName({ name })` | `xdevs_resolveName` | 4 |
 | `reverseXnsName({ address })` | `xdevs_reverseName` | 4 |
 | `getLocalFee({ contract })` | `xdevs_localFee` | 5 |
@@ -131,7 +132,12 @@ try { await client.getValidators() } catch (e) {
 }
 ```
 
-`xdevs_subscribe("vaultEvents")` is not wrapped yet.
+Vault alerts need a WebSocket transport:
+
+```ts
+const ws = createPublicClient({ chain: xdevsEnclave, transport: webSocket() }).extend(xdevsActions)
+const stop = await ws.watchVaultEvents({ account: me, onEvent: (e) => console.log(e.type, e.id) })
+```
 
 ## Development
 

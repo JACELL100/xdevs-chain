@@ -73,15 +73,16 @@ await addXdevsChainToWallet(wallet, xdevsDevnet) // sends wallet_addEthereumChai
 | `getCommit({ height })` | `xdevs_getCommitCertificate` | Implemented (Phase 2) |
 | `getValidators()` | `xdevs_validators` | Phase 3 |
 | `getEpochInfo()` | `xdevs_epochInfo` | Phase 3 |
-| `simulateTransaction(tx)` | `xdevs_simulateTransaction` | Phase 4 |
-| `checkRecipient({ from, to })` | `xdevs_checkRecipient` | Phase 4 |
-| `getApprovals({ owner })` | `xdevs_getApprovals` | Phase 4 |
-| `getVaultQueue({ vault })` | `xdevs_getVaultQueue` | Phase 4 |
-| `resolveXnsName({ name })` | `xdevs_resolveName` | Phase 4 |
-| `reverseXnsName({ address })` | `xdevs_reverseName` | Phase 4 |
+| `simulateTransaction(tx)` | `xdevs_simulateTransaction` | Implemented (Phase 4) |
+| `checkRecipient({ from?, to })` (`to`: address or XNS name) | `xdevs_checkRecipient` | Implemented (Phase 4) |
+| `getApprovals({ owner, tokens?, fromBlock? })` | `xdevs_getApprovals` | Implemented (Phase 4) |
+| `getVaultQueue({ vault })` | `xdevs_getVaultQueue` | Implemented (Phase 4) |
+| `watchVaultEvents({ account, onEvent })` (WebSocket transport) | `eth_subscribe("vaultEvents")` | Implemented (Phase 4) |
+| `resolveXnsName({ name })` | `xdevs_resolveName` | Implemented (Phase 4) |
+| `reverseXnsName({ address })` | `xdevs_reverseName` | Implemented (Phase 4) |
 | `getLocalFee({ contract })` | `xdevs_localFee` | Phase 5 |
 
-None of these methods exist in the node yet. The SDK throws `XdevsMethodNotAvailableError` when the node answers "method not found":
+Against a node that does not serve a method yet, the SDK throws `XdevsMethodNotAvailableError` (the node answers "method not found"):
 
 ```ts
 import { XdevsMethodNotAvailableError } from '@xdevs/sdk'
@@ -93,7 +94,7 @@ try {
 }
 ```
 
-`xdevs_getEoaLock`, which the node implements, is not wrapped by the SDK yet; call it with `client.request`. `xdevs_subscribe("vaultEvents")` is not wrapped either.
+`xdevs_getEoaLock`, which the node implements, is not wrapped by the SDK yet; call it with `client.request`. Safety results are advice, not fact: every simulation and recipient check carries a `disclaimer`.
 
 Every action is also exported as a standalone function taking the client first (`getValidators(client)`), for tree-shaking.
 
