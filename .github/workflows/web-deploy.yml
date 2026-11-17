@@ -117,6 +117,9 @@ jobs:
       - run: npm run build:sdk
       - name: Build apps/${{ matrix.app }}
         working-directory: apps/${{ matrix.app }}
+        env:
+          # Public Turnstile site key of the faucet widget (repository variable; empty for other apps).
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
         run: npm run build
       # npx (not cloudflare/wrangler-action) so wrangler is not npm-installed into the workspace root.
       - name: Deploy to Cloudflare Pages (${{ matrix.project }})
