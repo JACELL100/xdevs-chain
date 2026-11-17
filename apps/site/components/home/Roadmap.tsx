@@ -6,7 +6,7 @@ type Status = 'built' | 'next' | 'planned'
 const PHASES: { n: string; h: string; p: string; s: Status }[] = [
   { n: 'P1', h: 'Single-node chain', p: 'EVM execution, JSON-RPC, MetaMask and Foundry.', s: 'built' },
   { n: 'P2', h: 'BFT network', p: 'Malachite consensus, block sync, gossip, WebSockets.', s: 'built' },
-  { n: 'P3', h: 'Proof of Stake devnet', p: 'Staking-driven validators, public devnet, faucet, explorer.', s: 'next' },
+  { n: 'P3', h: 'Proof of Stake devnet', p: 'Enclave testnet live with 4 validators, explorer, wallet, status. Next: staking-driven validators, faucet, indexer.', s: 'next' },
   { n: 'P4', h: 'Safety layer RPCs', p: 'Simulation and recipient checks, reference wallet. Contracts already built.', s: 'planned' },
   { n: 'P5', h: 'Performance & MEV', p: 'Encrypted mempool, parallel execution, local fee markets.', s: 'planned' },
   { n: 'P6', h: 'Public testnet', p: 'Long-lived testnet, independent validators, bug bounty.', s: 'planned' },
@@ -31,8 +31,8 @@ export default function Roadmap() {
             </h2>
           </div>
           <p className="xh-body side" {...rv(120)}>
-            Phases 1 and 2 are built and tested. The public testnet is not live yet; it comes with Phase 3. Dates aren’t
-            promised. Progress is.
+            Phases 1 and 2 are built and tested. Phase 3 has started: the Enclave testnet is live with four validators. Dates
+            aren’t promised. Progress is.
             <Link className="xh-textlink" href="/roadmap">
               Full roadmap
             </Link>

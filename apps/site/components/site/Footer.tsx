@@ -39,7 +39,7 @@ const YEAR = 2026
 export default function Footer({ variant = 'full' }: FooterProps) {
   const legal = (
     <p className="xh-foot-legal">
-      Apache-2.0 · Pre-mainnet software; public testnet not live yet. Testnet tokens (tXDS) have no monetary value. © {YEAR}{' '}
+      Apache-2.0 · Pre-mainnet software; the Enclave testnet is a test network. Testnet tokens (tXDS) have no monetary value. © {YEAR}{' '}
       THE xDEVS
     </p>
   )

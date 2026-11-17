@@ -17,7 +17,7 @@ export default function Closing() {
           <span className="xh-metal">that has your back.</span>
         </h2>
         <p className="xh-lede" {...rv(120)}>
-          Run a 4-validator network on your laptop today. The public testnet is coming soon.
+          The Enclave testnet is live: add it to your wallet, or run a 4-validator network on your laptop.
         </p>
         <div className="xh-ctas" {...rv(180)}>
           <Link className="xh-btn xh-btn-primary" href="/guide/quickstart">

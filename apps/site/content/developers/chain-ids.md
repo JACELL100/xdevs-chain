@@ -5,14 +5,25 @@
 | Network | Chain id | Hex | Status |
 |---|---|---|---|
 | Local dev chain (`xdevs run --dev`) and local test networks (`xdevs-cli testnet init`) | **7117** | `0x1bcd` | <span class="status ok">Works today</span>, local only |
-| Public testnet (`xdevs-testnet-1`) | **To be announced** | | <span class="status next">Coming soon</span> |
+| **Enclave** public testnet (`xdevs-enclave-1`) | **717171** | `0xaf173` | <span class="status ok">Live</span> since 17 Nov 2026 · [endpoints](/network/endpoints) |
+| Internal devnet (`xdevs-devnet-1`) | **717170** | `0xaf172` | Reserved for short-lived internal networks |
 | Mainnet | Not planned yet | | |
 
-:::warning[About 717171]
-The SDK's `xdevsTestnet` and some examples use **717171** as a placeholder. It is not registered and may change. The real testnet chain id will be published on this site and registered on [chainlist](https://chainlist.org) when the public testnet launches.
+:::info[717171 is Enclave]
+Chain id **717171** belongs to the Enclave testnet; it was unused on [chainid.network](https://chainid.network) when it was chosen, and it will be registered on [chainlist](https://chainlist.org). In the SDK it is `xdevsEnclave` (`xdevsTestnet` is a deprecated alias).
 :::
 
 Chain id 7117 is for local development only. Never assume a transaction signed for 7117 is safe to replay elsewhere; any two people's local chains share it.
+
+## Wallet parameters (Enclave testnet)
+
+| Field | Value |
+|---|---|
+| Network name | xDEVS Chain Enclave |
+| RPC URL | `https://rpc.xdevschain.tech` |
+| Chain ID | `717171` |
+| Currency | EnclaveXDS, symbol `tXDS` (18 decimals) |
+| Block explorer | `https://explorer.xdevschain.tech` |
 
 ## Wallet parameters (local dev chain)
 
@@ -24,13 +35,13 @@ Chain id 7117 is for local development only. Never assume a transaction signed f
 | Currency symbol | `tXDS` (18 decimals) |
 | Block explorer | none |
 
-The [SDK](/developers/sdk) can add the network with `addXdevsChainToWallet(wallet, xdevsDevnet)`.
+The [SDK](/developers/sdk) can add the network with `addXdevsChainToWallet(wallet, xdevsEnclave)` (or `xdevsLocal` for the local chain).
 
 ## Protocol parameters
 
-| Parameter | Dev chain today | Planned testnet v1 |
+| Parameter | Dev chain | Enclave testnet |
 |---|---|---|
-| Block time | 2 s (configurable) | 2 s, then 1 s target |
+| Block time | 2 s (configurable) | 2 s (1 s target later) |
 | Block gas limit | 30,000,000 | 30,000,000 (tuned by benchmark) |
 | Min base fee | 0.1 gwei | 0.1 gwei |
 | Base fee max change | 12.5% per block | 12.5% per block |
@@ -39,7 +50,7 @@ The [SDK](/developers/sdk) can add the network with `addXdevsChainToWallet(walle
 | EVM rules | Osaka | Osaka |
 | XIP-0001 (EOA lock) | Active from genesis | Active from genesis |
 | Epoch length | n/a (static validator set) | 3,600 blocks |
-| Max validators | Set in genesis | 100 |
+| Max validators | Set in genesis | 4 in genesis today; up to 100 with Phase 3 staking |
 | Guardian Vault default delay | 24 h (1 h–7 d, per account) | Same |
 | Social recovery delay | 48 h (1 h–30 d, per account) | Same |
 

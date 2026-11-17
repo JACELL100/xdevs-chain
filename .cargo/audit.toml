@@ -39,7 +39,10 @@ ignore = [
   # about unknown topics (memory growth driven by a connected peer). Fixed in 0.50.1, which needs
   # libp2p 0.57+, blocked by Malachite's libp2p =0.56.0 pin. Partial mitigation: the tx-gossip
   # network caps peers (gossip.max_peers / max_inbound_peers) and bans flooding peers; the
-  # consensus network does not use gossipsub topics from strangers. KNOWN RISK for public nodes.
+  # consensus network does not use gossipsub topics from strangers. Enclave (Nov 2026): validator P2P
+  # ports (30333-30334) accept only the other validators' IPs (VCN security lists + iptables), so
+  # strangers cannot open a gossip connection; users reach the chain through the RPC only.
+  # Keep this restriction until the upgrade lands, also for any public full nodes.
   # Re-check: when Malachite moves to a newer libp2p, or by 2027-01-31.
   "RUSTSEC-2026-0534",
 ]
