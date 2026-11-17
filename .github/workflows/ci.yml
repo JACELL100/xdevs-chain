@@ -115,7 +115,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [sdk/ts, apps/faucet, apps/indexer, apps/explorer]
+        package: [apps/faucet, apps/indexer]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -128,16 +128,55 @@ jobs:
           cache: npm
           cache-dependency-path: |
             ${{ matrix.package }}/package-lock.json
-            sdk/ts/package-lock.json
-      # The indexer and explorer depend on the local SDK ("file:../../sdk/ts"); its dist/
-      # is not committed, so build it first.
+            package-lock.json
+      # The indexer depends on the local SDK ("file:../../sdk/ts"); its dist/ is not committed. The SDK is a
+      # member of the root npm workspace, so install the workspace and build it first.
       - name: Build @xdevs/sdk
-        if: matrix.package == 'apps/indexer' || matrix.package == 'apps/explorer'
-        working-directory: sdk/ts
-        run: npm ci && npm run build
+        if: matrix.package == 'apps/indexer'
+        working-directory: .
+        run: npm ci --no-audit --no-fund && npm run build:sdk
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm test
-      - name: Build the explorer
-        if: matrix.package == 'apps/explorer'
-        run: npm run build
+
+  # The npm workspace at the repo root: @xdevs/sdk, @xdevs/ui and the Next.js apps
+  # (explorer, wallet, faucet-web, status). One install, then typecheck + test + static build per package.
+  web:
+    name: web (sdk, ui, apps)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - id: sdk
+        name: "@xdevs/sdk: build, typecheck, test"
+        run: |
+          npm run build:sdk
+          npm run typecheck -w @xdevs/sdk
+          npm test -w @xdevs/sdk
+      - name: "@xdevs/ui: typecheck, test"
+        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
+        run: |
+          npm run typecheck -w @xdevs/ui
+          npm test -w @xdevs/ui
+      - name: "apps/explorer: typecheck, test, build"
+        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
+        run: npm run typecheck && npm test && npm run build
+        working-directory: apps/explorer
+      - name: "apps/wallet: typecheck, test, build"
+        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
+        run: npm run typecheck && npm test && npm run build
+        working-directory: apps/wallet
+      - name: "apps/faucet-web: typecheck, test, build"
+        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
+        run: npm run typecheck && npm test && npm run build
+        working-directory: apps/faucet-web
+      - name: "apps/status: typecheck, test, build"
+        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
+        run: npm run typecheck && npm test && npm run build
+        working-directory: apps/status

@@ -1,7 +1,8 @@
 # Copy to .dev.vars for `wrangler dev` (never commit .dev.vars).
-# Turnstile "always passes" TEST keys (public, from Cloudflare docs). Use the matching
-# site key 1x00000000000000000000AA in TURNSTILE_SITE_KEY and leave TURNSTILE_EXPECTED_HOSTNAME empty.
+# Turnstile "always passes" TEST keys (public, from Cloudflare docs). Build the UI (apps/faucet-web) with the
+# matching site key NEXT_PUBLIC_TURNSTILE_SITE_KEY=1x00000000000000000000AA, and clear the hostname check here.
 TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+TURNSTILE_EXPECTED_HOSTNAME=
 # A throwaway devnet key ONLY (e.g. one funded on a local devnet). Never a key that holds anything real.
 FAUCET_PRIVATE_KEY=0x<64 hex>
 RPC_URL=http://127.0.0.1:8545

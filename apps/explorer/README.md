@@ -1,73 +1,89 @@
-# xDEVS Explorer (UI)
+# xDEVS Explorer
 
-Static block explorer for xDEVS Chain: Vite + React + TypeScript, hand-written CSS (light and dark), no UI kit. It
-reads the [explorer API](../../docs/specs/explorer-api.md) served by [`apps/indexer`](../indexer/README.md) and, for a
-network check, the node's JSON-RPC.
+Block explorer for **xDEVS Chain Enclave**, the public testnet (chain id 717171, coin EnclaveXDS / `tXDS`), at
+[explorer.xdevschain.tech](https://explorer.xdevschain.tech). Next.js (App Router) static export for Cloudflare Pages,
+the shared brand kit [`@xdevs/ui`](../../packages/ui) (same look as xdevschain.tech), viem and [`@xdevs/sdk`](../../sdk/ts).
 
 ## Pages
 
 | Path | What it shows |
 |---|---|
-| `/` | Network stats (head, block time, totals, base fee, burned / Treasury fees), latest blocks and transactions (auto-refresh). |
-| `/blocks`, `/txs` | Paginated lists. |
-| `/block/:numberOrHash` | Block details, fee split, "finalized by N validators" from `xdevs_getCommitCertificate` when the node serves it. |
-| `/tx/:hash` | Status, fee breakdown (burned / Treasury / tip), transfers with spam flags, approvals with **Unlimited** and expiry badges, EIP-7702 authorizations, decoded logs, input. |
-| `/address/:address` | Balance, nonce, XNS name, labels, security badges (smart account, Guardian Vault, freeze, XIP-0001 EOA lock, recovery), tabs for transactions and transfers (**spam hidden by default**, toggle), live approvals with a **revoke hint** (ready-made calldata), and the vault queue. |
-| `/name/:name` | `.xdevs` name: resolution, owner, expiry, grace period, primary name. |
-| `/search?q=` | Block number, hash, address or name. |
+| `/` | Live chain head with the finality badge, blocks and transactions streaming in (WebSocket `newHeads`, polling fallback), measured stats from the last 30 blocks (height, average block time, throughput), active validators, transactions per block. |
+| `/blocks`, `/txs` | Live lists; older pages from the indexer when it is up. |
+| `/block/:number` | Header fields, fee split, transactions and the **commit certificate**: which validators precommitted, weighted by voting power against the 2/3 line, with each signature (`xdevs_getCommitCertificate`). |
+| `/tx/:hash` | Status, value, gas, fee split (burn / Treasury / tip), **decoded input** for the predeploys (Staking, Governance, XNS, WXDS, Permit2Expiring), XDRC-20 / ERC-20 and the Guardian Vault, transfers, approvals with expiry, EIP-7702 authorizations, decoded logs, and a **Guardian Vault panel** when the tx queued, cancelled or executed a vault action. |
+| `/address/:address` | Balance in tXDS, nonce, smart-account and **EOA lock** badges (`xdevs_getEoaLock`, XIP-0001), primary `.xdevs` name (XNS reverse record), guardians; tabs for transactions, transfers (spam hidden by default), live approvals with revoke hints, vault queue. Look-alike (address poisoning) warning from this browser's history. |
+| `/token/:address` | XDRC-20 / ERC-20 facts (supply, decimals, default and max approval duration), recent transfers. |
+| `/validators` | Validator set from the Staking predeploy (`0x…1000`) or `xdevs_validators`: status, stake, voting power, commission, uptime, epoch. |
+| `/name/:name` | `.xdevs` name: resolution, owner, expiry, grace period. |
+| `/search?q=` | Block number, tx hash, address or `.xdevs` name go straight to their page; other text asks the indexer. |
 
-**Look-alike warning** (plan §16.3): the explorer remembers the last 50 addresses you viewed or searched in this
-browser (localStorage only, never sent anywhere). If you open an address whose first 4 and last 4 hex chars match a
-different address from that history, a red banner explains address poisoning and shows both addresses. Addresses are
-always shown with their first and last 4 characters emphasised, and short forms keep 6 + 6 characters so 4/4
-look-alikes still differ visibly.
+## Data sources
+
+1. **Indexer API** (`apps/indexer`, [spec](../../docs/specs/explorer-api.md)) for lists, history, labels, spam flags,
+   approvals and vault queues.
+2. **Node RPC** for everything live: the head (WebSocket `newHeads`, else `eth_blockNumber` polling), commit certificates,
+   validators, the EOA lock, XNS reverse names, token metadata. When the API is down, block / tx / address / token pages
+   fall back to RPC-only views (labelled "Read directly from the node").
+3. When **neither** answers, every page shows a calm "Network not reachable yet — Enclave testnet launching soon" state
+   with both endpoint checks and a retry. Re-probes back off (15 s → 2 min), so an offline network never floods the console.
 
 ## Configuration
 
-Build-time variables (Vite inlines them; they are public):
+Build-time variables (inlined, public). Defaults are the Enclave endpoints from `@xdevs/sdk`:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `VITE_API_URL` | `http://127.0.0.1:8080` | Explorer API origin (no `/api/v1`). |
-| `VITE_RPC_URL` | `http://127.0.0.1:8545` | Node JSON-RPC, used for the footer network check. |
-| `VITE_CHAIN_ID` | `7117` | Expected chain id; a mismatch with the RPC or the API shows a warning. |
-| `VITE_NETWORK_NAME` | derived | Footer label. |
-| `VITE_NATIVE_SYMBOL` | `tXDS` | Native coin symbol. |
+| `NEXT_PUBLIC_RPC_URL` | `https://rpc.xdevschain.tech` | Node JSON-RPC (HTTP). |
+| `NEXT_PUBLIC_WS_URL` | `wss://ws.xdevschain.tech` | Node WebSocket for `newHeads`. |
+| `NEXT_PUBLIC_API_URL` | `https://explorer-api.xdevschain.tech` | Explorer API origin (no `/api/v1`). |
+| `NEXT_PUBLIC_CHAIN_ID` | `717171` | Expected chain id; a different id from the RPC shows a warning in the footer. |
+| `NEXT_PUBLIC_NETWORK_NAME` | `xDEVS Chain Enclave` | Label. |
+| `NEXT_PUBLIC_DEMO` | unset | `1` = demo mode: deterministic fixture chain (8 validators, XDRC-20 tokens, a smart account with a Guardian Vault queue, `.xdevs` names), no network calls, "Demo data" banner on every page. |
 
-Copy `.env.example` to `.env.local` to change them locally.
+See `.env.example` (for example a local node + indexer on 8545 / 8080).
 
-## Run locally
+## Develop
+
+From the repository root (npm workspaces; build the SDK once with `npm run build:sdk`):
 
 ```bash
-# node + indexer/API first (see apps/indexer/README.md), e.g.
-#   xdevs run --dev --genesis ../../deploy/configs/dev-genesis-with-predeploys.json --block-time 1s
-#   (cd ../indexer && DATABASE_URL=pglite://./data npm start)
-cd apps/explorer
-npm ci
-npm run dev        # http://localhost:5173
-npm run build      # typecheck + static build into dist/
-npm run preview    # serve dist/
-npm test           # node --test: formatting, look-alike logic, router, server-rendered components
+npm run dev -w @xdevs/explorer                        # http://localhost:3000
+NEXT_PUBLIC_DEMO=1 npm run dev -w @xdevs/explorer     # with demo data
+npm run typecheck -w @xdevs/explorer
+npm test -w @xdevs/explorer                           # node --test: formatting, look-alikes, routes/rewrites, decoding,
+                                                      # stats, commit certificates, demo chain, data fallbacks, components
+npm run build -w @xdevs/explorer                      # static export into apps/explorer/out
+npm start -w @xdevs/explorer                          # serves out/ with the _redirects rewrites (scripts/serve.mjs)
 ```
 
-`@xdevs/sdk` is linked from `sdk/ts` (`file:../../sdk/ts`); build the SDK once (`cd sdk/ts && npm ci && npm run build`)
-if its `dist/` is missing.
+The component tests compile `.tsx` with the SWC binary that Next.js ships (`test/jsx-hooks.mjs`); no extra dependency.
 
-## Deploy to Cloudflare Pages
+## Deploy (Cloudflare Pages, project `xdevs-explorer`)
 
-- Project root: `apps/explorer`. Build command: `npm ci && npm run build`. Output directory: `dist`. Node 24
-  (`NODE_VERSION=24`). Because `@xdevs/sdk` is a `file:` link to `../../sdk/ts`, connect the whole repository and add
-  `cd ../../sdk/ts && npm ci && npm run build && cd - && ` in front of the build command if `sdk/ts/dist` is not committed.
-- Set `VITE_API_URL` (for example `https://explorer-api.xdevschain.tech`), `VITE_RPC_URL`
-  (`https://rpc.xdevschain.tech`) and `VITE_CHAIN_ID` as build environment variables.
-- Custom domain: `explorer.xdevschain.tech` (one subdomain level, covered by the free `*.xdevschain.tech` certificate).
-- Deep links work without a redirect file: Pages serves `index.html` for unknown paths when the build has no
-  `404.html`. `public/_headers` sets a strict CSP (`script-src 'self'`, `connect-src 'self' https: wss:`), no framing,
-  and long caching for hashed assets. If the API or RPC is served over plain `http:`, extend `connect-src`.
-- Then set the indexer's `CORS_ORIGINS=https://explorer.xdevschain.tech`.
+- Build: `npm ci && npm run build:sdk && npm run build -w @xdevs/explorer`, output `apps/explorer/out`, `NODE_VERSION=24`.
+- **Dynamic routes** cannot be pre-rendered in a static export. Each one is exported once with the placeholder param
+  `_` (`generateStaticParams() → [{ … : '_' }]`), and `public/_redirects` serves that page for every value with a 200
+  rewrite (the URL stays):
 
-## Accessibility and design notes
+  ```
+  /block/*    /block/_    200
+  /tx/*       /tx/_       200
+  /address/*  /address/_  200
+  /token/*    /token/_    200
+  /name/*     /name/_     200
+  ```
 
-Semantic landmarks and a skip link, one `h1` per page, tables with headers and captions (stacked as labelled cards on
-narrow screens), visible focus, status text on every coloured badge, `role="alert"` for the look-alike and freeze
-warnings, `prefers-color-scheme` plus a manual Auto / Light / Dark toggle, and `prefers-reduced-motion`.
+  The page reads the real value from `window.location` after hydration. Links to these pages are plain `<a>` (a
+  document load, no RSC fetch for a payload that does not exist); static pages use `next/link`.
+- `public/_headers`: CSP (`script-src 'self' 'unsafe-inline'`: a Next static export inlines its RSC payload), no framing,
+  immutable caching for `/_next/static/*`. If the API or RPC is served over plain `http:`, extend `connect-src`.
+- Custom domain `explorer.xdevschain.tech`; set the indexer's `CORS_ORIGINS=https://explorer.xdevschain.tech`.
+
+## Design and accessibility
+
+Dark brand from `@xdevs/ui` (platinum on near-black, one teal accent for "final / live / links"), tabular numerals,
+monospace hashes with copy buttons, skeleton loading, responsive down to 360 px. Skip link and landmarks from the
+AppShell, one `h1` per page, table captions, text on every coloured badge, keyboard-reachable everything (`/` focuses
+the search), `role="alert"` for look-alike and freeze warnings, and `prefers-reduced-motion` turns off the ticker, row
+and pulse animations.

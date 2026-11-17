@@ -155,6 +155,8 @@ export const xnsAbi = parseAbi([
   'function available(string label) view returns (bool)',
   'function register(string label, address owner, uint256 duration) payable returns (bytes32, uint256)',
   'function rentPrice(uint256 duration) view returns (uint256)',
+  'function setName(string name) returns (bytes32)',
+  'function nameExpires(uint256 id) view returns (uint256)',
 ])
 
 export const erc20Abi = parseAbi([

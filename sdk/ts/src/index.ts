@@ -1,12 +1,18 @@
 export {
   XDEVS_DEVNET_CHAIN_ID,
+  XDEVS_ENCLAVE_CHAIN_ID,
+  XDEVS_ENCLAVE_ENDPOINTS,
+  XDEVS_LOCAL_CHAIN_ID,
   XDEVS_TESTNET_CHAIN_ID,
-  XDEVS_TESTNET_IS_PLACEHOLDER,
-  XDEVS_TESTNET_PLACEHOLDER_DOMAIN,
   type XdevsChain,
+  type XdevsDevnetEndpoints,
+  defineXdevsDevnet,
+  enclaveXds,
   testnetXds,
   xdevsChains,
   xdevsDevnet,
+  xdevsEnclave,
+  xdevsLocal,
   xdevsTestnet,
 } from './chains.ts'
 export { MULTICALL3_ADDRESS, type PredeployName, predeploys } from './predeploys.ts'

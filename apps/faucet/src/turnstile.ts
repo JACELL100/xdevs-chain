@@ -4,7 +4,7 @@
 import { HttpError } from "./http.ts";
 
 export const SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-/** Must match data-action on the widget in page.ts. */
+/** Must match the widget's `action` in apps/faucet-web/components/Turnstile.tsx. */
 export const TURNSTILE_ACTION = "claim";
 
 interface SiteverifyResult {

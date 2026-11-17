@@ -25,13 +25,13 @@ export interface Env {
   RPC_URL: string;
   /** Decimal chain id, e.g. "717171" for xdevs-testnet-1. */
   CHAIN_ID: string;
-  /** Turnstile site key (public, embedded in the page). */
-  TURNSTILE_SITE_KEY: string;
+  /** Unused by the Worker since the UI moved to apps/faucet-web (NEXT_PUBLIC_TURNSTILE_SITE_KEY there). */
+  TURNSTILE_SITE_KEY?: string;
   /** Amount per claim in whole tXDS (decimal string). Default "100". */
   DRIP_AMOUNT?: string;
   /** Refuse to drip when the faucet balance (tXDS) is below this. Default "1000". */
   MIN_FAUCET_BALANCE?: string;
-  /** Comma-separated list of origins allowed to call /api/* cross-origin (explorer, wallet). */
+  /** Comma-separated origins allowed to call /api/* cross-origin (explorer, wallet, status page). Same-origin faucet UI needs none. */
   CORS_ORIGINS?: string;
   /** Explorer tx URL template, "{hash}" is replaced, e.g. "https://explorer.testnet.example/tx/{hash}". */
   EXPLORER_TX_URL?: string;

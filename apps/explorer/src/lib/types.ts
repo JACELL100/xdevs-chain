@@ -1,4 +1,5 @@
-// Response shapes of the explorer API (docs/specs/explorer-api.md). Quantities are 0x hex strings.
+// Response shapes of the explorer API (docs/specs/explorer-api.md), also produced by the RPC-only and demo sources.
+// Quantities are 0x hex strings.
 
 export type Hex = `0x${string}`
 
@@ -27,12 +28,14 @@ export interface BlockSummary {
   gasLimit: string
   baseFeePerGas: string | null
   size: number | null
-  fees: { burned: string; treasury: string; priority: string }
+  /** `priority` is null when computed from RPC data without receipts. */
+  fees: { burned: string; treasury: string; priority: string | null }
 }
 
 export interface Commit {
   round: number
   signatures: number
+  /** Consensus addresses of the signers (sha256(ed25519 key)[..20]). */
   validators: string[]
 }
 
@@ -51,9 +54,10 @@ export interface TxSummary {
   to: string | null
   contractCreated: string | null
   value: string
-  status: 'success' | 'reverted'
+  /** `unknown` when the receipt was not fetched (RPC-only lists). */
+  status: 'success' | 'reverted' | 'unknown'
   methodId: string | null
-  fee: string
+  fee: string | null
   spam: boolean
   spamReasons: string[]
 }
@@ -216,4 +220,59 @@ export interface SearchResult {
   type: 'block' | 'tx' | 'address' | 'name'
   id: string
   label: string | null
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Explorer-only shapes (not served by the indexer API)
+// ---------------------------------------------------------------------------------------------------------------
+
+export type Source = 'api' | 'rpc' | 'demo'
+
+export interface ValidatorRow {
+  operator: string
+  consensusKey: string
+  status: 'candidate' | 'active' | 'jailed' | 'tombstoned' | 'exited' | 'unknown'
+  totalStake: string
+  selfStake: string | null
+  votingPower: string | null
+  commissionBps: number
+  uptimeBps: number | null
+  jailedUntil: number | null
+  inSigningSet: boolean
+  name: string | null
+}
+
+export interface ValidatorSet {
+  validators: ValidatorRow[]
+  epoch: number | null
+  /** `rpc-validators`: xdevs_validators, `staking`: eth_call on the Staking predeploy. */
+  via: 'rpc-validators' | 'staking' | 'demo'
+}
+
+export interface TokenInfo {
+  address: string
+  name: string | null
+  symbol: string | null
+  decimals: number | null
+  totalSupply: string | null
+  /** XDRC-20 (expiring approvals) when the token answers `defaultApprovalDuration()`. */
+  xdrc20: { defaultApprovalDuration: number; maxApprovalDuration: number | null } | null
+  known: boolean
+  label: string | null
+}
+
+export interface TokenPage {
+  token: TokenInfo
+  transfers: TokenTransfer[]
+  /** Blocks scanned for recent transfers (RPC log scan), null when served by the indexer. */
+  scannedBlocks: number | null
+  holdersNote: string | null
+}
+
+/** Live commit certificate with the signatures themselves (xdevs_getCommitCertificate). */
+export interface CommitDetail {
+  height: number
+  round: number
+  blockHash: string
+  signatures: { validator: string; signature: string }[]
 }

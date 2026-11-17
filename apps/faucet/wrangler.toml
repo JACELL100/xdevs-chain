@@ -10,17 +10,20 @@ name = "xdevs-faucet"
 main = "src/index.ts"
 compatibility_date = "2026-11-01"
 workers_dev = true
-# routes = [{ pattern = "faucet.testnet.<your-domain>", custom_domain = true }]
+# JSON API only. The UI (apps/faucet-web) is a Cloudflare Pages project on faucet.xdevschain.tech;
+# this route sends faucet.xdevschain.tech/api/* to the Worker (Worker routes take precedence over Pages).
+routes = [{ pattern = "faucet.xdevschain.tech/api/*", zone_name = "xdevschain.tech" }]
 
 [vars]
-RPC_URL = "https://rpc.testnet.<your-domain>"          # public RPC full node (plan §24.2), placeholder
-CHAIN_ID = "717171"                                    # xdevs-testnet-1 (plan §21.1)
-TURNSTILE_SITE_KEY = "0x4AAAAAAA_REPLACE_ME"           # public site key from the Turnstile dashboard
+RPC_URL = "https://rpc.xdevschain.tech"                # Enclave public RPC full node (plan §24.2)
+CHAIN_ID = "717171"                                    # xDEVS Chain Enclave (0xAF173)
 DRIP_AMOUNT = "100"                                    # tXDS per claim (plan §20.3)
 MIN_FAUCET_BALANCE = "1000"                            # pause drips below this many tXDS
-CORS_ORIGINS = "https://explorer.testnet.<your-domain>,https://wallet.testnet.<your-domain>"
-EXPLORER_TX_URL = "https://explorer.testnet.<your-domain>/tx/{hash}"
-TURNSTILE_EXPECTED_HOSTNAME = ""                       # e.g. "faucet.testnet.<your-domain>"; empty = not checked
+# Cross-origin callers of /api/*. The faucet UI is same-origin and needs no entry; the status page polls /api/status.
+CORS_ORIGINS = "https://status.xdevschain.tech,https://explorer.xdevschain.tech,https://wallet.xdevschain.tech"
+EXPLORER_TX_URL = "https://explorer.xdevschain.tech/tx/{hash}"
+TURNSTILE_EXPECTED_HOSTNAME = "faucet.xdevschain.tech" # empty = not checked (use empty with the Turnstile test keys)
+# The Turnstile SITE key now lives in the UI build: NEXT_PUBLIC_TURNSTILE_SITE_KEY in apps/faucet-web.
 
 # Rate-limit markers (addr:<address>, ip:<ipv4>, ip6:<prefix>/64), 24 h TTL.
 [[kv_namespaces]]

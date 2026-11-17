@@ -1,28 +1,39 @@
 import { type Chain, defineChain } from 'viem'
 import { MULTICALL3_ADDRESS, predeploys } from './predeploys.ts'
 
-/** Native currency of every pre-mainnet xDEVS network (plan §1.4, §20.1). 1 tXDS = 10^18 dev. */
+/** Native currency of local and devnet xDEVS networks (plan §1.4, §20.1). 1 tXDS = 10^18 dev. */
 export const testnetXds = { name: 'Testnet XDS', symbol: 'tXDS', decimals: 18 } as const
 
-/** Chain id of a local single-node devnet (`xdevs-primitives::DEV_CHAIN_ID`). */
-export const XDEVS_DEVNET_CHAIN_ID = 7117
+/** Native currency of the Enclave public testnet: EnclaveXDS, symbol tXDS. No monetary value. */
+export const enclaveXds = { name: 'EnclaveXDS', symbol: 'tXDS', decimals: 18 } as const
+
+/** Chain id of a local single-node chain started with `xdevs run --dev` (`xdevs-primitives::DEV_CHAIN_ID`). */
+export const XDEVS_LOCAL_CHAIN_ID = 7117
+
+/** Chain id of the xDEVS Chain Devnet (internal multi-node test network, no public endpoint yet). */
+export const XDEVS_DEVNET_CHAIN_ID = 717170
 
 /**
- * Chain id of the public testnet.
- *
- * TODO(chain-id): 717171 (0xAF173) is the PLACEHOLDER from plan §21.1 / §23.1. It is NOT yet registered
- * on chainlist.org / ethereum-lists/chains. Replace it once the id is registered (plan §8.5).
+ * Chain id of xDEVS Chain Enclave, the public testnet: 717171 = 0xAF173.
+ * Free in the chainid.network registry (checked 2026-11-17); registration on ethereum-lists/chains is pending.
  */
-export const XDEVS_TESTNET_CHAIN_ID = 717171
+export const XDEVS_ENCLAVE_CHAIN_ID = 717171
 
-/**
- * TODO(domain): the testnet domain is not chosen yet (plan §1.4 "Secure a domain").
- * `.invalid` is reserved by RFC 2606, so requests fail fast instead of hitting a random host.
- */
-export const XDEVS_TESTNET_PLACEHOLDER_DOMAIN = 'testnet.xdevs.invalid'
+/** @deprecated Use {@link XDEVS_ENCLAVE_CHAIN_ID}. */
+export const XDEVS_TESTNET_CHAIN_ID = XDEVS_ENCLAVE_CHAIN_ID
 
-/** `true` while `xdevsTestnet` still uses the placeholder chain id and domain above. */
-export const XDEVS_TESTNET_IS_PLACEHOLDER = true
+/** Public endpoints of the Enclave testnet (all under xdevschain.tech). */
+export const XDEVS_ENCLAVE_ENDPOINTS = {
+  rpc: 'https://rpc.xdevschain.tech',
+  ws: 'wss://ws.xdevschain.tech',
+  explorer: 'https://explorer.xdevschain.tech',
+  explorerApi: 'https://explorer-api.xdevschain.tech',
+  wallet: 'https://wallet.xdevschain.tech',
+  faucet: 'https://faucet.xdevschain.tech',
+  status: 'https://status.xdevschain.tech',
+  bundler: 'https://bundler.xdevschain.tech',
+  site: 'https://xdevschain.tech',
+} as const
 
 /** A viem `Chain` narrowed with the literal config of an xDEVS network. */
 export type XdevsChain<config extends Chain = Chain> = Chain<undefined> & config
@@ -42,9 +53,9 @@ const genesisContracts = {
   wxds: { address: predeploys.WXDS, blockCreated: 0 },
 } as const
 
-const devnetConfig = {
-  id: XDEVS_DEVNET_CHAIN_ID,
-  name: 'xDEVS Chain Devnet',
+const localConfig = {
+  id: XDEVS_LOCAL_CHAIN_ID,
+  name: 'xDEVS Chain Local',
   nativeCurrency: testnetXds,
   rpcUrls: {
     default: {
@@ -57,35 +68,66 @@ const devnetConfig = {
   testnet: true,
 } as const
 
-/** Local development node started with `xdevs run --dev` (chain id 7117). */
-export const xdevsDevnet: XdevsChain<typeof devnetConfig> = /*#__PURE__*/ defineChain(devnetConfig)
+/** Local development node started with `xdevs run --dev` (chain id 7117, `http://127.0.0.1:8545`). */
+export const xdevsLocal: XdevsChain<typeof localConfig> = /*#__PURE__*/ defineChain(localConfig)
 
-const testnetConfig = {
-  id: XDEVS_TESTNET_CHAIN_ID,
-  name: 'xDEVS Chain Testnet',
+const devnetConfig = {
+  id: XDEVS_DEVNET_CHAIN_ID,
+  name: 'xDEVS Chain Devnet',
   nativeCurrency: testnetXds,
-  rpcUrls: {
-    default: {
-      http: [`https://rpc.${XDEVS_TESTNET_PLACEHOLDER_DOMAIN}`],
-      webSocket: [`wss://ws.${XDEVS_TESTNET_PLACEHOLDER_DOMAIN}`],
-    },
-  },
-  blockExplorers: {
-    default: { name: 'xDEVS Explorer', url: `https://explorer.${XDEVS_TESTNET_PLACEHOLDER_DOMAIN}` },
-  },
+  // No public endpoint yet: pass one with `defineXdevsDevnet({ rpcUrl })`. An empty list makes
+  // viem's `http()` transport fail fast instead of calling a wrong host.
+  rpcUrls: { default: { http: [] as readonly string[] } },
   contracts: genesisContracts,
   blockTime: 2_000,
   testnet: true,
 } as const
 
 /**
- * Public xDEVS Chain testnet.
- *
- * TODO: chain id (717171) and all URLs are PLACEHOLDERS — see {@link XDEVS_TESTNET_CHAIN_ID} and
- * {@link XDEVS_TESTNET_PLACEHOLDER_DOMAIN}. Until then, override them, e.g.
- * `defineChain({ ...xdevsTestnet, rpcUrls: { default: { http: ['https://…'] } } })`.
+ * xDEVS Chain Devnet (chain id 717170). It has no public RPC yet, so this definition carries no URL:
+ * use {@link defineXdevsDevnet} to point it at a node.
  */
-export const xdevsTestnet: XdevsChain<typeof testnetConfig> = /*#__PURE__*/ defineChain(testnetConfig)
+export const xdevsDevnet: XdevsChain<typeof devnetConfig> = /*#__PURE__*/ defineChain(devnetConfig)
+
+/** Endpoints for {@link defineXdevsDevnet}. */
+export type XdevsDevnetEndpoints = { rpcUrl: string; wsUrl?: string; explorerUrl?: string }
+
+/** {@link xdevsDevnet} pointed at the given RPC (and optional WebSocket / explorer) URL. */
+export function defineXdevsDevnet({ rpcUrl, wsUrl, explorerUrl }: XdevsDevnetEndpoints): XdevsChain {
+  return defineChain({
+    ...devnetConfig,
+    rpcUrls: { default: { http: [rpcUrl], ...(wsUrl ? { webSocket: [wsUrl] } : {}) } },
+    ...(explorerUrl ? { blockExplorers: { default: { name: 'xDEVS Explorer', url: explorerUrl } } } : {}),
+  })
+}
+
+const enclaveConfig = {
+  id: XDEVS_ENCLAVE_CHAIN_ID,
+  name: 'xDEVS Chain Enclave',
+  nativeCurrency: enclaveXds,
+  rpcUrls: {
+    default: {
+      http: [XDEVS_ENCLAVE_ENDPOINTS.rpc],
+      webSocket: [XDEVS_ENCLAVE_ENDPOINTS.ws],
+    },
+  },
+  blockExplorers: {
+    default: {
+      name: 'xDEVS Explorer',
+      url: XDEVS_ENCLAVE_ENDPOINTS.explorer,
+      apiUrl: XDEVS_ENCLAVE_ENDPOINTS.explorerApi,
+    },
+  },
+  contracts: genesisContracts,
+  blockTime: 2_000,
+  testnet: true,
+} as const
+
+/** xDEVS Chain Enclave, the public testnet (chain id 717171, coin EnclaveXDS / tXDS). */
+export const xdevsEnclave: XdevsChain<typeof enclaveConfig> = /*#__PURE__*/ defineChain(enclaveConfig)
+
+/** @deprecated The public testnet is named Enclave: use {@link xdevsEnclave}. */
+export const xdevsTestnet: typeof xdevsEnclave = xdevsEnclave
 
 /** All xDEVS chains known to this SDK version. */
-export const xdevsChains = [xdevsDevnet, xdevsTestnet] as const
+export const xdevsChains = [xdevsLocal, xdevsDevnet, xdevsEnclave] as const
