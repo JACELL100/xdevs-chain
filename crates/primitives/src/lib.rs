@@ -13,6 +13,7 @@ mod account;
 mod block;
 mod config;
 pub mod constants;
+pub mod safety;
 pub mod serde_helpers;
 mod tx;
 pub mod xip0001;
