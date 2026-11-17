@@ -14,7 +14,8 @@ name: web-deploy
 
 on:
   push:
-    branches: [main]
+    # web-apps: work-in-progress branch; only the apps listed in READY_ON_BRANCH deploy from it.
+    branches: [main, web-apps]
     paths:
       - "apps/explorer/**"
       - "apps/wallet/**"
@@ -73,6 +74,8 @@ jobs:
           EVENT: ${{ github.event_name }}
           INPUT_APP: ${{ inputs.app }}
           CHANGED: ${{ steps.filter.outputs.changes }}
+          REF: ${{ github.ref_name }}
+          READY_ON_BRANCH: "explorer"
         run: |
           node -e '
             const projects = { explorer: "xdevs-explorer", wallet: "xdevs-wallet", "faucet-web": "xdevs-faucet", status: "xdevs-status" }
@@ -81,6 +84,7 @@ jobs:
             if (process.env.EVENT === "workflow_dispatch")
               apps = process.env.INPUT_APP === "all" ? Object.keys(projects) : [process.env.INPUT_APP]
             else apps = JSON.parse(process.env.CHANGED || "[]").filter((a) => a in projects)
+            if (process.env.REF !== "main") apps = apps.filter((a) => process.env.READY_ON_BRANCH.split(",").includes(a))
             const include = apps.map((app) => ({ app, project: projects[app], url: `https://${hosts[app]}.xdevschain.tech` }))
             const out = `matrix=${JSON.stringify({ include })}\nany=${include.length > 0}\n`
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, out)
