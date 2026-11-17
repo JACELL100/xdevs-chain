@@ -10,6 +10,12 @@
 //!   address/topic semantics are those of `eth_getLogs`.
 //! * `newPendingTransactions`: the hash of every transaction admitted to the mempool
 //!   (`true` = full objects is not supported).
+//! * `vaultEvents` (optional filter `{account}`, Phase 4): Guardian Vault alerts decoded
+//!   from committed blocks: `queued`, `cancelled`, `executed`, `invalidated` (vault epoch
+//!   bumped by a recovery), `frozen`, `unfrozen`
+//!   ([`xdevs_primitives::safety::VaultEvent`], with block / tx / log index). Without an
+//!   account every matching event of every contract is delivered: only the `account`
+//!   filter (the emitter) proves which smart account an event belongs to.
 //!
 //! Limits (§19.3): at most [`crate::RpcServerConfig::max_subscriptions_per_connection`]
 //! per connection (jsonrpsee, error -32006) and
@@ -50,7 +56,12 @@ use std::{
     time::Duration,
 };
 use tokio::sync::broadcast::{self, error::RecvError};
-use xdevs_primitives::{keccak256, B256};
+use xdevs_primitives::{
+    keccak256,
+    reexports::alloy_primitives::U64,
+    safety::{decode_vault_event, VaultEvent},
+    Address, B256,
+};
 
 /// Subscribe method.
 pub const SUBSCRIBE: &str = "eth_subscribe";
@@ -72,6 +83,14 @@ pub(crate) enum SubscriptionKind {
     NewHeads,
     Logs(Box<Filter>),
     NewPendingTransactions,
+    VaultEvents(Option<Address>),
+}
+
+/// Filter of a `vaultEvents` subscription.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VaultEventsFilter {
+    account: Option<Address>,
 }
 
 impl SubscriptionKind {
@@ -80,6 +99,7 @@ impl SubscriptionKind {
             Self::NewHeads => "newHeads",
             Self::Logs(_) => "logs",
             Self::NewPendingTransactions => "newPendingTransactions",
+            Self::VaultEvents(_) => "vaultEvents",
         }
     }
 }
@@ -89,7 +109,7 @@ fn invalid(msg: impl Into<String>) -> ErrorObjectOwned {
 }
 
 /// Parse `eth_subscribe` params: `["newHeads"]`, `["logs", filter?]`,
-/// `["newPendingTransactions", false?]`.
+/// `["newPendingTransactions", false?]`, `["vaultEvents", {account?}?]`.
 pub(crate) fn parse_subscription(
     params: &Params<'_>,
 ) -> Result<SubscriptionKind, ErrorObjectOwned> {
@@ -110,9 +130,15 @@ pub(crate) fn parse_subscription(
             )),
             _ => Ok(SubscriptionKind::NewPendingTransactions),
         },
+        "vaultEvents" => {
+            let filter: Option<VaultEventsFilter> = seq.optional_next()?;
+            Ok(SubscriptionKind::VaultEvents(
+                filter.unwrap_or_default().account,
+            ))
+        }
         other => Err(invalid(format!(
             "unsupported subscription type {other:?} (supported: newHeads, logs, \
-             newPendingTransactions)"
+             newPendingTransactions, vaultEvents)"
         ))),
     }
 }
@@ -174,6 +200,7 @@ enum Source {
     Heads(broadcast::Receiver<Arc<BlockEvent>>),
     Logs(broadcast::Receiver<Arc<BlockEvent>>, Box<Filter>),
     PendingTxs(broadcast::Receiver<B256>),
+    Vault(broadcast::Receiver<Arc<BlockEvent>>, Option<Address>),
 }
 
 async fn subscribe(
@@ -200,6 +227,10 @@ async fn subscribe(
         SubscriptionKind::NewPendingTransactions => {
             ctx.backend.subscribe_pending_txs().map(Source::PendingTxs)
         }
+        SubscriptionKind::VaultEvents(account) => ctx
+            .backend
+            .subscribe_blocks()
+            .map(|rx| Source::Vault(rx, account)),
     };
     let Some(source) = source else {
         let e = RpcBackendError::Unsupported(format!(
@@ -234,6 +265,14 @@ async fn subscribe(
             .await
         }
         Source::PendingTxs(rx) => pump(&sink, rx, |hash: B256, out| push(out, &hash)).await,
+        Source::Vault(rx, account) => {
+            pump(&sink, rx, |ev: Arc<BlockEvent>, out| {
+                for event in vault_events(&ev, account) {
+                    push(out, &event);
+                }
+            })
+            .await
+        }
     };
     drop(permit);
     match result {
@@ -243,6 +282,24 @@ async fn subscribe(
             SubscriptionCloseResponse::NotifErr(SubscriptionError::from(reason))
         }
     }
+}
+
+/// The Guardian Vault events of a committed block (emitted by `account` if set), with
+/// their block / transaction / log position.
+pub(crate) fn vault_events(block: &BlockEvent, account: Option<Address>) -> Vec<VaultEvent> {
+    block
+        .logs
+        .iter()
+        .filter(|l| account.is_none_or(|a| l.inner.address == a))
+        .filter_map(|l| {
+            let mut event = decode_vault_event(&l.inner)?;
+            event.block_number = l.block_number.map(U64::from);
+            event.block_hash = l.block_hash;
+            event.transaction_hash = l.transaction_hash;
+            event.log_index = l.log_index.map(U64::from);
+            Some(event)
+        })
+        .collect()
 }
 
 /// Serialise `value` as a notification payload (the sink adds method and id).
@@ -561,5 +618,65 @@ mod tests {
         };
         assert!(s.starts_with("0x") && s.len() == 34, "{s}");
         assert!(s[2..].chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn vault_events_kind_and_filtering() {
+        let account = Address::repeat_byte(0xac);
+        assert_eq!(
+            parse(json!(["vaultEvents"])).unwrap(),
+            SubscriptionKind::VaultEvents(None)
+        );
+        assert_eq!(
+            parse(json!(["vaultEvents", {"account": account}])).unwrap(),
+            SubscriptionKind::VaultEvents(Some(account))
+        );
+        assert_eq!(
+            parse(json!(["vaultEvents", {"acount": account}]))
+                .unwrap_err()
+                .code(),
+            -32602
+        );
+
+        let t = &*xdevs_primitives::safety::TOPICS;
+        let log = |address: Address, topics: Vec<B256>, data: Vec<u8>, index: u64| RpcLog {
+            inner: xdevs_primitives::Log {
+                address,
+                data: xdevs_primitives::LogData::new_unchecked(topics, data.into()),
+            },
+            block_number: Some(9),
+            block_hash: Some(B256::repeat_byte(9)),
+            transaction_hash: Some(B256::repeat_byte(7)),
+            log_index: Some(index),
+            ..Default::default()
+        };
+        let id = B256::left_padding_from(&[3]);
+        let block = BlockEvent {
+            header: RpcHeader::default(),
+            logs: vec![
+                log(account, vec![t.vault_executed, id], Vec::new(), 0),
+                // Same event from another contract.
+                log(
+                    Address::repeat_byte(0x01),
+                    vec![t.vault_executed, id],
+                    Vec::new(),
+                    1,
+                ),
+                // Not a vault event.
+                log(account, vec![t.transfer], Vec::new(), 2),
+                log(account, vec![t.account_unfrozen], Vec::new(), 3),
+            ],
+            tx_count: 1,
+        };
+        let all = vault_events(&block, None);
+        assert_eq!(all.len(), 3);
+        let mine = vault_events(&block, Some(account));
+        assert_eq!(mine.len(), 2);
+        let json = serde_json::to_value(&mine[0]).unwrap();
+        assert_eq!(json["type"], "executed");
+        assert_eq!(json["id"], "0x3");
+        assert_eq!(json["blockNumber"], "0x9");
+        assert_eq!(json["logIndex"], "0x0");
+        assert_eq!(serde_json::to_value(&mine[1]).unwrap()["type"], "unfrozen");
     }
 }
