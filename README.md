@@ -115,10 +115,10 @@ deploy/            dev genesis, systemd unit, local Docker setup
 | JSON-RPC | `https://rpc.xdevschain.tech` | ✅ Live |
 | WebSocket | `wss://ws.xdevschain.tech` | ✅ Live |
 | Network status | https://status.xdevschain.tech | ✅ Live |
-| Block explorer | https://explorer.xdevschain.tech | ✅ Live (reads from the node; history needs the explorer API) |
+| Block explorer | https://explorer.xdevschain.tech | ✅ Live |
 | Wallet | https://wallet.xdevschain.tech | ✅ Live (preview; passkey accounts need the bundler) |
 | Faucet | https://faucet.xdevschain.tech | 🚧 Page live; claims open once the captcha is configured |
-| Explorer API | `https://explorer-api.xdevschain.tech` | 📋 Next |
+| Explorer API | `https://explorer-api.xdevschain.tech/api/v1/…` | ✅ Live (indexer on Postgres) |
 | Bundler | `https://bundler.xdevschain.tech` | 📋 Next |
 | Website and docs | https://xdevschain.tech | ✅ Live |
 
