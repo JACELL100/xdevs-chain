@@ -1,0 +1,49 @@
+name: genesis
+
+# Builds a genesis file with the system predeploys and the validators registered in Staking
+# (tools/genesis-builder needs Foundry, which is too heavy for the maintainers' laptops).
+# Run it manually with a config from tools/genesis-builder/configs and download the artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: "Config name in tools/genesis-builder/configs (without .json)"
+        required: true
+        default: devnet
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.9.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Build genesis
+        working-directory: tools/genesis-builder
+        run: |
+          set -euo pipefail
+          cfg="configs/${{ inputs.config }}.json"
+          test -f "$cfg"
+          node genesis-builder.ts build --config "$cfg" --out "../../genesis-${{ inputs.config }}.json"
+      - name: Verify
+        continue-on-error: true
+        run: bash tools/genesis-builder/verify.sh "genesis-${{ inputs.config }}.json"
+      - name: Checksum
+        run: sha256sum "genesis-${{ inputs.config }}.json" | tee "genesis-${{ inputs.config }}.json.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: genesis-${{ inputs.config }}
+          path: |
+            genesis-${{ inputs.config }}.json
+            genesis-${{ inputs.config }}.json.sha256

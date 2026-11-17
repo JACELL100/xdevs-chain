@@ -1,0 +1,75 @@
+{
+  "_comment": "xDEVS Chain devnet-1 (4 Oracle validators: Hyderabad val-1/val-2, Mumbai val-3/val-4). Consensus keys were generated on each VM; the allocations go to val-1's operator account (devnet only, tXDS has no value).",
+  "genesis": {
+    "config": {
+      "chainId": 717170,
+      "name": "xdevs-devnet-1",
+      "hardfork": "xdevs-v1",
+      "xip0001Block": 0,
+      "blockTimeMs": 2000,
+      "epochLength": 3600,
+      "baseFee": {
+        "initial": "1000000000",
+        "minimum": "100000000",
+        "elasticity": 2,
+        "maxChangeDenominator": 8,
+        "burnBps": 8000
+      },
+      "treasury": "0x0000000000000000000000000000000000001002",
+      "systemAddress": "0xfffffffffffffffffffffffffffffffffffffffe"
+    },
+    "timestamp": "0x0",
+    "gasLimit": "0x1c9c380",
+    "extraData": "0x7844455653"
+  },
+  "totalSupply": "1000000000",
+  "allocations": [
+    {
+      "name": "faucet, grants, core development and reserve (75%) -> val-1 operator",
+      "address": "0x4E0a69305925f213D717e002EF7E4bae4f5B0402",
+      "amount": "750000000"
+    },
+    {
+      "name": "treasury (20%)",
+      "address": "0x0000000000000000000000000000000000001002",
+      "amount": "200000000"
+    }
+  ],
+  "validators": [
+    {
+      "name": "val1",
+      "operator": "0x4E0a69305925f213D717e002EF7E4bae4f5B0402",
+      "consensusKey": "ed25519:0xd7881d9fc4338abfa176e4bbded8e36ef8bbbec992b4af40bef4d8f297efcf4d",
+      "stake": "12500000",
+      "commissionBps": 1000,
+      "p2p": "/ip4/140.245.245.54/tcp/30333/p2p/12D3KooWP65HsosrdGnXhdcJKkeQNyRzzFAK9aGb5P38Q2EvtRnU"
+    },
+    {
+      "name": "val2",
+      "operator": "0x4f3Cd5fb70f67d8c4851a48c9317833612cf8393",
+      "consensusKey": "ed25519:0xadc8f702a821726352a4a281e445bfb5b627bc11c196b6a5625f9f0d2610be4f",
+      "stake": "12500000",
+      "commissionBps": 1000,
+      "p2p": "/ip4/129.225.105.26/tcp/30333/p2p/12D3KooWKpMAUjPQAyv9xgLjjxYhoht6wKnLvMoy4dPie6gYagsv"
+    },
+    {
+      "name": "val3",
+      "operator": "0x187F5EEa6730C7c7aC7ba1cc8994420ECBb6D6f2",
+      "consensusKey": "ed25519:0x24311d9a9a22c4979cc4085b20877ce5dd47795be261fa9db7962a6440dad858",
+      "stake": "12500000",
+      "commissionBps": 1000,
+      "p2p": "/ip4/130.210.85.54/tcp/30333/p2p/12D3KooWSpGWhwaFfftXJz28XnyW9tnqpwmsDcRDkq8G3kiLG9Bw"
+    },
+    {
+      "name": "val4",
+      "operator": "0x42073689894ba795fF54D4Aa2b528F5b48280782",
+      "consensusKey": "ed25519:0x20dc457d6cec118ef3f90760f390fcdd338143448ac866b9b62296f967f13d0c",
+      "stake": "12500000",
+      "commissionBps": 1000,
+      "p2p": "/ip4/80.225.192.74/tcp/30333/p2p/12D3KooWBRYhGYHJdw9QeKsUi1Ff3ibbo1DvLTS5Vt1y4By92tFG"
+    }
+  ],
+  "governance": {
+    "guardian": "0x0000000000000000000000000000000000000000"
+  }
+}
