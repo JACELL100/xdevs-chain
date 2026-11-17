@@ -127,43 +127,99 @@ macro_rules! table {
     };
 }
 
-table!(/// `block number -> header (RLP)`.
-    Headers, u64, Header);
-table!(/// `block hash -> block number`.
-    HeaderNumbers, B256, u64);
-table!(/// `block number -> transactions`.
-    Bodies, u64, Vec<TxEnvelope>);
-table!(/// `tx hash -> (block number, index)`.
-    Transactions, B256, TxLocation);
-table!(/// `(block number, tx index) -> receipt (EIP-2718)`.
-    Receipts, (u64, u64), ReceiptEnvelope);
-table!(/// `address -> flat account`.
-    PlainAccounts, Address, AccountInfo);
-table!(/// `(address, slot) -> value`. Zero values are deleted, never stored.
-    PlainStorage, (Address, B256), U256);
-table!(/// `code hash -> bytecode`.
-    Bytecodes, B256, Bytes);
-table!(/// `string key -> raw bytes`, see [`crate::meta_keys`].
-    Meta, String, Vec<u8>);
-table!(/// `(address, block) -> account as it was before that block` (`None` = absent).
-    AccountHistory, (Address, u64), Option<AccountInfo>);
-table!(/// `(address, slot, block) -> value before that block` (zero = unset).
-    StorageHistory, (Address, B256, u64), U256);
-table!(/// `block -> keys whose history entries that block wrote` (pruning index).
-    StateChangeSets, u64, StateChangeSet);
-table!(/// `block number -> commit certificate` (Phase 2). The value is the RLP of
+table!(
+    /// `block number -> header (RLP)`.
+    Headers,
+    u64,
+    Header
+);
+table!(
+    /// `block hash -> block number`.
+    HeaderNumbers,
+    B256,
+    u64
+);
+table!(
+    /// `block number -> transactions`.
+    Bodies,
+    u64,
+    Vec<TxEnvelope>
+);
+table!(
+    /// `tx hash -> (block number, index)`.
+    Transactions,
+    B256,
+    TxLocation
+);
+table!(
+    /// `(block number, tx index) -> receipt (EIP-2718)`.
+    Receipts,
+    (u64, u64),
+    ReceiptEnvelope
+);
+table!(
+    /// `address -> flat account`.
+    PlainAccounts,
+    Address,
+    AccountInfo
+);
+table!(
+    /// `(address, slot) -> value`. Zero values are deleted, never stored.
+    PlainStorage,
+    (Address, B256),
+    U256
+);
+table!(
+    /// `code hash -> bytecode`.
+    Bytecodes,
+    B256,
+    Bytes
+);
+table!(
+    /// `string key -> raw bytes`, see [`crate::meta_keys`].
+    Meta,
+    String,
+    Vec<u8>
+);
+table!(
+    /// `(address, block) -> account as it was before that block` (`None` = absent).
+    AccountHistory,
+    (Address, u64),
+    Option<AccountInfo>
+);
+table!(
+    /// `(address, slot, block) -> value before that block` (zero = unset).
+    StorageHistory,
+    (Address, B256, u64),
+    U256
+);
+table!(
+    /// `block -> keys whose history entries that block wrote` (pruning index).
+    StateChangeSets,
+    u64,
+    StateChangeSet
+);
+table!(
+    /// `block number -> commit certificate` (Phase 2). The value is the RLP of
     /// `xdevs_consensus::CommitCertificate` (research doc §6.5), stored opaquely so storage
     /// does not depend on consensus. Written in the same `WriteBatch` as the block; may be
     /// replaced by a certificate with more signatures at `Finalized`.
-    CommitCertificates, u64, Bytes);
-table!(/// Merkle-Patricia trie node cache for incremental state roots (Phase 2,
+    CommitCertificates,
+    u64,
+    Bytes
+);
+table!(
+    /// Merkle-Patricia trie node cache for incremental state roots (Phase 2,
     /// ADR-0004). Key = [`account_trie_key`] / [`storage_trie_key`]: a tag byte
     /// (`0x00` account trie, `0x01` storage trie), for storage tries the 32-byte
     /// `keccak256(address)`, then the node's nibble path from the root, **one nibble per
     /// byte** (`0x00..=0x0f`). Value = the RLP-encoded trie node. The tag and the
     /// fixed-length owner make keys prefix-free per trie, so one account's whole storage
     /// trie can be removed with a prefix delete, and walks visit nodes in path order.
-    TrieNodes, Vec<u8>, Bytes);
+    TrieNodes,
+    Vec<u8>,
+    Bytes
+);
 
 /// [`TrieNodes`] tag of account-trie nodes.
 pub const TRIE_NODES_ACCOUNT_TAG: u8 = 0x00;

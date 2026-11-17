@@ -25,8 +25,8 @@ export function getAddChainParameters(chain: Chain, options: { iconUrls?: string
 
 /**
  * Asks the wallet (MetaMask etc.) to add `chain` via `wallet_addEthereumChain`.
- * Throws before contacting the wallet if the chain still uses a placeholder `.invalid` URL
- * (e.g. the unconfigured `xdevsTestnet`).
+ * Throws before contacting the wallet if the chain has no RPC URL (e.g. the unconfigured `xdevsDevnet`)
+ * or still uses a placeholder `.invalid` URL.
  */
 export async function addXdevsChainToWallet(
   walletClient: Client<Transport, Chain | undefined, Account | undefined>,
@@ -34,6 +34,11 @@ export async function addXdevsChainToWallet(
   options: { iconUrls?: string[] } = {},
 ): Promise<void> {
   const params = getAddChainParameters(chain, options)
+  if (params.rpcUrls.length === 0)
+    throw new BaseError(`Chain "${chain.name}" has no RPC URL.`, {
+      name: 'XdevsPlaceholderChainError',
+      metaMessages: ['Set rpcUrls (e.g. with defineXdevsDevnet({ rpcUrl })) before adding it to a wallet.'],
+    })
   const placeholder = [...params.rpcUrls, ...(params.blockExplorerUrls ?? [])].find((u) => {
     try {
       return new URL(u).hostname.endsWith('.invalid')

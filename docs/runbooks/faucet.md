@@ -11,7 +11,8 @@ Threat: "Faucet draining" (plan §25.1). Hosting: Cloudflare Workers free plan (
 
 | Piece | What it does |
 |---|---|
-| Worker `xdevs-faucet` | `GET /` form, `POST /api/claim`, `GET /api/status`. Checks the address and the Turnstile token. |
+| Worker `xdevs-faucet` | JSON API only, routed at `faucet.xdevschain.tech/api/*`: `POST /api/claim`, `GET /api/status`. Checks the address and the Turnstile token. |
+| Pages project `xdevs-faucet` (`apps/faucet-web`) | The faucet UI at `faucet.xdevschain.tech` (Next.js static export). Calls `/api/*` on the same origin. |
 | Durable Object `FaucetSigner` (one instance, `faucet-hot-wallet`) | The only code that signs. Handles one claim at a time: checks the rate limit, checks the balance, picks the nonce, signs an EIP-1559 tx and sends it. |
 | KV namespace `RATE_LIMIT` | Keys `addr:<address>`, `ip:<ipv4>`, `ip6:<prefix>::/64`. Each key expires after 24 h. |
 | Hot wallet (`FAUCET_PRIVATE_KEY`) | Holds a **small** float only. Topped up from the faucet reserve. |
@@ -23,14 +24,14 @@ Threat: "Faucet draining" (plan §25.1). Hosting: Cloudflare Workers free plan (
 |---|---|---|---|
 | `FAUCET_PRIVATE_KEY` | secret | `0x` + 64 hex | Hot wallet key. The code never logs it or returns it. |
 | `TURNSTILE_SECRET_KEY` | secret | from the Turnstile dashboard | Used for the server-side `siteverify` check. |
-| `RPC_URL` | var | `https://rpc.testnet.<domain>` | The public RPC full node. |
+| `RPC_URL` | var | `https://rpc.xdevschain.tech` | The public RPC full node. |
 | `CHAIN_ID` | var | `717171` | Checked against `eth_chainId` once per DO lifetime. If it does not match, claims return 503. |
-| `TURNSTILE_SITE_KEY` | var | public site key | Shown in the page. |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | UI build env (`apps/faucet-web`) | public site key | Rendered by the faucet UI. No longer a Worker var. |
 | `DRIP_AMOUNT` | var | `100` | tXDS per claim. |
 | `MIN_FAUCET_BALANCE` | var | `1000` | Below this, claims return 503 `faucet_empty`. |
 | `CORS_ORIGINS` | var | explorer and wallet origins, comma-separated | Only these origins get CORS headers on `/api/*`. |
-| `EXPLORER_TX_URL` | var | `https://explorer.testnet.<domain>/tx/{hash}` | Leave it empty if there is no explorer yet. |
-| `TURNSTILE_EXPECTED_HOSTNAME` | var | `faucet.testnet.<domain>` | Optional extra check. Leave it empty when using the Turnstile test keys. |
+| `EXPLORER_TX_URL` | var | `https://explorer.xdevschain.tech/tx/{hash}` | Leave it empty if there is no explorer yet. |
+| `TURNSTILE_EXPECTED_HOSTNAME` | var | `faucet.xdevschain.tech` | Optional extra check. Leave it empty when using the Turnstile test keys. |
 
 ## 2. Deploy (not done yet — run these later)
 
@@ -48,8 +49,8 @@ npx wrangler@4 kv namespace create RATE_LIMIT
 npx wrangler@4 kv namespace create RATE_LIMIT --preview
 
 # 2. Turnstile: Cloudflare dashboard -> Turnstile -> Add widget
-#    Hostnames: faucet.testnet.<domain> (+ the *.workers.dev host while testing)
-#    Mode: Managed. Put the SITE key in wrangler.toml [vars] TURNSTILE_SITE_KEY.
+#    Hostnames: faucet.xdevschain.tech (+ the *.pages.dev host while testing)
+#    Mode: Managed. Put the SITE key in the faucet UI build env: NEXT_PUBLIC_TURNSTILE_SITE_KEY (apps/faucet-web).
 npx wrangler@4 secret put TURNSTILE_SECRET_KEY      # paste when prompted
 
 # 3. Hot wallet: create a NEW key used only for the faucet (never reuse a key)
@@ -65,7 +66,7 @@ npx wrangler@4 deploy --dry-run --outdir dist   # checks the bundle and its size
 npx wrangler@4 deploy
 
 # 6. Smoke test
-curl -s https://faucet.testnet.<domain>/api/status    # address, balance, healthy:true
+curl -s https://faucet.xdevschain.tech/api/status    # address, balance, healthy:true
 #    Then make one real claim from a browser and check the tx in the explorer.
 npx wrangler@4 tail                                   # live logs (no secrets are ever logged)
 ```

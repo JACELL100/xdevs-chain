@@ -4,32 +4,66 @@ import { describe, it } from 'node:test'
 import { createWalletClient, custom, defineChain, getAddress } from 'viem'
 import {
   MULTICALL3_ADDRESS,
-  XDEVS_TESTNET_IS_PLACEHOLDER,
+  XDEVS_ENCLAVE_CHAIN_ID,
+  XDEVS_ENCLAVE_ENDPOINTS,
+  XDEVS_TESTNET_CHAIN_ID,
   addXdevsChainToWallet,
+  defineXdevsDevnet,
   getAddChainParameters,
   predeploys,
   xdevsChains,
   xdevsDevnet,
+  xdevsEnclave,
+  xdevsLocal,
   xdevsTestnet,
 } from '../src/index.ts'
 
 describe('chains', () => {
-  it('devnet matches the local node defaults', () => {
-    assert.equal(xdevsDevnet.id, 7117)
-    assert.equal(xdevsDevnet.name, 'xDEVS Chain Devnet')
-    assert.deepEqual(xdevsDevnet.nativeCurrency, { name: 'Testnet XDS', symbol: 'tXDS', decimals: 18 })
-    assert.deepEqual(xdevsDevnet.rpcUrls.default.http, ['http://127.0.0.1:8545'])
-    assert.deepEqual(xdevsDevnet.rpcUrls.default.webSocket, ['ws://127.0.0.1:8545'])
-    assert.equal(xdevsDevnet.testnet, true)
-    assert.equal(xdevsDevnet.blockExplorers, undefined)
+  it('local matches the `xdevs run --dev` defaults', () => {
+    assert.equal(xdevsLocal.id, 7117)
+    assert.equal(xdevsLocal.name, 'xDEVS Chain Local')
+    assert.deepEqual(xdevsLocal.nativeCurrency, { name: 'Testnet XDS', symbol: 'tXDS', decimals: 18 })
+    assert.deepEqual(xdevsLocal.rpcUrls.default.http, ['http://127.0.0.1:8545'])
+    assert.deepEqual(xdevsLocal.rpcUrls.default.webSocket, ['ws://127.0.0.1:8545'])
+    assert.equal(xdevsLocal.testnet, true)
+    assert.equal(xdevsLocal.blockExplorers, undefined)
   })
 
-  it('testnet uses the (placeholder) id 717171 = 0xAF173 and clearly marked placeholder URLs', () => {
-    assert.equal(xdevsTestnet.id, 717171)
-    assert.equal(xdevsTestnet.id, 0xaf173)
-    assert.equal(XDEVS_TESTNET_IS_PLACEHOLDER, true)
-    assert.deepEqual(xdevsTestnet.nativeCurrency, { name: 'Testnet XDS', symbol: 'tXDS', decimals: 18 })
-    assert.match(xdevsTestnet.rpcUrls.default.http[0]!, /^https:\/\/rpc\.testnet\..*\.invalid$/)
+  it('Enclave is chain 717171 = 0xAF173 with EnclaveXDS and the xdevschain.tech endpoints', () => {
+    assert.equal(xdevsEnclave.id, 717171)
+    assert.equal(xdevsEnclave.id, 0xaf173)
+    assert.equal(XDEVS_ENCLAVE_CHAIN_ID, 717171)
+    assert.equal(xdevsEnclave.name, 'xDEVS Chain Enclave')
+    assert.deepEqual(xdevsEnclave.nativeCurrency, { name: 'EnclaveXDS', symbol: 'tXDS', decimals: 18 })
+    assert.deepEqual(xdevsEnclave.rpcUrls.default.http, ['https://rpc.xdevschain.tech'])
+    assert.deepEqual(xdevsEnclave.rpcUrls.default.webSocket, ['wss://ws.xdevschain.tech'])
+    assert.equal(xdevsEnclave.blockExplorers.default.url, 'https://explorer.xdevschain.tech')
+    assert.equal(xdevsEnclave.blockExplorers.default.url, XDEVS_ENCLAVE_ENDPOINTS.explorer)
+    assert.equal(xdevsEnclave.testnet, true)
+    for (const url of Object.values(XDEVS_ENCLAVE_ENDPOINTS)) assert.ok(/(^|\.)xdevschain\.tech$/.test(new URL(url).hostname), url)
+  })
+
+  it('keeps xdevsTestnet / XDEVS_TESTNET_CHAIN_ID as deprecated aliases of Enclave', () => {
+    assert.equal(xdevsTestnet, xdevsEnclave)
+    assert.equal(XDEVS_TESTNET_CHAIN_ID, XDEVS_ENCLAVE_CHAIN_ID)
+  })
+
+  it('devnet is chain 717170 without a public RPC until one is configured', () => {
+    assert.equal(xdevsDevnet.id, 717170)
+    assert.equal(xdevsDevnet.name, 'xDEVS Chain Devnet')
+    assert.equal(xdevsDevnet.nativeCurrency.symbol, 'tXDS')
+    assert.deepEqual(xdevsDevnet.rpcUrls.default.http, [])
+    const dev = defineXdevsDevnet({ rpcUrl: 'https://devnet.example.org', wsUrl: 'wss://devnet.example.org' })
+    assert.equal(dev.id, 717170)
+    assert.deepEqual(dev.rpcUrls.default.http, ['https://devnet.example.org'])
+    assert.deepEqual(dev.rpcUrls.default.webSocket, ['wss://devnet.example.org'])
+    assert.equal(dev.blockExplorers, undefined)
+    const withExplorer = defineXdevsDevnet({ rpcUrl: 'https://devnet.example.org', explorerUrl: 'https://x.example.org' })
+    assert.equal(withExplorer.blockExplorers?.default.url, 'https://x.example.org')
+  })
+
+  it('has unique chain ids', () => {
+    assert.equal(new Set(xdevsChains.map((c) => c.id)).size, xdevsChains.length)
   })
 
   it('exposes multicall3 at the canonical address and every predeploy as a contract', () => {
@@ -71,17 +105,17 @@ describe('predeploys', () => {
 
 describe('wallet_addEthereumChain (§23.1)', () => {
   it('builds the plan §23.1 parameters', () => {
-    assert.deepEqual(getAddChainParameters(xdevsTestnet), {
+    assert.deepEqual(getAddChainParameters(xdevsEnclave), {
       chainId: '0xaf173',
-      chainName: 'xDEVS Chain Testnet',
-      nativeCurrency: { name: 'Testnet XDS', symbol: 'tXDS', decimals: 18 },
-      rpcUrls: ['https://rpc.testnet.xdevs.invalid'],
-      blockExplorerUrls: ['https://explorer.testnet.xdevs.invalid'],
+      chainName: 'xDEVS Chain Enclave',
+      nativeCurrency: { name: 'EnclaveXDS', symbol: 'tXDS', decimals: 18 },
+      rpcUrls: ['https://rpc.xdevschain.tech'],
+      blockExplorerUrls: ['https://explorer.xdevschain.tech'],
     })
-    const devnet = getAddChainParameters(xdevsDevnet, { iconUrls: ['https://example.org/xds.svg'] })
-    assert.equal(devnet.chainId, '0x1bcd')
-    assert.equal('blockExplorerUrls' in devnet, false)
-    assert.deepEqual(devnet.iconUrls, ['https://example.org/xds.svg'])
+    const local = getAddChainParameters(xdevsLocal, { iconUrls: ['https://example.org/xds.svg'] })
+    assert.equal(local.chainId, '0x1bcd')
+    assert.equal('blockExplorerUrls' in local, false)
+    assert.deepEqual(local.iconUrls, ['https://example.org/xds.svg'])
   })
 
   function mockWallet() {
@@ -99,20 +133,17 @@ describe('wallet_addEthereumChain (§23.1)', () => {
 
   it('sends wallet_addEthereumChain once', async () => {
     const { wallet, calls } = mockWallet()
-    await addXdevsChainToWallet(wallet, xdevsDevnet)
-    assert.deepEqual(calls, [{ method: 'wallet_addEthereumChain', params: [getAddChainParameters(xdevsDevnet)] }])
+    await addXdevsChainToWallet(wallet, xdevsEnclave)
+    assert.deepEqual(calls, [{ method: 'wallet_addEthereumChain', params: [getAddChainParameters(xdevsEnclave)] }])
   })
 
-  it('refuses the placeholder testnet but accepts an overridden one', async () => {
+  it('refuses chains without an RPC or with a placeholder URL', async () => {
     const { wallet, calls } = mockWallet()
-    await assert.rejects(addXdevsChainToWallet(wallet, xdevsTestnet), /placeholder URL/)
+    await assert.rejects(addXdevsChainToWallet(wallet, xdevsDevnet), /no RPC URL/)
+    const placeholder = defineChain({ ...xdevsEnclave, rpcUrls: { default: { http: ['https://rpc.testnet.xdevs.invalid'] } } })
+    await assert.rejects(addXdevsChainToWallet(wallet, placeholder), /placeholder URL/)
     assert.equal(calls.length, 0)
-    const real = defineChain({
-      ...xdevsTestnet,
-      rpcUrls: { default: { http: ['https://rpc.testnet.example.org'] } },
-      blockExplorers: { default: { name: 'Explorer', url: 'https://explorer.testnet.example.org' } },
-    })
-    await addXdevsChainToWallet(wallet, real)
+    await addXdevsChainToWallet(wallet, defineXdevsDevnet({ rpcUrl: 'https://devnet.example.org' }))
     assert.equal(calls.length, 1)
   })
 })

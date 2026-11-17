@@ -1,0 +1,31 @@
+{
+  "name": "xdevs-web",
+  "private": true,
+  "description": "npm workspace for the xDEVS Chain web apps (explorer, wallet, faucet, status), the shared UI kit and the TypeScript SDK.",
+  "license": "Apache-2.0",
+  "author": "THE xDEVS",
+  "workspaces": [
+    "sdk/ts",
+    "packages/ui",
+    "apps/explorer",
+    "apps/wallet",
+    "apps/faucet-web",
+    "apps/status"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build:sdk": "npm run build -w @xdevs/sdk",
+    "test:sdk": "npm test -w @xdevs/sdk",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "build:apps": "npm run build -w @xdevs/explorer -w @xdevs/wallet -w @xdevs/faucet-web -w @xdevs/status"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}

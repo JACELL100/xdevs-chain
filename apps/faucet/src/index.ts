@@ -1,8 +1,11 @@
 // tXDS faucet for xDEVS Chain — Cloudflare Worker entry point (module syntax).
 //
-//   GET  /            HTML form (address / .xdevs name + Turnstile)
+// JSON API only. The web UI is apps/faucet-web (Next.js on Cloudflare Pages at faucet.xdevschain.tech);
+// this Worker is routed at faucet.xdevschain.tech/api/* (Worker routes take precedence over Pages).
+//
 //   POST /api/claim   {address, turnstileToken} -> {ok, txHash, ...}
 //   GET  /api/status  faucet address, balance, drip amount, chain id (no secrets)
+//   anything else     404 JSON {ok:false, error:"not_found"}
 //
 // Policy (plan §20.3): DRIP_AMOUNT (default 100 tXDS) once per 24h per address AND per IP,
 // Turnstile captcha, small hot wallet with a balance floor (plan §25.1 "Faucet draining").
@@ -11,7 +14,6 @@ import { assertAllowedRecipient, parseRecipient, resolveName } from "./address.t
 import { formatTxds, loadAccount, loadConfig, makeClient, rpcUnavailable, SYMBOL } from "./chain.ts";
 import type { Env } from "./env.ts";
 import { corsHeaders, errorResponse, HttpError, json, withHeaders } from "./http.ts";
-import { renderPage } from "./page.ts";
 import { ipKey } from "./ratelimit.ts";
 import type { DripRequest, DripResult } from "./signer.ts";
 import { verifyTurnstile } from "./turnstile.ts";
@@ -45,16 +47,6 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
 
   if (method === "OPTIONS" && pathname.startsWith("/api/")) {
     return new Response(null, { status: 204 });
-  }
-  if (pathname === "/" || pathname === "/index.html") {
-    if (method !== "GET" && method !== "HEAD") throw methodNotAllowed("GET");
-    let drip = "100";
-    try {
-      drip = formatTxds(loadConfig(env).dripWei);
-    } catch {
-      /* page still renders; claim will report the misconfiguration */
-    }
-    return renderPage({ siteKey: env.TURNSTILE_SITE_KEY ?? "", dripAmount: drip });
   }
   if (pathname === "/api/claim") {
     if (method !== "POST") throw methodNotAllowed("POST");

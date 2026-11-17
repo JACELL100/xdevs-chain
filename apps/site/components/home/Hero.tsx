@@ -24,8 +24,8 @@ export default function Hero() {
         </div>
 
         <Link className="pill" href="/network/endpoints">
-          <span className="pill-tag">Testnet</span>
-          <span className="pill-text">Public testnet coming soon</span>
+          <span className="pill-tag">Live</span>
+          <span className="pill-text">Enclave testnet is live</span>
           <Chevron />
         </Link>
 

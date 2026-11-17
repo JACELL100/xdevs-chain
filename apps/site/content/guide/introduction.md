@@ -19,9 +19,13 @@ It executes transactions with [`revm`](https://github.com/bluealloy/revm) using 
 | State | Ethereum Merkle-Patricia Trie (incremental root over persisted trie nodes), stored in `redb` |
 | Networking | libp2p: one network for consensus, one for transaction gossip |
 | Local dev chain id | `7117` |
-| Public testnet chain id | To be announced |
+| Enclave testnet chain id | `717171` ([live](/network/endpoints)) |
 
 ## Where the project is today
+
+:::tip[The Enclave testnet is live]
+The public testnet **Enclave** (chain id 717171) has run since 17 November 2026 on four validators: RPC `https://rpc.xdevschain.tech`, [explorer](https://explorer.xdevschain.tech), [wallet](https://wallet.xdevschain.tech), [status](https://status.xdevschain.tech). See [Network endpoints](/network/endpoints).
+:::
 
 :::tip[Phases 1 and 2 work on your own machines]
 - A **single-node dev chain** (`xdevs run --dev`) produces blocks, serves Ethereum JSON-RPC, and works with MetaMask and Foundry.

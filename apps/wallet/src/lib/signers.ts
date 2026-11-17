@@ -42,13 +42,13 @@ export function ecdsaSignerStruct(address: Hex): SignerStruct {
 export type StoredPasskey = { credentialId: string; publicKey: P256PublicKey; rpId: string; createdAt: number }
 
 /** Creates a WebAuthn P-256 passkey (user verification required). Browser only. */
-export async function createPasskey(userName: string, rpName = 'xDEVS Wallet'): Promise<StoredPasskey> {
+export async function createPasskey(userName: string, rpName = 'xDEVS Wallet', rpId: string = location.hostname): Promise<StoredPasskey> {
   if (!globalThis.navigator?.credentials) throw new Error('WebAuthn is not available in this browser')
   const userId = crypto.getRandomValues(new Uint8Array(16))
   const cred = (await navigator.credentials.create({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
-      rp: { name: rpName, id: location.hostname },
+      rp: { name: rpName, id: rpId },
       user: { id: userId, name: userName, displayName: userName },
       pubKeyCredParams: [{ type: 'public-key', alg: -7 }], // ES256 = P-256 only (the chain's P256VERIFY)
       authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
@@ -65,7 +65,7 @@ export async function createPasskey(userName: string, rpName = 'xDEVS Wallet'): 
   return {
     credentialId: base64UrlEncode(new Uint8Array(cred.rawId)),
     publicKey: spkiToPublicKey(new Uint8Array(spki)),
-    rpId: location.hostname,
+    rpId,
     createdAt: Date.now(),
   }
 }

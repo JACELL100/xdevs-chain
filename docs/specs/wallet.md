@@ -4,7 +4,7 @@ Status: testnet reference implementation (Phase 4). Plan refs: §16 (user-safety
 criteria. Companion specs: [`smart-accounts.md`](smart-accounts.md), [`xip-0001-eoa-lock.md`](xip-0001-eoa-lock.md),
 [`xns-and-approvals.md`](xns-and-approvals.md), [`sdk.md`](sdk.md), [`explorer-api.md`](explorer-api.md).
 
-Sources: `apps/wallet/` (Vite + React SPA, logic in `src/lib/`, UI in `src/ui/`), `apps/bundler/` (DEV-ONLY ERC-4337
+Sources: `apps/wallet/` (Next.js static export on `@xdevs/ui`, logic in `src/lib/`, data layer in `src/data/`, UI in `src/views/` + `src/components/`), `apps/bundler/` (DEV-ONLY ERC-4337
 v0.9 bundler). Tests: `apps/wallet/test/`, `apps/bundler/test/`.
 
 ---
@@ -24,10 +24,12 @@ Chain-side pieces used: `XdevsSmartAccount` (`0x…1005`), `SmartAccountFactory`
 
 ## 2. Configuration
 
-Vite env at build time (all public): `VITE_RPC_URL`, `VITE_BUNDLER_URL`, `VITE_CHAIN_ID` (default 7117),
-`VITE_API_URL` (explorer API base, optional), `VITE_FAUCET_URL`, `VITE_EXPLORER_URL`, `VITE_PAYMASTER_SPONSOR`
-(XdevsPaymaster sponsor paying the activation op), `VITE_KNOWN_TOKENS` (comma list), `VITE_DEV_TOOLS`
-(virtual passkey + raw-key panels; on automatically under `vite dev`, must stay off on public builds).
+Next.js env at build time (all public, defaults = the Enclave testnet, chain 717171): `NEXT_PUBLIC_RPC_URL`,
+`NEXT_PUBLIC_BUNDLER_URL`, `NEXT_PUBLIC_CHAIN_ID`, `NEXT_PUBLIC_CHAIN_NAME`, `NEXT_PUBLIC_API_URL` (explorer API, `off` =
+chain reads only), `NEXT_PUBLIC_EXPLORER_URL`, `NEXT_PUBLIC_FAUCET_URL`, `NEXT_PUBLIC_PAYMASTER_SPONSOR`,
+`NEXT_PUBLIC_KNOWN_TOKENS`, `NEXT_PUBLIC_RP_ID` (WebAuthn RP ID, default = page host), `NEXT_PUBLIC_DEMO` (fixture
+data, no chain), `NEXT_PUBLIC_DEV_TOOLS` (virtual passkey + raw-key panel; on under `next dev`, must stay off on public
+builds). An unreachable RPC shows a "launching soon" state with an optional session-only demo preview.
 
 Persistence: `localStorage["xdevs-wallet:v1"]` holds account records (address, label, kind, passkey credential id +
 public key, init params and salt of not-yet-deployed accounts) and a per-account recipient history. Passkey accounts

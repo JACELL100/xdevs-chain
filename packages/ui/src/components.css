@@ -1,0 +1,717 @@
+/* @xdevs/ui components: app shell (header, footer) and the kit. Import after tokens.css and base.css. */
+
+.xu-noscroll {
+  overflow: hidden;
+}
+
+/* ---------- app shell ---------- */
+
+.xu-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+.xu-main {
+  flex: 1 0 auto;
+  width: 100%;
+}
+.xu-banner {
+  border-bottom: 1px solid var(--xh-line);
+  background: var(--xh-bg-2);
+  color: var(--xh-text-2);
+  font-size: 13.5px;
+}
+.xu-banner > div {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 10px clamp(16px, 3vw, 32px);
+}
+
+.xu-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: var(--xh-header-h-app);
+  background: rgba(5, 6, 10, 0.78);
+  -webkit-backdrop-filter: saturate(160%) blur(18px);
+  backdrop-filter: saturate(160%) blur(18px);
+  border-bottom: 1px solid var(--xh-line);
+}
+.xu-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 clamp(16px, 3vw, 32px);
+}
+.xu-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-width: 0;
+}
+.xu-brand-word {
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--xh-text);
+  white-space: nowrap;
+}
+.xu-brand-word span {
+  font-weight: 400;
+  color: var(--xh-text-2);
+}
+.xu-brand-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--xh-line-2);
+  flex: none;
+}
+.xu-brand-app {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--xh-text-2);
+  white-space: nowrap;
+}
+.xu-nav {
+  margin-left: 12px;
+  min-width: 0;
+}
+.xu-nav ul {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.xu-nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: var(--xh-radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--xh-muted);
+  white-space: nowrap;
+  transition: color 0.2s, background-color 0.2s;
+}
+.xu-nav a:hover,
+.xu-nav a.is-active {
+  color: var(--xh-text);
+}
+.xu-nav a.is-active {
+  background: rgba(255, 255, 255, 0.05);
+}
+.xu-header-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex: none;
+}
+.xu-burger {
+  display: none;
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.xu-burger span {
+  position: absolute;
+  left: 11px;
+  right: 11px;
+  height: 1.5px;
+  background: var(--xh-text);
+  transition: transform 0.3s var(--xh-ease);
+}
+.xu-burger span:first-child {
+  top: 16px;
+}
+.xu-burger span:last-child {
+  top: 23px;
+}
+.xu-burger[aria-expanded='true'] span:first-child {
+  transform: translateY(3.5px) rotate(45deg);
+}
+.xu-burger[aria-expanded='true'] span:last-child {
+  transform: translateY(-3.5px) rotate(-45deg);
+}
+.xu-sheet {
+  position: fixed;
+  inset: var(--xh-header-h-app) 0 0 0;
+  z-index: 49;
+  background: var(--xh-bg);
+  padding: 12px clamp(16px, 3vw, 32px) 40px;
+  overflow-y: auto;
+}
+.xu-sheet[hidden] {
+  display: none;
+}
+.xu-sheet nav {
+  display: grid;
+}
+.xu-sheet a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 54px;
+  border-bottom: 1px solid var(--xh-line);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--xh-text-2);
+}
+.xu-sheet a.is-active {
+  color: var(--xh-text);
+}
+.xu-sheet-net {
+  margin-top: 20px;
+}
+
+@media (max-width: 900px) {
+  .xu-nav,
+  .xu-header-end .xu-netbadge {
+    display: none;
+  }
+  .xu-burger {
+    display: block;
+  }
+}
+@media (max-width: 520px) {
+  .xu-brand-word {
+    display: none;
+  }
+}
+
+/* ---------- footer ---------- */
+
+.xu-foot {
+  border-top: 1px solid var(--xh-line);
+  padding: 40px 0 32px;
+  margin-top: 64px;
+  background: var(--xh-bg);
+  color: var(--xh-dim);
+  font-size: 13px;
+}
+.xu-foot-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+.xu-foot-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.xu-foot-links a {
+  font-size: 13.5px;
+  color: var(--xh-muted);
+  transition: color 0.2s;
+}
+.xu-foot-links a:hover,
+.xu-foot-links a[aria-current='page'] {
+  color: var(--xh-text);
+}
+.xu-foot-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--xh-line);
+}
+.xu-foot-bottom p {
+  margin: 0;
+}
+.xu-foot-by a {
+  color: var(--xh-text-2);
+  font-weight: 560;
+  border-bottom: 1px solid var(--xh-line-2);
+  transition: color 0.2s, border-color 0.2s;
+}
+.xu-foot-by a:hover {
+  color: var(--xh-text);
+  border-color: var(--xh-text-2);
+}
+.xu-foot-legal {
+  text-align: right;
+  max-width: 70ch;
+}
+@media (max-width: 760px) {
+  .xu-foot-bottom {
+    flex-direction: column;
+  }
+  .xu-foot-legal {
+    text-align: left;
+  }
+}
+
+/* ---------- page helpers ---------- */
+
+.xu-page {
+  width: 100%;
+  max-width: calc(var(--xh-max) + var(--xh-gutter) * 2);
+  margin: 0 auto;
+  padding: 40px var(--xh-gutter) 0;
+}
+.xu-page-title {
+  margin: 0 0 6px;
+  font-size: clamp(26px, 3vw, 36px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
+.xu-page-sub {
+  margin: 0 0 28px;
+  color: var(--xh-muted);
+}
+.xu-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+/* ---------- button ---------- */
+
+.xu-btn {
+  cursor: pointer;
+  border: 0;
+}
+.xu-btn[disabled],
+.xu-btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.xu-btn.is-sm {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13.5px;
+}
+.xu-btn.is-md {
+  height: 40px;
+  padding: 0 18px;
+  font-size: 14.5px;
+}
+.xu-btn-quiet {
+  background: transparent;
+  color: var(--xh-text-2);
+}
+.xu-btn-quiet:hover {
+  color: var(--xh-text);
+  background: rgba(255, 255, 255, 0.05);
+}
+.xu-btn-danger {
+  border: 1px solid rgba(255, 122, 102, 0.35);
+  color: var(--xh-alert);
+  background: var(--xh-alert-soft);
+}
+.xu-btn-danger:hover {
+  border-color: rgba(255, 122, 102, 0.6);
+}
+.xu-btn.xh-btn-ghost {
+  border: 1px solid var(--xh-line-2);
+}
+
+/* ---------- card ---------- */
+
+.xu-card {
+  position: relative;
+  background: linear-gradient(180deg, var(--xh-surface) 0%, var(--xh-bg-2) 100%);
+  border: 1px solid var(--xh-line);
+  border-radius: var(--xh-radius-md);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035) inset;
+  min-width: 0;
+}
+.xu-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--xh-line);
+}
+.xu-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--xh-text);
+}
+.xu-card-body {
+  padding: 18px;
+}
+.xu-card-body.is-flush {
+  padding: 0;
+}
+
+/* ---------- badge ---------- */
+
+.xu-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: var(--xh-radius-pill);
+  font-family: var(--xh-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  border: 1px solid var(--xh-line-2);
+  color: var(--xh-text-2);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.xu-badge.is-final {
+  color: var(--xh-final);
+  border-color: rgba(79, 227, 207, 0.35);
+  background: var(--xh-final-soft);
+}
+.xu-badge.is-alert {
+  color: var(--xh-alert);
+  border-color: rgba(255, 122, 102, 0.35);
+  background: var(--xh-alert-soft);
+}
+.xu-badge.is-warn {
+  color: var(--xh-warn);
+  border-color: rgba(242, 196, 109, 0.35);
+  background: var(--xh-warn-soft);
+}
+.xu-badge.is-dim {
+  color: var(--xh-dim);
+  border-color: var(--xh-line);
+}
+
+/* ---------- network badge ---------- */
+
+.xu-netbadge .xu-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--xh-dim);
+  flex: none;
+}
+.xu-netbadge[data-status='live'] .xu-dot {
+  background: var(--xh-final);
+  box-shadow: 0 0 0 3px rgba(79, 227, 207, 0.18);
+}
+.xu-netbadge[data-status='degraded'] .xu-dot {
+  background: var(--xh-warn);
+}
+.xu-netbadge[data-status='down'] .xu-dot {
+  background: var(--xh-alert);
+}
+.xu-netbadge[data-status='checking'] .xu-dot {
+  animation: xu-pulse 1.4s var(--xh-ease-in-out) infinite;
+}
+@keyframes xu-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---------- stat ---------- */
+
+.xu-stat {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.xu-stat-label {
+  font-family: var(--xh-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--xh-dim);
+  text-transform: lowercase;
+}
+.xu-stat-value {
+  font-size: clamp(20px, 2vw, 26px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--xh-text);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.xu-stat-hint {
+  font-size: 12.5px;
+  color: var(--xh-muted);
+}
+
+/* ---------- hash / address / copy ---------- */
+
+.xu-hash {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  font-family: var(--xh-mono);
+  font-size: 13px;
+  color: var(--xh-text-2);
+  vertical-align: middle;
+}
+.xu-hash-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.xu-hash.is-full .xu-hash-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+a.xu-hash-text {
+  color: var(--xh-final);
+}
+a.xu-hash-text:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.xu-addr-label {
+  font-family: var(--xh-sans);
+  font-weight: 500;
+  color: var(--xh-text);
+}
+.xu-copy {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--xh-radius-xs);
+  background: transparent;
+  color: var(--xh-dim);
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+}
+.xu-copy:hover {
+  color: var(--xh-text);
+  background: rgba(255, 255, 255, 0.06);
+}
+.xu-copy[data-copied='true'] {
+  color: var(--xh-final);
+}
+.xu-copy svg {
+  width: 14px;
+  height: 14px;
+}
+.xu-copy.has-label {
+  width: auto;
+  gap: 6px;
+  padding: 0 10px;
+  height: 30px;
+  font-size: 13px;
+  border: 1px solid var(--xh-line-2);
+}
+
+/* ---------- skeleton ---------- */
+
+.xu-skel {
+  display: block;
+  border-radius: var(--xh-radius-xs);
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.09) 50%, rgba(255, 255, 255, 0.04) 100%);
+  background-size: 200% 100%;
+  animation: xu-shimmer 1.4s linear infinite;
+}
+@keyframes xu-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ---------- empty / error ---------- */
+
+.xu-state {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 48px 20px;
+  text-align: center;
+}
+.xu-state-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--xh-line-2);
+  color: var(--xh-muted);
+}
+.xu-state.is-error .xu-state-icon {
+  color: var(--xh-alert);
+  border-color: rgba(255, 122, 102, 0.35);
+  background: var(--xh-alert-soft);
+}
+.xu-state-title {
+  margin: 6px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--xh-text);
+}
+.xu-state-text {
+  margin: 0;
+  max-width: 52ch;
+  color: var(--xh-muted);
+  font-size: 14px;
+}
+.xu-state-detail {
+  margin: 0;
+  max-width: 64ch;
+  font-family: var(--xh-mono);
+  font-size: 12px;
+  color: var(--xh-dim);
+  overflow-wrap: anywhere;
+}
+.xu-state-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* ---------- tabs ---------- */
+
+.xu-tabs-list {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--xh-line);
+  scrollbar-width: none;
+}
+.xu-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--xh-muted);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.xu-tab:hover {
+  color: var(--xh-text);
+}
+.xu-tab[aria-selected='true'] {
+  color: var(--xh-text);
+}
+.xu-tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--xh-text);
+}
+.xu-tab-count {
+  font-family: var(--xh-mono);
+  font-size: 11px;
+  color: var(--xh-dim);
+}
+.xu-tabs-panel {
+  padding-top: 18px;
+}
+
+/* ---------- table ---------- */
+
+.xu-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+.xu-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.xu-table th {
+  height: 40px;
+  padding: 0 14px;
+  text-align: left;
+  font-family: var(--xh-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--xh-dim);
+  border-bottom: 1px solid var(--xh-line);
+  white-space: nowrap;
+}
+.xu-table td {
+  height: 48px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--xh-line);
+  color: var(--xh-text-2);
+  vertical-align: middle;
+}
+.xu-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.xu-table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.018);
+}
+.xu-table .is-right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.xu-table .is-center {
+  text-align: center;
+}
+.xu-table .is-mono {
+  font-family: var(--xh-mono);
+  font-size: 13px;
+}
+
+/* ---------- add to wallet ---------- */
+
+.xu-addwallet {
+  display: inline-grid;
+  gap: 6px;
+}
+.xu-addwallet-msg {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--xh-muted);
+}
+.xu-addwallet-msg.is-ok {
+  color: var(--xh-final);
+}
+.xu-addwallet-msg.is-err {
+  color: var(--xh-alert);
+}
+
+/* ---------- logo ---------- */
+
+.xu-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--xh-text);
+}
+.xu-logo svg {
+  flex: none;
+}

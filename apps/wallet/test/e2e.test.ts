@@ -45,6 +45,7 @@ import { checkRecipient, resolveRecipient } from '../src/lib/recipient.ts'
 import { sendUserOp } from '../src/lib/send.ts'
 import { SoftPasskey, passkeySignerStruct } from '../src/lib/signers.ts'
 import { checkVaultOutcome, listVaultQueue, setVaultPolicyCallData } from '../src/lib/vault.ts'
+import { matchPasskeySigner } from '../src/lib/passkey-auth.ts'
 
 let chain: Awaited<ReturnType<typeof devChain>>['chain']
 let devnet: Awaited<ReturnType<typeof devChain>>['devnet']
@@ -173,6 +174,35 @@ describe(`Phase 4 exit criteria (headless)`, () => {
     queue = await listVaultQueue(client, account, await now())
     assert.equal(queue.find((a) => a.id === off.queuedIds[0])?.status, 'cancelled')
     assert.equal(await client.getBalance({ address: attacker }), attackerBefore)
+  })
+
+  it('Next.js app data layer: passkey sign-in matches the on-chain signer; the live backend reads the same state', async () => {
+    const pk = await passkey
+    // Sign-in on a new device: a discoverable-credential assertion is matched against the account's getSigners().
+    const st = await readAccountState(client, account)
+    const assertion = await pk.assert(toHex(crypto.getRandomValues(new Uint8Array(32))))
+    assert.deepEqual(await matchPasskeySigner(st.signers, assertion), pk.publicKey)
+    const stranger = await SoftPasskey.generate()
+    assert.equal(await matchPasskeySigner(st.signers, await stranger.assert(toHex(crypto.getRandomValues(new Uint8Array(32))))), null)
+
+    // The UI's live backend, configured like a deployment (NEXT_PUBLIC_* are read when config.ts first loads).
+    process.env.NEXT_PUBLIC_RPC_URL = chain.rpcUrl
+    process.env.NEXT_PUBLIC_BUNDLER_URL = bundlerUrl
+    process.env.NEXT_PUBLIC_CHAIN_ID = String(devnet.chainId)
+    process.env.NEXT_PUBLIC_API_URL = 'off'
+    const { liveBackend } = await import('../src/data/live.ts')
+    assert.equal((await liveBackend.chainStatus()).kind, 'ok')
+    const live = await liveBackend.readAccount(account)
+    assert.equal(live.deployed, true)
+    assert.equal(live.guardianThreshold, 2)
+    const queue = await liveBackend.vaultQueue(account)
+    assert.ok(queue.some((a) => a.status === 'cancelled'), 'the cancelled theft is in the queue history')
+    const big = await liveBackend.review(live, { target: addr('spender'), value: parseEther('8'), data: '0x' }, null, null)
+    assert.equal(big.vault.kind, 'queued')
+    const small = await liveBackend.review(live, { target: addr('recipient'), value: parseEther('0.1'), data: '0x' }, null, null)
+    assert.equal(small.vault.kind, 'instant')
+    const assets = await liveBackend.assets(account, live.balance)
+    assert.equal(assets[0].balance, live.balance)
   })
 
   it('(c) the preview flags an unlimited approval (advice, not fact) and the vault would block it', async () => {

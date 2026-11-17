@@ -15,7 +15,7 @@ import {
   timeAgo,
   vaultStatusTone,
 } from '../src/lib/format.ts'
-import { parseRoute } from '../src/lib/router.ts'
+import { isDynamicHref, paramFromPath, paths } from '../src/lib/routes.ts'
 
 test('formatUnits groups thousands, trims zeros, never shows dust as 0', () => {
   assert.equal(formatUnits(1234567890000000000000n, 18), '1,234.56789')
@@ -84,12 +84,17 @@ test('search classification', () => {
   assert.deepEqual(classifySearch('alice'), { type: 'text', id: 'alice' })
 })
 
-test('router', () => {
-  assert.deepEqual(parseRoute('/'), { page: 'home' })
-  assert.deepEqual(parseRoute('/block/12/'), { page: 'block', id: '12' })
-  assert.deepEqual(parseRoute('/address/0xabc', '?tab=approvals'), { page: 'address', address: '0xabc', tab: 'approvals' })
-  assert.deepEqual(parseRoute('/name/alice.xdevs'), { page: 'name', name: 'alice.xdevs' })
-  assert.deepEqual(parseRoute('/search', '?q=a%20b'), { page: 'search', q: 'a b' })
-  assert.deepEqual(parseRoute('/nope/x/y'), { page: 'notfound' })
-  assert.deepEqual(parseRoute('/tx/%E0%A4%A'), { page: 'tx', hash: '%E0%A4%A' }, 'malformed escapes do not throw')
+test('routes: placeholder-served dynamic pages read their param from the URL', () => {
+  assert.equal(paramFromPath('/block/12', 'block'), '12')
+  assert.equal(paramFromPath('/block/12/', 'block'), '12')
+  assert.equal(paramFromPath('/block/_', 'block'), null, 'the exported placeholder itself has no value')
+  assert.equal(paramFromPath('/block/_.html', 'block'), null)
+  assert.equal(paramFromPath('/name/alice.xdevs', 'name'), 'alice.xdevs')
+  assert.equal(paramFromPath('/tx/%E0%A4%A', 'tx'), '%E0%A4%A', 'malformed escapes do not throw')
+  assert.equal(paramFromPath('/', 'tx'), null)
+  assert.equal(isDynamicHref(paths.tx('0xab')), true)
+  assert.equal(isDynamicHref(paths.address('0xab', 'vault')), true)
+  assert.equal(isDynamicHref(paths.validators()), false)
+  assert.equal(isDynamicHref(paths.search('x')), false)
+  assert.equal(paths.name('a b.xdevs'), '/name/a%20b.xdevs')
 })

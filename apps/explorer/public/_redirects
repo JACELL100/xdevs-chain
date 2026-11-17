@@ -1,0 +1,7 @@
+# Cloudflare Pages rewrites (status 200 = served in place, the URL stays). Each dynamic route is exported once with
+# the placeholder param "_"; the page reads the real value from the URL in the browser.
+/block/*    /block/_    200
+/tx/*       /tx/_       200
+/address/*  /address/_  200
+/token/*    /token/_    200
+/name/*     /name/_     200

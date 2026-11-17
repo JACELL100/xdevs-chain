@@ -4,7 +4,8 @@ TypeScript SDK for **xDEVS Chain** (by THE xDEVS) — an EVM-equivalent PoS L1 f
 Built on [viem](https://viem.sh): chain definitions, typed `xdevs_` JSON-RPC actions, XNS (`.xdevs`)
 name helpers and address-poisoning helpers.
 
-> Status: pre-release (0.1.0). The public testnet chain id (717171) and URLs are **placeholders**.
+> Status: pre-release (0.1.0). The public testnet is **xDEVS Chain Enclave** (chain id 717171, coin EnclaveXDS / tXDS);
+> its endpoints under xdevschain.tech are announced on https://xdevschain.tech/network/endpoints as they go live.
 > Most `xdevs_` methods are implemented by the node only from Phase 3–5 (see table below); the SDK
 > throws `XdevsMethodNotAvailableError` when the node does not have them yet.
 
@@ -20,27 +21,32 @@ ESM only, Node ≥ 22.18 or any modern bundler. `viem@^2.21` is a peer dependenc
 
 ```ts
 import { createPublicClient, http } from 'viem'
-import { xdevsActions, xdevsDevnet, formatXds } from '@xdevs/sdk'
+import { xdevsActions, xdevsEnclave, formatXds } from '@xdevs/sdk'
 
-const client = createPublicClient({ chain: xdevsDevnet, transport: http() }).extend(xdevsActions)
+const client = createPublicClient({ chain: xdevsEnclave, transport: http() }).extend(xdevsActions)
 
 const balance = await client.getBalance({ address: '0x…' })
 console.log(`${formatXds(balance)} tXDS`)
 ```
 
-| Chain | Export | Chain id | RPC |
-|---|---|---|---|
-| Local devnet | `xdevsDevnet` | 7117 | `http://127.0.0.1:8545`, `ws://127.0.0.1:8545` |
-| Public testnet | `xdevsTestnet` | 717171 (**placeholder, TODO**) | `https://rpc.testnet.xdevs.invalid` (**placeholder**) |
+| Chain | Export | Chain id | Coin | RPC |
+|---|---|---|---|---|
+| Enclave (public testnet) | `xdevsEnclave` | 717171 (`0xaf173`) | EnclaveXDS (tXDS) | `https://rpc.xdevschain.tech`, `wss://ws.xdevschain.tech`; explorer `https://explorer.xdevschain.tech` |
+| Devnet | `xdevsDevnet` | 717170 | tXDS | no public RPC yet: `defineXdevsDevnet({ rpcUrl, wsUrl?, explorerUrl? })` |
+| Local dev chain (`xdevs run --dev`) | `xdevsLocal` | 7117 | tXDS | `http://127.0.0.1:8545`, `ws://127.0.0.1:8545` |
 
-Until the testnet is live, override its URLs:
+`xdevsTestnet` / `XDEVS_TESTNET_CHAIN_ID` remain as deprecated aliases of `xdevsEnclave` / `XDEVS_ENCLAVE_CHAIN_ID`.
+`XDEVS_ENCLAVE_ENDPOINTS` lists every Enclave service URL (rpc, ws, explorer, explorerApi, wallet, faucet, status,
+bundler, site). Before 0.1.0 final, `xdevsDevnet` meant the local 7117 chain: use `xdevsLocal` for that now.
+
+To point a chain at your own node, override its URLs:
 
 ```ts
 import { defineChain } from 'viem'
-const testnet = defineChain({ ...xdevsTestnet, rpcUrls: { default: { http: ['https://rpc.example.org'] } } })
+const mine = defineChain({ ...xdevsLocal, rpcUrls: { default: { http: ['http://10.0.0.5:8545'] } } })
 ```
 
-Both chains carry the genesis predeploys as viem `contracts` (`multicall3`, `staking`, `xnsRegistry`, `wxds`, …),
+All chains carry the genesis predeploys as viem `contracts` (`multicall3`, `staking`, `xnsRegistry`, `wxds`, …),
 and `predeploys` exports the raw addresses (kept in sync with `contracts/src/common/Predeploys.sol` by a test).
 
 ## Safety features
@@ -92,13 +98,13 @@ Label rules mirror `XNSLabel.sol`: 3–63 chars of `[a-z0-9-]`, no leading/trail
 
 ```ts
 import { createWalletClient, custom } from 'viem'
-import { addXdevsChainToWallet, xdevsDevnet } from '@xdevs/sdk'
+import { addXdevsChainToWallet, xdevsEnclave } from '@xdevs/sdk'
 
 const wallet = createWalletClient({ transport: custom(window.ethereum!) })
-await addXdevsChainToWallet(wallet, xdevsDevnet) // wallet_addEthereumChain (plan §23.1)
+await addXdevsChainToWallet(wallet, xdevsEnclave) // wallet_addEthereumChain (plan §23.1)
 ```
 
-`addXdevsChainToWallet` refuses chains that still use a placeholder `.invalid` URL.
+`addXdevsChainToWallet` refuses chains without an RPC URL (e.g. the unconfigured `xdevsDevnet`) or with a placeholder `.invalid` URL.
 
 ## `xdevs_` methods
 

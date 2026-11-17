@@ -59,17 +59,16 @@ async function call(env: Parameters<typeof worker.fetch>[1], req: Request) {
   return { res, body };
 }
 
-describe("GET /", () => {
-  it("serves the accessible form with Turnstile and the no-value notice", async () => {
+describe("non-API paths", () => {
+  it("serves JSON only: the HTML page moved to apps/faucet-web", async () => {
     const { env } = makeEnv();
-    const { res, body } = await call(env, new Request("https://faucet.testnet.example/"));
-    assert.equal(res.status, 200);
-    assert.match(res.headers.get("Content-Type") ?? "", /text\/html/);
-    assert.match(body, /Testnet tokens have no value/);
-    assert.match(body, /class="cf-turnstile" data-sitekey="1x00000000000000000000AA"/);
-    assert.match(body, /<label for="address">/);
-    assert.match(body, /aria-live="polite"/);
-    assert.match(res.headers.get("Content-Security-Policy") ?? "", /challenges\.cloudflare\.com/);
+    for (const path of ["/", "/index.html", "/api/nope"]) {
+      const { res, body } = await call(env, new Request(`https://faucet.testnet.example${path}`));
+      assert.equal(res.status, 404, path);
+      assert.match(res.headers.get("Content-Type") ?? "", /application\/json/);
+      assert.equal(body.ok, false);
+      assert.equal(body.error, "not_found");
+    }
   });
 });
 

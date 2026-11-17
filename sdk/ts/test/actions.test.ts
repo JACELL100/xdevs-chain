@@ -9,7 +9,7 @@ import {
   isMethodNotFoundError,
   parseXds,
   xdevsActions,
-  xdevsDevnet,
+  xdevsLocal,
 } from '../src/index.ts'
 import { mockClient, rpcError } from './helpers.ts'
 
@@ -31,7 +31,7 @@ const simulationResponse = {
 
 describe('xdevs_ actions', () => {
   it('decorator does not shadow any built-in viem public action', () => {
-    const base = createPublicClient({ chain: xdevsDevnet, transport: custom({ request: async () => null }) })
+    const base = createPublicClient({ chain: xdevsLocal, transport: custom({ request: async () => null }) })
     const added = Object.keys(xdevsActions(base))
     assert.equal(added.length, 10)
     for (const key of added) assert.equal(key in base, false, `${key} collides with viem`)
@@ -59,7 +59,7 @@ describe('xdevs_ actions', () => {
     const calls: { method: string; params?: unknown }[] = []
     const client = createClient({
       account,
-      chain: xdevsDevnet,
+      chain: xdevsLocal,
       transport: custom({ request: async (c: { method: string; params?: unknown }) => (calls.push(c), simulationResponse) }),
     }).extend(xdevsActions)
     await client.simulateTransaction({ to: BOB, data: '0xdeadbeef', blockNumber: 255n })

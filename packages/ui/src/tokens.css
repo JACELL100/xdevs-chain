@@ -1,0 +1,63 @@
+/*
+ * @xdevs/ui design tokens: the xDEVS Chain brand, identical to apps/site (xdevschain.tech).
+ * Platinum on near-black, ONE accent ("finality teal", --xh-final) used sparingly for state:
+ * final, safe, live, links. --xh-alert is for danger/errors only, --xh-warn for degraded states.
+ * Fonts: next/font sets --font-geist / --font-geist-mono on <html> (see READY.md).
+ */
+
+:root {
+  /* color */
+  --xh-bg: #05060a;
+  --xh-bg-2: #08090e;
+  --xh-surface: #0b0d12;
+  --xh-surface-2: #10131a;
+  --xh-line: rgba(255, 255, 255, 0.075);
+  --xh-line-2: rgba(255, 255, 255, 0.13);
+  --xh-line-3: rgba(255, 255, 255, 0.22);
+  --xh-text: #f3f5f8;
+  --xh-text-2: #c4c9d1;
+  --xh-muted: #8f96a1;
+  --xh-dim: #6b727d;
+  --xh-final: #4fe3cf;
+  --xh-final-strong: #5fe6d3;
+  --xh-final-soft: rgba(79, 227, 207, 0.14);
+  --xh-alert: #ff7a66;
+  --xh-alert-soft: rgba(255, 122, 102, 0.1);
+  --xh-silver: linear-gradient(180deg, #ffffff 0%, #eef1f4 42%, #a9b0ba 100%);
+
+  /* type (next/font sets --font-geist / --font-geist-mono on <html>) */
+  --xh-sans: var(--font-geist), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --xh-mono: var(--font-geist-mono), ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  /* radii */
+  --xh-radius-xs: 6px;
+  --xh-radius-sm: 8px;
+  --xh-radius-md: 14px;
+  --xh-radius-lg: 22px;
+  --xh-radius-pill: 999px;
+
+  /* spacing + layout */
+  --xh-space-1: 4px;
+  --xh-space-2: 8px;
+  --xh-space-3: 12px;
+  --xh-space-4: 16px;
+  --xh-space-5: 24px;
+  --xh-space-6: 32px;
+  --xh-space-7: 48px;
+  --xh-space-8: 64px;
+  --xh-max: 1200px;
+  --xh-gutter: clamp(20px, 5vw, 48px);
+  --xh-header-h: 64px;
+
+  /* motion */
+  --xh-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --xh-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* app-only additions (not used by the site) */
+  --xh-warn: #f2c46d;
+  --xh-warn-soft: rgba(242, 196, 109, 0.12);
+  --xh-surface-3: #151922;
+  --xh-header-h-app: 60px;
+
+  color-scheme: dark;
+}

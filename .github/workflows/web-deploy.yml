@@ -1,0 +1,129 @@
+name: web-deploy
+
+# Builds and deploys the workspace web apps (static Next.js exports) to Cloudflare Pages whenever main
+# changes one of them, the shared UI kit (packages/ui), the SDK (sdk/ts), the root workspace files or this
+# workflow. Only the affected apps are deployed; a manual run can deploy one app or all of them.
+#
+#   apps/explorer   -> Pages project xdevs-explorer -> https://explorer.xdevschain.tech
+#   apps/wallet     -> Pages project xdevs-wallet   -> https://wallet.xdevschain.tech
+#   apps/faucet-web -> Pages project xdevs-faucet   -> https://faucet.xdevschain.tech
+#   apps/status     -> Pages project xdevs-status   -> https://status.xdevschain.tech
+#
+# Needs the repository secret CLOUDFLARE_API_TOKEN (Pages: Edit) and the repository variable
+# CLOUDFLARE_ACCOUNT_ID (same as docs.yml). The Pages projects and custom domains must exist.
+
+on:
+  push:
+    # web-apps: work-in-progress branch; only the apps listed in READY_ON_BRANCH deploy from it.
+    branches: [main, web-apps]
+    paths:
+      - "apps/explorer/**"
+      - "apps/wallet/**"
+      - "apps/faucet-web/**"
+      - "apps/status/**"
+      - "packages/ui/**"
+      - "sdk/ts/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/web-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      app:
+        description: App to deploy
+        type: choice
+        options: [all, explorer, wallet, faucet-web, status]
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      any: ${{ steps.matrix.outputs.any }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name == 'push'
+        with:
+          filters: |
+            shared: &shared
+              - "packages/ui/**"
+              - "sdk/ts/**"
+              - "package.json"
+              - "package-lock.json"
+              - ".github/workflows/web-deploy.yml"
+            explorer:
+              - *shared
+              - "apps/explorer/**"
+            wallet:
+              - *shared
+              - "apps/wallet/**"
+            faucet-web:
+              - *shared
+              - "apps/faucet-web/**"
+            status:
+              - *shared
+              - "apps/status/**"
+      - id: matrix
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_APP: ${{ inputs.app }}
+          CHANGED: ${{ steps.filter.outputs.changes }}
+          REF: ${{ github.ref_name }}
+          READY_ON_BRANCH: "explorer,wallet,faucet-web,status"
+        run: |
+          node -e '
+            const projects = { explorer: "xdevs-explorer", wallet: "xdevs-wallet", "faucet-web": "xdevs-faucet", status: "xdevs-status" }
+            const hosts = { explorer: "explorer", wallet: "wallet", "faucet-web": "faucet", status: "status" }
+            let apps
+            if (process.env.EVENT === "workflow_dispatch")
+              apps = process.env.INPUT_APP === "all" ? Object.keys(projects) : [process.env.INPUT_APP]
+            else apps = JSON.parse(process.env.CHANGED || "[]").filter((a) => a in projects)
+            if (process.env.REF !== "main") apps = apps.filter((a) => process.env.READY_ON_BRANCH.split(",").includes(a))
+            const include = apps.map((app) => ({ app, project: projects[app], url: `https://${hosts[app]}.xdevschain.tech` }))
+            const out = `matrix=${JSON.stringify({ include })}\nany=${include.length > 0}\n`
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, out)
+            console.log(out)
+          '
+
+  deploy:
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
+    name: deploy (${{ matrix.app }})
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: web-${{ matrix.app }}
+      url: ${{ matrix.url }}
+    concurrency:
+      group: web-deploy-${{ matrix.app }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:sdk
+      - name: Build apps/${{ matrix.app }}
+        working-directory: apps/${{ matrix.app }}
+        env:
+          # Public Turnstile site key of the faucet widget (repository variable; empty for other apps).
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+        run: npm run build
+      # npx (not cloudflare/wrangler-action) so wrangler is not npm-installed into the workspace root.
+      - name: Deploy to Cloudflare Pages (${{ matrix.project }})
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 pages deploy "apps/${{ matrix.app }}/out" --project-name="${{ matrix.project }}" --branch=main --commit-dirty=true

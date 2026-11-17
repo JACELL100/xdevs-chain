@@ -1,5 +1,5 @@
 import { type Chain, createPublicClient, custom } from 'viem'
-import { xdevsActions, xdevsDevnet } from '../src/index.ts'
+import { xdevsActions, xdevsLocal } from '../src/index.ts'
 
 export type Call = { method: string; params: unknown }
 
@@ -7,7 +7,7 @@ export type Call = { method: string; params: unknown }
  * A public client whose transport never touches the network: every request is recorded in `calls`
  * and answered by `handler` (throw to simulate a JSON-RPC error).
  */
-export function mockClient(handler: (call: Call) => unknown, chain: Chain = xdevsDevnet) {
+export function mockClient(handler: (call: Call) => unknown, chain: Chain = xdevsLocal) {
   const calls: Call[] = []
   const client = createPublicClient({
     chain,

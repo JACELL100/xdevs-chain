@@ -6,7 +6,7 @@ xDEVS Chain is an EVM-equivalent, Proof-of-Stake Layer 1 written in Rust, built 
 
 The native coin is **XDS** (testnet: **tXDS**, 18 decimals; the smallest unit is the "dev"). Names end in `.xdevs` (XNS, the xDEVS Name Service).
 
-> **Status: Phase 2 (multi-validator BFT network) working locally; public testnet not live yet.** Validators reach BFT consensus with Malachite, survive one validator going down, halt safely with two down and resume, and late nodes sync from genesis. Findings from an internal security review (denial-of-service in proposal streaming, gossip and RPC) are fixed and covered by tests; an external audit is still required before mainnet. The system and user-safety contracts, the TypeScript SDK and the faucet are built and tested. The public devnet (Phase 3) is next. Testnet tokens have no value.
+> **Status: the Enclave public testnet is live (chain id 717171, since 17 Nov 2026).** Phase 2 (multi-validator BFT network) is complete and Phase 3 has started. Validators reach BFT consensus with Malachite, survive one validator going down, halt safely with two down and resume, and late nodes sync from genesis. Findings from an internal security review (denial-of-service in proposal streaming, gossip and RPC) are fixed and covered by tests; an external audit is still required before mainnet. The system and user-safety contracts, the TypeScript SDK and the faucet are built and tested. Staking-driven validators, the faucet and the explorer API are the next Phase 3 steps. Testnet tokens have no value.
 
 ## Why xDEVS Chain?
 
@@ -43,7 +43,8 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | Multi-validator BFT consensus (Malachite), block sync, P2P tx gossip, incremental state root | ✅ Built and tested locally (Phase 2) |
 | DoS hardening of consensus streaming, gossip and RPC (from the Phase 2 security review) | ✅ Built and tested |
 | 24-hour soak test of a multi-validator network | 📋 Planned on the testnet VMs (5-hour soaks run in CI) |
-| Staking-driven validator set, public testnet | 📋 Next (Phase 3) |
+| Public testnet (Enclave, 4 validators) | ✅ Live since 17 Nov 2026 |
+| Staking-driven validator set | 📋 Next (Phase 3) |
 | Transaction simulation and recipient-check RPCs, reference wallet | 📋 Planned (Phase 4) |
 | Encrypted mempool, parallel execution, local fee markets | 📋 Planned (Phase 5) |
 | Light-client bridges | 📋 Planned (Phase 7) |
@@ -105,19 +106,27 @@ docs/              ADRs (docs/adr), specs (docs/specs), runbooks (docs/runbooks)
 deploy/            dev genesis, systemd unit, local Docker setup
 ```
 
-## Public endpoints (planned)
+## Enclave testnet (live)
 
-These are not live yet. They will be announced on [xdevschain.tech](https://xdevschain.tech) when the public testnet launches.
+**xDEVS Chain Enclave** is the public testnet: chain id **717171** (`0xaf173`), coin **EnclaveXDS** (symbol `tXDS`, no value), 2-second blocks with BFT finality, 4 validators (Oracle Cloud, Hyderabad + Mumbai).
 
-| Service | URL |
-|---|---|
-| Website and docs | `https://xdevschain.tech` |
-| Testnet JSON-RPC | `https://rpc.xdevschain.tech` |
-| Testnet WebSocket | `wss://ws.xdevschain.tech` |
-| Block explorer | `https://explorer.xdevschain.tech` |
-| Faucet | `https://faucet.xdevschain.tech` |
+| Service | URL | Status |
+|---|---|---|
+| JSON-RPC | `https://rpc.xdevschain.tech` | ✅ Live |
+| WebSocket | `wss://ws.xdevschain.tech` | ✅ Live |
+| Network status | https://status.xdevschain.tech | ✅ Live |
+| Block explorer | https://explorer.xdevschain.tech | ✅ Live (reads from the node; history needs the explorer API) |
+| Wallet | https://wallet.xdevschain.tech | ✅ Live (preview; passkey accounts need the bundler) |
+| Faucet | https://faucet.xdevschain.tech | 🚧 Page live; claims open once the captcha is configured |
+| Explorer API | `https://explorer-api.xdevschain.tech` | 📋 Next |
+| Bundler | `https://bundler.xdevschain.tech` | 📋 Next |
+| Website and docs | https://xdevschain.tech | ✅ Live |
 
-Service hosts use one subdomain level (`*.xdevschain.tech`) so they are covered by Cloudflare's free certificate for the domain. The testnet chain id will be published here once it is registered on [chainlist](https://chainlist.org).
+```bash
+cast block-number --rpc-url https://rpc.xdevschain.tech
+```
+
+Add it to MetaMask: network name `xDEVS Chain Enclave`, RPC `https://rpc.xdevschain.tech`, chain id `717171`, symbol `tXDS`, explorer `https://explorer.xdevschain.tech`. Details: [Network endpoints](https://xdevschain.tech/network/endpoints).
 
 ## Quickstart (local dev chain)
 

@@ -267,7 +267,7 @@ export type XdevsActions = {
  * Client decorator adding every `xdevs_` action:
  *
  * ```ts
- * const client = createPublicClient({ chain: xdevsDevnet, transport: http() }).extend(xdevsActions)
+ * const client = createPublicClient({ chain: xdevsEnclave, transport: http() }).extend(xdevsActions)
  * const sim = await client.simulateTransaction({ account, to, value: parseXds('1') })
  * ```
  */

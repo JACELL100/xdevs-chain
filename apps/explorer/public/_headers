@@ -1,10 +1,12 @@
 # Cloudflare Pages response headers.
+# script-src needs 'unsafe-inline': a Next.js static export streams its React Server Component payload in inline
+# <script> tags. Everything else stays first-party; data comes from the RPC / API origins over https/wss.
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
 
-/assets/*
+/_next/static/*
   Cache-Control: public, max-age=31536000, immutable
