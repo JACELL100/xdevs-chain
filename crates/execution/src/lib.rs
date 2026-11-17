@@ -9,6 +9,8 @@
 //! * [`EvmExecutor::call`] / [`EvmExecutor::estimate_gas`] — single-call execution for
 //!   `eth_call` / `eth_estimateGas`; the `*_with_limits` variants stop a simulation at a
 //!   wall-clock deadline or when it is cancelled ([`CallLimits`]).
+//! * [`EvmExecutor::inspect_call`] — the same message call with an extra revm
+//!   inspector (Phase 4: the `xdevs-simulator` crate behind `xdevs_simulateTransaction`).
 //!
 //! Phase 3: [`EvmExecutor::execute_with`] / [`EvmExecutor::build_with`] run the Staking
 //! system calls of every block from `ChainConfig::staking_validators_block` on
@@ -38,7 +40,7 @@ mod tests;
 mod xip0001;
 
 pub use base_fee::next_base_fee;
-pub use db::StateDbError;
+pub use db::{StateDbError, StateOverlay};
 pub use env::{BLOB_TX_TYPE, SPEC};
 pub use error::ExecutionError;
 pub use executor::CALL_LIMIT_CHECK_INTERVAL;
@@ -227,6 +229,10 @@ impl CallLimits {
         None
     }
 }
+
+/// EVM context seen by an inspector passed to [`EvmExecutor::inspect_call`]. An inspector
+/// that does not look at the context implements `revm::Inspector<CTX>` for every `CTX`.
+pub type CallContext<'o, 'a> = revm::handler::MainnetContext<&'o mut StateOverlay<'a>>;
 
 /// The revm-based executor: implements [`BlockExecutor`] plus call/estimate helpers.
 #[derive(Clone, Debug)]
