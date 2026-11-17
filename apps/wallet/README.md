@@ -1,58 +1,66 @@
-# xDEVS reference wallet
+# xDEVS Wallet (wallet.xdevschain.tech)
 
-Vite + React single-page app (no UI kit, hand-written CSS) implementing the Phase 4 user-safety layer (plan §16, §23,
-§27): passkey smart accounts with no seed phrase, the Guardian Vault, pre-sign previews, an approvals manager, XNS
-sending with poisoning checks, guardian tools, and the EIP-7702 / XIP-0001 EOA-lock path. Testnet reference: testnet
-tokens have no value. Spec: [`docs/specs/wallet.md`](../../docs/specs/wallet.md).
+Next.js static export (client-side app) built on the shared brand kit `@xdevs/ui`: a passkey smart account with no
+seed phrase, the Guardian Vault, guardians with freeze and recovery, expiring approvals, `.xdevs` names, and the
+EIP-7702 / XIP-0001 EOA lock for MetaMask addresses. Spec: [`docs/specs/wallet.md`](../../docs/specs/wallet.md).
+Testnet: xDEVS Chain **Enclave** (chain 717171, EnclaveXDS / tXDS, no monetary value).
 
-## Run against a local dev chain
+## Screens
+
+| Route | What |
+|---|---|
+| `/` | Dashboard (balance, quick actions, assets, activity, protection summary, vault alert, activation) or onboarding |
+| `/welcome` | Create a wallet with a passkey (vault limits, optional guardians), sign in with a passkey, watch an address |
+| `/send` | tXDS / token / contract call; address or `.xdevs` name; look-alike and first-time checks; simulation ("advice, not fact"); Guardian Vault outcome ("will wait N hours"); one passkey confirmation |
+| `/receive` | Address grouped for checking, name, QR code (local encoder, `src/lib/qr.ts`), faucet link |
+| `/vault` | Queued actions with countdown, cancel (confirm dialog) / execute, history, policy, trusted addresses |
+| `/guardians` | Guardians and quorum (add / remove), freeze and recovery state, "act as a guardian" tools (browser wallet) |
+| `/approvals` | Live approvals with expiry, revoke / revoke all, approval checker |
+| `/names` | Claim a look-alike-proof `.xdevs` name and set it as primary |
+| `/eoa-lock` | Connect MetaMask, see delegation / vault / lock state, turn on the XIP-0001 lock (dev raw-key upgrade panel) |
+| `/settings` | Endpoints with live status, accounts on this device, export of PUBLIC account info, demo switch |
+
+When the RPC does not answer, every screen shows a "Enclave testnet is launching soon" state with "Preview the
+wallet with demo data" (session-only demo).
+
+## Configuration (all public, inlined at build time; defaults = Enclave)
+
+`NEXT_PUBLIC_RPC_URL`, `NEXT_PUBLIC_BUNDLER_URL`, `NEXT_PUBLIC_CHAIN_ID`, `NEXT_PUBLIC_CHAIN_NAME`, `NEXT_PUBLIC_API_URL`
+(explorer API, `off` = chain reads only), `NEXT_PUBLIC_EXPLORER_URL`, `NEXT_PUBLIC_FAUCET_URL`,
+`NEXT_PUBLIC_PAYMASTER_SPONSOR`, `NEXT_PUBLIC_KNOWN_TOKENS`, `NEXT_PUBLIC_RP_ID` (WebAuthn RP ID; default = page host,
+i.e. `wallet.xdevschain.tech`, `localhost` in dev; never change it on a live deployment), `NEXT_PUBLIC_DEMO=1` (demo
+build: fixture account and data, every screen labelled "Demo"), `NEXT_PUBLIC_DEV_TOOLS` (virtual passkey and raw-key
+panel; on under `next dev`, never on a public build). See `.env.example`.
+
+## Develop, test, build
 
 ```bash
-# 1. chain + paymaster sponsor + test token (terminal 1)
-cd apps/bundler && npm install && npm run devnet          # prints the .env.local below
-# 2. dev bundler (terminal 2) — the command is printed by step 1
-BUNDLER_PRIVATE_KEY=0x5de4…365a RPC_URL=http://127.0.0.1:8545 npm start
-# 3. wallet (terminal 3)
-cd apps/wallet && npm install
-cp .env.example .env.local    # then paste the values printed by step 1
-npm run dev                    # http://localhost:5173 (WebAuthn needs localhost or HTTPS)
+npm run build:sdk                      # from the repo root, once
+npm run dev -w @xdevs/wallet           # http://localhost:3000 (WebAuthn works on localhost)
+npm run typecheck -w @xdevs/wallet
+npm test -w @xdevs/wallet              # chain tests start anvil (or the xDEVS node) themselves
+npm run build -w @xdevs/wallet         # out/ ; postbuild writes out/_headers (per-page CSP with script hashes)
 ```
 
-`npm run devnet` prefers the real node (`xdevs run --dev --genesis deploy/configs/dev-genesis-with-predeploys.json`,
-binary via `XDEVS_BIN` or the cargo target dirs) and falls back to `anvil --hardfork osaka --chain-id 7117` with the
-same genesis alloc. Against an already-running node: `npm run devnet -- --rpc http://127.0.0.1:8545`.
+Local chain: `cd apps/bundler && npm run devnet` and the dev bundler (see its README), then `.env.local` with the
+local values from `.env.example`.
 
-Configuration (`.env.local`, all public, baked into the bundle): `VITE_RPC_URL`, `VITE_BUNDLER_URL`, `VITE_CHAIN_ID`,
-`VITE_API_URL` (explorer API, optional), `VITE_FAUCET_URL`, `VITE_EXPLORER_URL`, `VITE_PAYMASTER_SPONSOR`,
-`VITE_KNOWN_TOKENS`, `VITE_DEV_TOOLS`.
+Code layout: `src/lib` (framework-free logic shared with the tests: WebAuthn encoding, UserOperations, vault,
+preview, recipients, approvals, 7702, QR, formatting), `src/data` (`live.ts` = chain + bundler + explorer API,
+`demo.ts` = fixtures; both implement `Backend`), `src/wallet` (provider, gate, hooks), `src/components`, `src/views`,
+`src/app` (routes).
 
-## Dev-only parts (never on a public deployment)
+Tests: `unit` (UserOp packing, vault rules, revoke builders, bundler copy in sync), `webauthn` (P-256 encoding verified
+by the chain's `P256VERIFY` and the account's ERC-1271), `e2e` (Phase 4 exit criteria on a real chain + the app's live
+data layer and passkey sign-in matching), `app` (formatting, strict amounts, sign-in verification, demo backend
+behaviour), `qr` (Reed-Solomon / format / version vectors), `csp` (headers generator).
 
-- **Virtual passkey**: a WebCrypto P-256 key in `localStorage` that signs exactly like a passkey (for headless tests and
-  machines without an authenticator). It is a hot key.
-- **Raw-key EIP-7702 panel** and **dev-key guardian**: paste a private key. MetaMask cannot sign a 7702 authorization to
-  `0x…1005` today, so the upgrade path needs the raw key on dev chains.
-- **`apps/bundler`**: single-operator dev bundler, see its README.
+## Security notes
 
-`vite dev` enables these automatically; a production build only with `VITE_DEV_TOOLS=true`.
-
-## Build and deploy
-
-`npm run build` (typecheck + `vite build`) writes `dist/`, a static site (planned host: Cloudflare Pages). A public
-deployment needs a production ERC-4337 bundler URL and must keep `VITE_DEV_TOOLS` unset.
-
-## Tests
-
-`npm test` (Node ≥ 22.18, runs TypeScript directly):
-
-- `test/unit.test.ts` — UserOperation packing / hashing helpers, dummy signatures, vault explanation, revoke builders.
-- `test/webauthn.test.ts` — WebAuthn signature encoding: RFC 6979 P-256 vector and software-passkey assertions verified
-  by the chain's real `P256VERIFY` precompile (`0x100`), byte offsets, and acceptance by `XdevsSmartAccount`'s verifier
-  (ERC-1271).
-- `test/e2e.test.ts` — the Phase 4 exit criteria headlessly on a real chain with the dev bundler and the paymaster:
-  passkey-only sign-up → sponsored deployment → faucet funds; stolen-key large transfer queued → visible in the queue →
-  2-of-3 guardian cancel; unlimited approval flagged by the preview; look-alike recipients; approvals list + revoke;
-  EIP-7702 upgrade + EOA lock (on the xDEVS node, a raw transfer from the locked key is refused with XIP-0001).
-
-Chain selection: `XDEVS_TEST_CHAIN=xdevs|anvil|auto` (default auto = the xDEVS node if its binary is found). The e2e
-test deploys the XDRC-20 test token from `contracts/out-wallet` (built with Foundry on first use).
+- No seed phrase; the passkey's private key never leaves the authenticator. Only public data is stored locally.
+- Every send shows recipient checks (look-alike / first-time / verified name), the vault outcome and a simulation;
+  high-severity warnings and look-alike recipients need an explicit acknowledgement; "rejected" disables signing.
+- Strict amount parsing (no guessing of `1,5`), amounts truncated never rounded up, addresses shown in 4-char groups
+  with the first and last group highlighted.
+- No analytics, no third-party requests, no `eval`; errors never include key material. CSP: inline scripts allowed
+  by hash per page, `connect-src` limited to the configured RPC / bundler / explorer API.

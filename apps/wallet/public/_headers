@@ -1,0 +1,13 @@
+# Cloudflare Pages response headers. FALLBACK ONLY: `npm run build` runs scripts/csp.mjs (postbuild), which replaces
+# out/_headers with a stricter version (per-page script hashes instead of 'unsafe-inline', connect-src limited to the
+# configured RPC / bundler / explorer API).
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Cross-Origin-Opener-Policy: same-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), publickey-credentials-get=(self), publickey-credentials-create=(self)
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'
+
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable

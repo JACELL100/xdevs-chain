@@ -38,7 +38,7 @@ export const config = {
   rpcUrl: str(process.env.NEXT_PUBLIC_RPC_URL) ?? ENCLAVE.rpcUrl,
   bundlerUrl: str(process.env.NEXT_PUBLIC_BUNDLER_URL) ?? ENCLAVE.bundlerUrl,
   chainId,
-  chainName: str(process.env.NEXT_PUBLIC_CHAIN_NAME) ?? (chainId === 7117 ? 'xDEVS Chain Local' : ENCLAVE.name),
+  chainName: str(process.env.NEXT_PUBLIC_CHAIN_NAME) ?? (chainId === 7117 ? 'xDEVS Chain Local' : chainId === 717170 ? 'xDEVS Chain Devnet' : ENCLAVE.name),
   coinName: ENCLAVE.coinName,
   symbol: ENCLAVE.symbol,
   /** Explorer API base (apps/indexer) for activity, approvals and the vault queue; "off" = chain reads only. */

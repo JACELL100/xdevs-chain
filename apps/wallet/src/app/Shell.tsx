@@ -61,7 +61,7 @@ function Frame({ children }: { children: React.ReactNode }) {
   const { rec, chain, demo, ready, queue } = useWallet()
   const openCount = queue.filter((a) => a.status === 'queued' || a.status === 'ready').length
   const showBanner = ready && (demo || (openCount > 0 && path !== '/vault'))
-  const status = demo ? 'live' : chain.kind === 'ok' ? 'live' : chain.kind === 'checking' ? 'checking' : chain.kind === 'wrong-chain' ? 'degraded' : 'down'
+  const status = demo ? 'unknown' : chain.kind === 'ok' ? 'live' : chain.kind === 'checking' ? 'checking' : chain.kind === 'wrong-chain' ? 'degraded' : 'down'
   return (
     <AppShell
       appName="Wallet"
@@ -69,7 +69,7 @@ function Frame({ children }: { children: React.ReactNode }) {
       nav={ready && rec ? NAV : []}
       currentPath={path}
       linkComponent={Link}
-      network={{ status, label: config.chainId === 717171 ? 'Enclave testnet' : config.chainName, href: XDEVS_LINKS.status }}
+      network={{ status, label: demo ? 'Demo data' : config.chainId === 717171 ? 'Enclave testnet' : config.chainId === 717170 ? 'Devnet' : config.chainName, href: XDEVS_LINKS.status }}
       headerActions={<AccountMenu />}
       banner={showBanner ? <Banner path={path} /> : null}
     >
