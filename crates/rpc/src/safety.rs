@@ -815,7 +815,7 @@ async fn get_approvals_inner(
             transaction_hash: tx,
         });
     }
-    out.sort_by(|a, b| b.last_updated_block.cmp(&a.last_updated_block));
+    out.sort_by_key(|a| std::cmp::Reverse(a.last_updated_block));
     Ok(out)
 }
 

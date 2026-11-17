@@ -134,7 +134,7 @@ pub fn simulate(
         ));
     }
     if fee_per_gas > 0 {
-        let gas = U256::from(req.gas.unwrap_or_else(|| result.gas_used()));
+        let gas = U256::from(req.gas.unwrap_or(result.gas_used()));
         let needed = gas
             .saturating_mul(U256::from(fee_per_gas))
             .saturating_add(request.value.unwrap_or_default());

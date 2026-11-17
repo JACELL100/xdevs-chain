@@ -312,7 +312,7 @@ impl RpcBackend for Mock {
             .iter()
             .filter(|l| {
                 let n = l.block_number.unwrap();
-                n >= from && n <= to && filter.matches(&l.inner)
+                (from..=to).contains(&n) && filter.matches(&l.inner)
             })
             .cloned()
             .collect();

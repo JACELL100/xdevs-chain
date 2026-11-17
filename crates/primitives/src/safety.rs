@@ -348,7 +348,7 @@ impl Warning {
 
 /// Sort warnings by severity (highest first), keeping the order of equal ones.
 pub fn sort_warnings(warnings: &mut [Warning]) {
-    warnings.sort_by(|a, b| b.severity.cmp(&a.severity));
+    warnings.sort_by_key(|w| std::cmp::Reverse(w.severity));
 }
 
 // ---------------------------------------------------------------------------

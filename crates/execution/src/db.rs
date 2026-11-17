@@ -32,8 +32,11 @@ impl From<xdevs_state::StateError> for StateDbError {
     }
 }
 
-/// Read-through cache + write buffer on top of a [`StateProvider`].
-pub(crate) struct StateOverlay<'a> {
+/// Read-through cache + write buffer on top of a [`StateProvider`]: the revm database of
+/// every execution. Public only so that inspectors passed to
+/// [`crate::EvmExecutor::inspect_call`] can name their context type
+/// ([`crate::CallContext`]); it has no public constructor.
+pub struct StateOverlay<'a> {
     provider: &'a dyn StateProvider,
     /// Changes committed so far (the write buffer).
     diff: StateDiff,
