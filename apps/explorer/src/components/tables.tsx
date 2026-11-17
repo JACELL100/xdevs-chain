@@ -269,7 +269,7 @@ export function VaultTable({ items, now }: { items: VaultAction[]; now: number }
         </span>
       ),
     },
-    { key: 'queued', header: 'Queued in', render: (v) => <TxHash hash={v.queuedTx} /> },
+    { key: 'queued', header: 'Queued in', render: (v) => (v.queuedTx ? <TxHash hash={v.queuedTx} /> : <span className="x-muted">—</span>) },
   ]
   return <Table caption="Guardian Vault queue" columns={cols} rows={items} rowKey={(v) => v.id} className="x-table" />
 }

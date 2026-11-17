@@ -45,7 +45,7 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | 24-hour soak test of a multi-validator network | 📋 Planned on the testnet VMs (5-hour soaks run in CI) |
 | Public testnet (Enclave, 4 validators) | ✅ Live since 17 Nov 2026 |
 | Staking-driven validator set (epochs, rewards, downtime and double-sign slashing) | ✅ Built and tested on local networks; Enclave activation pending (Phase 3) |
-| Transaction simulation and recipient-check RPCs, reference wallet | 📋 Planned (Phase 4) |
+| Transaction simulation and safety RPCs (`xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, `vaultEvents`) | ✅ Built and tested (Phase 4); reference wallet uses them when the node serves them |
 | Encrypted mempool, parallel execution, local fee markets | 📋 Planned (Phase 5) |
 | Light-client bridges | 📋 Planned (Phase 7) |
 
@@ -58,7 +58,8 @@ Works and is covered by tests (unit tests per crate plus in-process end-to-end t
 - [XIP-0001](docs/specs/xip-0001-eoa-lock.md) EOA lock, active from genesis on dev chains (`"xip0001Block": 0`): an EIP-7702 account delegated to the xDEVS Smart Account with lock word 1 may only send value-0 calls to itself (one per block, gas ≤ 2,000,000, max fee ≤ 2 × base fee), with word 2 nothing at all, and EIP-7702 authorizations signed by a locked key are skipped. Enforced when executing and building blocks and on mempool admission (re-checked on every new head); `eth_sendRawTransaction` / `eth_estimateGas` return `-32003` with `data.reason` (`XIP0001_SEALED`, `XIP0001_NOT_SELF_CALL`, ...), and `xdevs_getEoaLock(address, block)` reports the lock state.
 - Storage in `redb` with one atomic write per block; restarts resume from the same head and state root. The Ethereum state root is maintained incrementally over persisted trie nodes.
 - Multi-validator networks (Phase 2): Malachite BFT consensus with execute-before-vote, commit certificates (`xdevs_getCommitCertificate`), a double-sign guard, block sync for late joiners, libp2p transaction gossip, validator and full-node modes, and `xdevs-cli testnet init` to generate a local network. Tested: 1 of 4 validators down keeps going, 2 of 4 halts safely and resumes, no forks, restarted validators rejoin.
-- WebSocket subscriptions: `eth_subscribe` `newHeads`, `logs` and `newPendingTransactions`, with per-connection and global limits.
+- WebSocket subscriptions: `eth_subscribe` `newHeads`, `logs`, `newPendingTransactions` and `vaultEvents` (Guardian Vault alerts), with per-connection and global limits.
+- Safety RPCs (Phase 4): `xdevs_simulateTransaction` (revm inspector: asset changes, approvals, Guardian Vault outcome, advisory warnings), `xdevs_checkRecipient` (facts kept apart from advice: look-alike and poisoning checks), `xdevs_getApprovals`, `xdevs_getVaultQueue`, `xdevs_resolveName` / `xdevs_reverseName`, all within the `eth_call` / `eth_getLogs` limits.
 - Prometheus `/metrics` (`[metrics] enabled = true`): block height, block time, finality latency, transactions, peers, mempool size.
 - JSON-RPC over HTTP (WebSocket transport on the same port): `eth_chainId`, `eth_blockNumber`, `eth_getBalance`, `eth_getTransactionCount`, `eth_getCode`, `eth_getStorageAt`, `eth_call`, `eth_estimateGas`, `eth_sendRawTransaction`, block / transaction / receipt lookups, `eth_getBlockReceipts`, `eth_getLogs`, `eth_gasPrice`, `eth_maxPriorityFeePerGas`, `eth_feeHistory`, `net_*`, `web3_*` and `xdevs_getEoaLock`.
 - State queries at past blocks: the node keeps reverse state diffs for the last 10,000 blocks (`[chain] pruning = "full"`; `"minimal"` keeps 128, `"archive"` keeps all, `state_history_blocks` sets any window), so `cast ... --block N`, `anvil --fork-url` and `forge script` can pin a block while new blocks keep coming. Older blocks return `-32000 historical state not available`.
@@ -72,7 +73,7 @@ Not done yet:
 - Block and receipt pruning (all blocks are kept) and JSON log output.
 - Dev block timestamps are whole seconds and at least parent + 1, so block times under 1 s run ahead of the wall clock.
 - Graceful shutdown on Ctrl-C is tested in-process; it has not been checked by hand with a console Ctrl-C on Windows.
-- XIP-0001 extras that depend on later phases: the `xdevs_simulateTransaction` warning (the method itself is Phase 4).
+- XIP-0001 extras: a dedicated `xdevs_simulateTransaction` warning for transactions a locked EOA could not send.
 
 ### Honest trade-offs
 

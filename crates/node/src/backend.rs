@@ -6,7 +6,7 @@
 //! DoS limits (security review "RPC load can starve consensus"): at most
 //! `max_concurrent` requests do blocking work at once (default 2 x CPUs; others wait up
 //! to [`RPC_QUEUE_TIMEOUT`] for a slot, then fail with -32005), and `eth_call` /
-//! `eth_estimateGas` stop after `evm_timeout` of EVM time (default 5 s, like geth) or as
+//! `eth_estimateGas` / `xdevs_simulateTransaction` stop after `evm_timeout` of EVM time (default 5 s, like geth) or as
 //! soon as the request is dropped (client gone), failing with "execution aborted".
 //! Consensus never shares these threads (see `ChainApp`).
 //! State queries at past blocks read the reverse state diffs of the recent blocks
@@ -39,6 +39,7 @@ use xdevs_rpc::{
     types::*,
     BackendResult, BlockEvent, ChainEvents, RpcBackend, RpcBackendError,
 };
+use xdevs_simulator::SimulationOptions;
 use xdevs_state::{
     history::oldest_available_state, DbStateProvider, HistoricalStateProvider, StateProvider,
 };
@@ -47,6 +48,9 @@ use xdevs_storage::{DbError, DbRead};
 /// Fallback suggested priority fee when recent blocks carry no transactions
 /// (0.001 gwei, geth's default minimum suggestion).
 pub const DEFAULT_PRIORITY_FEE: u128 = 1_000_000;
+/// Native coin symbol in simulation results (every xDEVS network so far is a test
+/// network: tXDS has no value).
+pub const NATIVE_SYMBOL: &str = "tXDS";
 /// Blocks sampled by the priority-fee oracle.
 pub const TIP_ORACLE_BLOCKS: u64 = 20;
 
@@ -661,6 +665,23 @@ impl RpcBackend for NodeBackend {
         .await
     }
 
+    async fn simulate_transaction(
+        &self,
+        request: TransactionRequest,
+        block: BlockId,
+    ) -> BackendResult<SimulationReport> {
+        self.simulate(move |s, ctx, limits| {
+            let (header, state) = state_at(s, block)?;
+            let options = SimulationOptions {
+                gas_cap: ctx.gas_cap,
+                native_symbol: NATIVE_SYMBOL.to_string(),
+            };
+            xdevs_simulator::simulate(&ctx.executor, &*state, &header, &request, &options, limits)
+                .map_err(|e| ctx.exec_err(e))
+        })
+        .await
+    }
+
     async fn send_raw_transaction(&self, raw: Bytes) -> BackendResult<B256> {
         let chain_id = self.cfg.chain_id;
         let pool = self.pool.clone();
@@ -1151,5 +1172,46 @@ mod tests {
         assert_eq!(err.code(), -32005);
         assert_eq!(backend.logs(range.clone(), Some(5)).await.unwrap().len(), 5);
         assert_eq!(backend.logs(range, None).await.unwrap().len(), 5);
+    }
+
+    /// `xdevs_simulateTransaction` runs the simulator on the requested block's state with
+    /// the backend limits, and never changes the chain.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn simulates_without_committing() {
+        let (db, _pool, _producer, backend) = dev_chain(10);
+        let to = Address::repeat_byte(0x42);
+        let request = TransactionRequest {
+            from: Some(DEV_ACCOUNTS[0]),
+            to: Some(TxKind::Call(to)),
+            value: Some(U256::from(GWEI)),
+            max_fee_per_gas: Some(u128::from(GWEI)),
+            ..Default::default()
+        };
+        let latest = BlockId::Number(BlockNumberOrTag::Latest);
+        let report = backend
+            .simulate_transaction(request.clone(), latest)
+            .await
+            .unwrap();
+        assert!(report.success);
+        assert_eq!(report.asset_changes.len(), 1);
+        let change = &report.asset_changes[0];
+        assert_eq!((change.from, change.to), (DEV_ACCOUNTS[0], to));
+        assert_eq!(change.symbol.as_deref(), Some(NATIVE_SYMBOL));
+        assert_eq!(report.gas_used, U64::from(21_000));
+        assert_eq!(backend.balance(to, latest).await.unwrap(), U256::ZERO);
+        assert_eq!(chain::latest_header(&*db).unwrap().0, 0);
+
+        let mut no_from = request;
+        no_from.from = None;
+        let err = backend
+            .simulate_transaction(no_from, latest)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("from"), "{err}");
+        let unknown = BlockId::Number(BlockNumberOrTag::Number(99));
+        assert!(backend
+            .simulate_transaction(TransactionRequest::default(), unknown)
+            .await
+            .is_err());
     }
 }

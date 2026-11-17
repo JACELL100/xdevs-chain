@@ -1,0 +1,19 @@
+[package]
+name = "xdevs-simulator"
+description = "xDEVS Chain transaction simulator (plan §16.4): revm inspector, asset diffs, approvals, Guardian Vault outcome and advisory warnings."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+xdevs-primitives.workspace = true
+xdevs-state.workspace = true
+xdevs-execution.workspace = true
+alloy-rpc-types-eth.workspace = true
+revm.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

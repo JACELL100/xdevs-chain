@@ -10,6 +10,11 @@
 //! [`events::ChainEvents`] and hands out receivers via [`RpcBackend::subscribe_blocks`] /
 //! [`RpcBackend::subscribe_pending_txs`].
 //!
+//! Phase 4 safety methods (`xdevs_simulateTransaction`, `xdevs_checkRecipient`,
+//! `xdevs_getApprovals`, `xdevs_getVaultQueue`, `xdevs_resolveName`, `xdevs_reverseName`)
+//! and the `vaultEvents` subscription live in `safety` / [`subscription`]; only the
+//! simulation needs the backend ([`RpcBackend::simulate_transaction`]).
+//!
 //! Finality tags: `latest`, `safe` and `finalized` all mean the latest committed
 //! block (BFT finality); `pending` = latest state + pool view (nonce only in Phase 1);
 //! `earliest` = block 0.
@@ -22,6 +27,7 @@ mod cors;
 mod error;
 pub mod events;
 mod limits;
+mod safety;
 mod server;
 pub mod subscription;
 
@@ -42,6 +48,12 @@ pub mod types {
         FeeHistory, Filter, FilterBlockOption, Header as RpcHeader, Log as RpcLog, SyncInfo,
         SyncStatus, Transaction as RpcTransaction, TransactionReceipt as RpcReceipt,
         TransactionRequest,
+    };
+    pub use xdevs_primitives::safety::{
+        Approval, ApprovalChange, ApprovalKind, AssetChange, AssetStandard, AssetToken,
+        BalanceChange, ContractCreation, HistoryScan, RecipientAdvice, RecipientCheck,
+        RecipientFacts, Severity, SimulationReport, VaultActionStatus, VaultCall, VaultEvent,
+        VaultEventKind, VaultOutcome, VaultQueueItem, Warning,
     };
     pub use xdevs_primitives::EoaLockStatus;
 
@@ -224,7 +236,22 @@ pub trait RpcBackend: Send + Sync + 'static {
         Err(RpcBackendError::Unsupported("xdevs_submitEvidence".into()))
     }
 
-    /// `eth_subscribe("newHeads" | "logs")`: a receiver of every block committed from
+    /// `xdevs_simulateTransaction(tx, block)` (plan §16.4): run `request` (with `from`)
+    /// against the state of `block` with the transaction simulator and report its asset
+    /// changes, approvals, Guardian Vault outcome and advisory warnings. Same limits as
+    /// `eth_call` (gas cap, EVM time limit, cancellation). The default reports the method
+    /// as unsupported.
+    async fn simulate_transaction(
+        &self,
+        _request: TransactionRequest,
+        _block: BlockId,
+    ) -> BackendResult<SimulationReport> {
+        Err(RpcBackendError::Unsupported(
+            "xdevs_simulateTransaction".into(),
+        ))
+    }
+
+    /// `eth_subscribe("newHeads" | "logs" | "vaultEvents")`: a receiver of every block committed from
     /// now on, in commit order (see [`events::ChainEvents::subscribe_blocks`]). The
     /// default (`None`) answers these subscriptions with -32601.
     fn subscribe_blocks(&self) -> Option<broadcast::Receiver<Arc<BlockEvent>>> {

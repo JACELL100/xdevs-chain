@@ -7857,6 +7857,7 @@ dependencies = [
  "xdevs-network",
  "xdevs-primitives",
  "xdevs-rpc",
+ "xdevs-simulator",
  "xdevs-state",
  "xdevs-storage",
  "zeroize",
@@ -7894,6 +7895,18 @@ dependencies = [
  "tower",
  "tracing",
  "xdevs-primitives",
+]
+
+[[package]]
+name = "xdevs-simulator"
+version = "0.1.0"
+dependencies = [
+ "alloy-rpc-types-eth",
+ "revm",
+ "serde_json",
+ "xdevs-execution",
+ "xdevs-primitives",
+ "xdevs-state",
 ]
 
 [[package]]

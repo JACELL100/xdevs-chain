@@ -35,9 +35,10 @@ Quantities are hex on the wire and `bigint` in parsed results.
 | `getValidators()` | `xdevs_validators` | `[block]` | `{operator, consensusKey, status, votingPower: bigint, totalStake: bigint, commissionBps, uptimeBps}[]` | 3 |
 | `getEpochInfo()` | `xdevs_epochInfo` | `[block]` | `{epoch, epochLength, startBlock, nextTransitionBlock: bigint, validatorSetHash}` | 3 |
 | `simulateTransaction(tx)` | `xdevs_simulateTransaction` | `[RpcTransactionRequest, block]` | §16.4 shape, `gasUsed: bigint` | 4 |
-| `checkRecipient({from,to})` | `xdevs_checkRecipient` | `[from, to]` | `{firstTime, lookAlikeOf: Address[], name: string\|null, isContract, warnings?}` | 4 |
-| `getApprovals({owner})` | `xdevs_getApprovals` | `[owner, block]` | `{kind, token, symbol?, spender, amount, expires: number\|null}[]` | 4 |
-| `getVaultQueue({vault})` | `xdevs_getVaultQueue` | `[vault, block]` | `{id, target, value, data, executeAfter: bigint}[]` | 4 |
+| `checkRecipient({from?,to})` | `xdevs_checkRecipient` | `[from, to]`, `[to]` or `[from\|null, to, block]` (`to`: address or normalized name) | `{firstTime, lookAlikeOf: Address[], name: string\|null, isContract, warnings?, address?, facts?, advice?}` | 4 |
+| `getApprovals({owner,tokens?,fromBlock?})` | `xdevs_getApprovals` | `[owner, block]` or `[owner, {tokens?, fromBlock?}, block]` | `{kind, token, symbol?, spender, amount (raw integer string \| "unlimited" \| "all"), expires: number\|null, ...}[]` | 4 |
+| `getVaultQueue({vault})` | `xdevs_getVaultQueue` | `[vault, block]` | `{id, target, value, data, executeAfter: bigint, account?, expiresAt?, status?, calls?, cancelVotes?}[]` | 4 |
+| `watchVaultEvents({account,onEvent})` | `eth_subscribe("vaultEvents")` | `["vaultEvents", {account}]` | `VaultEvent` notifications | 4 |
 | `resolveXnsName({name})` | `xdevs_resolveName` | `[normalizedName]` | `Address \| null` (checksummed) | 4 |
 | `reverseXnsName({address})` | `xdevs_reverseName` | `[address]` | `string \| null` | 4 |
 | `getLocalFee({contract})` | `xdevs_localFee` | `[contract, block]` | `{contract, globalBaseFee, localBaseFee, totalBaseFee: bigint}` | 5 |
@@ -82,5 +83,4 @@ Warning codes (`XdevsWarningCode`, §16.4 catalogue v1, open-ended for forward c
 
 ## 5. Not yet covered
 
-- `xdevs_subscribe("vaultEvents")` (Phase 4, WebSocket) — types/action not written yet.
 - Contract ABIs / typed wrappers for predeploys (Staking, XNS, Vault) — to add once the Solidity interfaces settle.

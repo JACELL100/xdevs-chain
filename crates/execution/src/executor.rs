@@ -430,24 +430,7 @@ impl EvmExecutor {
         if let Some(reason) = limits.tripped() {
             return Err(ExecutionError::Aborted(reason));
         }
-        let from = request.from.unwrap_or_default();
-        let nonce = db
-            .account(from)
-            .map_err(|e| ExecutionError::State(e.0))?
-            .map_or(0, |a| a.nonce);
-        let mut env: TxEnv = call_tx_env(request, self.chain_config().chain_id, gas_limit, nonce)?;
-        // Simulations are never rejected by XIP-0001, but locked authorities are skipped
-        // exactly as in a real transaction so results and gas match inclusion.
-        if self.chain_config().xip0001_active(header.number + 1) {
-            xip0001::filter_authorizations(db, &mut env.authorization_list)
-                .map_err(|e| ExecutionError::State(e.0))?;
-        }
-        let mut cfg = cfg_env(self.chain_config().chain_id);
-        cfg.disable_nonce_check = true;
-        cfg.disable_base_fee = true;
-        cfg.disable_block_gas_limit = true;
-        cfg.disable_eip3607 = true;
-        cfg.tx_gas_limit_cap = Some(u64::MAX);
+        let (env, cfg) = self.call_env(db, header, request, gas_limit)?;
         let out = if limits.is_unbounded() {
             new_evm(db, cfg, block_env(header)).transact(env)
         } else {
@@ -470,6 +453,101 @@ impl EvmExecutor {
             Ok(out) => Ok(CallOutcome::Done(out.result)),
             Err(EVMError::Transaction(e)) => Ok(CallOutcome::Invalid(e.to_string())),
             Err(e) => Err(evm_error(e)),
+        }
+    }
+
+    /// [`EvmExecutor::run_call`] with `inspector` observing the execution next to the
+    /// [`CallLimits`] interrupt.
+    fn run_call_inspected<I>(
+        &self,
+        db: &mut StateOverlay<'_>,
+        header: &Header,
+        request: &TransactionRequest,
+        gas_limit: u64,
+        limits: &CallLimits,
+        inspector: &mut I,
+    ) -> Result<CallOutcome, ExecutionError>
+    where
+        I: for<'o, 'a> Inspector<crate::CallContext<'o, 'a>>,
+    {
+        if let Some(reason) = limits.tripped() {
+            return Err(ExecutionError::Aborted(reason));
+        }
+        let (env, cfg) = self.call_env(db, header, request, gas_limit)?;
+        let mut evm = Context::mainnet()
+            .with_db(db)
+            .with_block(block_env(header))
+            .with_cfg(cfg)
+            .build_mainnet_with_inspector((
+                Interrupt {
+                    limits,
+                    steps: 0,
+                    tripped: None,
+                },
+                inspector,
+            ));
+        let out = evm.inspect_tx(env);
+        if let Some(reason) = evm.inspector.0.tripped {
+            return Err(ExecutionError::Aborted(reason));
+        }
+        match out {
+            Ok(out) => Ok(CallOutcome::Done(out.result)),
+            Err(EVMError::Transaction(e)) => Ok(CallOutcome::Invalid(e.to_string())),
+            Err(e) => Err(evm_error(e)),
+        }
+    }
+
+    /// Transaction and config environment of a message call (see [`Self::run_call`]).
+    fn call_env(
+        &self,
+        db: &mut StateOverlay<'_>,
+        header: &Header,
+        request: &TransactionRequest,
+        gas_limit: u64,
+    ) -> Result<(TxEnv, CfgEnv), ExecutionError> {
+        let from = request.from.unwrap_or_default();
+        let nonce = db
+            .account(from)
+            .map_err(|e| ExecutionError::State(e.0))?
+            .map_or(0, |a| a.nonce);
+        let mut env: TxEnv = call_tx_env(request, self.chain_config().chain_id, gas_limit, nonce)?;
+        // Simulations are never rejected by XIP-0001, but locked authorities are skipped
+        // exactly as in a real transaction so results and gas match inclusion.
+        if self.chain_config().xip0001_active(header.number + 1) {
+            xip0001::filter_authorizations(db, &mut env.authorization_list)
+                .map_err(|e| ExecutionError::State(e.0))?;
+        }
+        let mut cfg = cfg_env(self.chain_config().chain_id);
+        cfg.disable_nonce_check = true;
+        cfg.disable_base_fee = true;
+        cfg.disable_block_gas_limit = true;
+        cfg.disable_eip3607 = true;
+        cfg.tx_gas_limit_cap = Some(u64::MAX);
+        Ok((env, cfg))
+    }
+
+    /// [`EvmExecutor::call_with_limits`] with `inspector` observing the execution (calls,
+    /// creates, logs, self-destructs; e.g. the Phase-4 transaction simulator). Nothing is
+    /// committed; the same relaxed checks, gas cap and [`CallLimits`] apply. An inspector
+    /// that ignores the EVM context implements `revm::Inspector<CTX>` for every `CTX`.
+    pub fn inspect_call<I>(
+        &self,
+        state: &dyn StateProvider,
+        header: &Header,
+        request: &TransactionRequest,
+        gas_cap: u64,
+        limits: &CallLimits,
+        inspector: &mut I,
+    ) -> Result<CallResult, ExecutionError>
+    where
+        I: for<'o, 'a> Inspector<crate::CallContext<'o, 'a>>,
+    {
+        let cap = effective_cap(gas_cap);
+        let gas_limit = request.gas.unwrap_or(cap).min(cap);
+        let mut db = StateOverlay::new(state);
+        match self.run_call_inspected(&mut db, header, request, gas_limit, limits, inspector)? {
+            CallOutcome::Invalid(reason) => Err(ExecutionError::InvalidRequest(reason)),
+            CallOutcome::Done(result) => Ok(to_call_result(result)),
         }
     }
 

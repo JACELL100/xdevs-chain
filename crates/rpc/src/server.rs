@@ -94,6 +94,15 @@ pub fn build_module(
     method!("xdevs_getEoaLock", xdevs_get_eoa_lock);
     method!("xdevs_getCommitCertificate", xdevs_get_commit_certificate);
     method!("xdevs_submitEvidence", xdevs_submit_evidence);
+    method!(
+        "xdevs_simulateTransaction",
+        crate::safety::simulate_transaction
+    );
+    method!("xdevs_checkRecipient", crate::safety::check_recipient);
+    method!("xdevs_getApprovals", crate::safety::get_approvals);
+    method!("xdevs_getVaultQueue", crate::safety::get_vault_queue);
+    method!("xdevs_resolveName", crate::safety::resolve_name);
+    method!("xdevs_reverseName", crate::safety::reverse_name);
     crate::subscription::register(&mut m)?;
     Ok(m)
 }
