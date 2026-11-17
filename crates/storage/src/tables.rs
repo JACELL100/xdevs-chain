@@ -16,6 +16,8 @@
 //! | `StateChangeSets`| block number           | [`StateChangeSet`] (keys for pruning)  |
 //! | `CommitCertificates` | block number       | commit certificate (RLP, Phase 2)      |
 //! | `TrieNodes`      | tag ‖ [hashed addr] ‖ nibble path | trie node (RLP), see [`TrieNodes`] |
+//! | `BlockConsensus` | block number           | block consensus data (RLP, Phase 3)    |
+//! | `ValidatorSets`  | epoch-boundary block   | validator set of the next epoch        |
 //!
 //! `Transactions` stores only the location; the transaction itself lives in `Bodies`
 //! (saves disk vs. storing it twice). The history tables hold reverse diffs for the
@@ -24,7 +26,9 @@
 //! `CommitCertificates` (Phase 2) holds the commit certificate of each block, written in
 //! the same batch as the block; `TrieNodes` (Phase 2) caches Merkle-Patricia trie nodes
 //! for incremental state roots. Both are additive: [`crate::SCHEMA_VERSION`] is unchanged
-//! and backends create missing tables on open. `LogIndex` arrives in a later phase.
+//! and backends create missing tables on open. `BlockConsensus` and `ValidatorSets`
+//! (Phase 3, staking-driven validator set) are additive in the same way. `LogIndex`
+//! arrives in a later phase.
 
 use crate::codec::{Decode, Encode};
 use xdevs_primitives::{
@@ -62,11 +66,15 @@ pub enum TableId {
     CommitCertificates,
     /// `trie node key -> RLP trie node` (Phase 2, incremental state root).
     TrieNodes,
+    /// `block number -> block consensus data` (Phase 3).
+    BlockConsensus,
+    /// `epoch-boundary block -> validator set of the following epoch` (Phase 3).
+    ValidatorSets,
 }
 
 impl TableId {
     /// Every table, in a fixed order (backends create them all on open).
-    pub const ALL: [TableId; 14] = [
+    pub const ALL: [TableId; 16] = [
         TableId::Headers,
         TableId::HeaderNumbers,
         TableId::Bodies,
@@ -81,6 +89,8 @@ impl TableId {
         TableId::StateChangeSets,
         TableId::CommitCertificates,
         TableId::TrieNodes,
+        TableId::BlockConsensus,
+        TableId::ValidatorSets,
     ];
 
     /// Stable on-disk table name.
@@ -100,6 +110,8 @@ impl TableId {
             TableId::StateChangeSets => "StateChangeSets",
             TableId::CommitCertificates => "CommitCertificates",
             TableId::TrieNodes => "TrieNodes",
+            TableId::BlockConsensus => "BlockConsensus",
+            TableId::ValidatorSets => "ValidatorSets",
         }
     }
 }
@@ -221,6 +233,25 @@ table!(
     Bytes
 );
 
+table!(
+    /// `block number -> consensus data of the block` (Phase 3): the opaque RLP of
+    /// `xdevs_consensus::BlockConsensusData` (previous commit certificate, proposer,
+    /// double-sign evidence) that the header's `requests_hash` commits to. Only blocks
+    /// from the staking activation on have an entry. Written in the block's batch.
+    BlockConsensus,
+    u64,
+    Bytes
+);
+table!(
+    /// `epoch-boundary block number -> validator set of the following epoch` (Phase 3):
+    /// read from the Staking contract after the boundary block's `onEpoch()`, in force
+    /// for the blocks `B + 1 ..= B + epochLength`. Opaque bytes (the node's canonical
+    /// encoding), written in the boundary block's batch, never changed afterwards.
+    ValidatorSets,
+    u64,
+    Bytes
+);
+
 /// [`TrieNodes`] tag of account-trie nodes.
 pub const TRIE_NODES_ACCOUNT_TAG: u8 = 0x00;
 /// [`TrieNodes`] tag of storage-trie nodes.
@@ -272,6 +303,7 @@ mod tests {
         let names: std::collections::BTreeSet<_> = TableId::ALL.iter().map(|t| t.name()).collect();
         assert_eq!(names.len(), TableId::ALL.len());
         assert!(names.contains("CommitCertificates") && names.contains("TrieNodes"));
+        assert!(names.contains("BlockConsensus") && names.contains("ValidatorSets"));
     }
 
     #[test]
@@ -350,6 +382,8 @@ mod tests {
         }
         let db = RedbDatabase::open(&path).unwrap();
         assert_eq!(db.get::<CommitCertificates>(&1).unwrap(), None);
+        assert_eq!(db.get::<BlockConsensus>(&1).unwrap(), None);
+        assert_eq!(db.get::<ValidatorSets>(&1).unwrap(), None);
         roundtrip(&db);
         assert_eq!(SCHEMA_VERSION, 1);
     }

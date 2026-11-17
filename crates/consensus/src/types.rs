@@ -1,5 +1,6 @@
 //! xdevs consensus types (research doc §6.4–§6.6): validators, validator sets, canonical
-//! sign-bytes, commit certificates and evidence. **Frozen**: change only additively.
+//! sign-bytes, commit certificates, evidence and (Phase 3) the consensus data carried by a
+//! block ([`BlockConsensusData`]). **Frozen**: change only additively.
 //!
 //! No Malachite types appear here. Everything is deterministic: validators are kept sorted
 //! by address, voting-power math is integer-only, and every encoding is fixed-length or RLP.
@@ -7,7 +8,7 @@
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use sha2::{Digest, Sha256};
 use std::fmt;
-use xdevs_primitives::{hex, B256};
+use xdevs_primitives::{hex, keccak256, Bytes, B256};
 
 /// Domain tag of vote sign-bytes.
 pub const VOTE_DOMAIN: &[u8] = b"XDEVS/VOTE/1";
@@ -500,8 +501,9 @@ impl SignedVote {
 }
 
 /// Two votes by the same validator for the same (height, round, type) and different
-/// values: double-sign evidence (plan §11.6).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// values: double-sign evidence (plan §11.6). RLP: `[first, second]`, each vote
+/// `[type:u8, height, round, block_hash (empty = nil), validator, signature]`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
 pub struct ConflictingVotes {
     /// First vote.
     pub first: SignedVote,
@@ -526,6 +528,95 @@ impl ConflictingVotes {
             return false;
         };
         a.verify(chain_id, &v.public_key) && b.verify(chain_id, &v.public_key)
+    }
+
+    /// The same evidence with its two votes in a canonical order (nil first, then by
+    /// block hash), so one equivocation always has one encoding and one [`Self::hash`].
+    pub fn canonical(mut self) -> Self {
+        if self.second.block_hash < self.first.block_hash {
+            std::mem::swap(&mut self.first, &mut self.second);
+        }
+        self
+    }
+
+    /// Canonical RLP bytes.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        alloy_rlp::encode(self)
+    }
+
+    /// Decode canonical RLP, rejecting trailing bytes.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CertificateError> {
+        alloy_rlp::decode_exact(bytes).map_err(|e| CertificateError::Decode(e.to_string()))
+    }
+
+    /// `keccak256(rlp(self))`: the evidence reference recorded on chain
+    /// (`Staking.slash` `ref`, plan §11.6).
+    pub fn hash(&self) -> B256 {
+        keccak256(self.to_bytes())
+    }
+}
+
+/// RLP wire form of a [`SignedVote`].
+#[derive(RlpEncodable, RlpDecodable)]
+struct WireVote {
+    vote_type: u8,
+    height: u64,
+    round: u32,
+    block_hash: Bytes,
+    validator: ValidatorAddress,
+    signature: [u8; SIGNATURE_LEN],
+}
+
+impl From<&SignedVote> for WireVote {
+    fn from(v: &SignedVote) -> Self {
+        Self {
+            vote_type: v.vote_type as u8,
+            height: v.height,
+            round: v.round,
+            block_hash: v
+                .block_hash
+                .map_or_else(Bytes::new, |h| Bytes::copy_from_slice(h.as_slice())),
+            validator: v.validator,
+            signature: v.signature,
+        }
+    }
+}
+
+impl alloy_rlp::Encodable for SignedVote {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        alloy_rlp::Encodable::encode(&WireVote::from(self), out);
+    }
+
+    fn length(&self) -> usize {
+        alloy_rlp::Encodable::length(&WireVote::from(self))
+    }
+}
+
+impl alloy_rlp::Decodable for SignedVote {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let w = <WireVote as alloy_rlp::Decodable>::decode(buf)?;
+        let vote_type = match w.vote_type {
+            1 => VoteType::Prevote,
+            2 => VoteType::Precommit,
+            _ => return Err(alloy_rlp::Error::Custom("unknown vote type")),
+        };
+        let block_hash = match w.block_hash.len() {
+            0 => None,
+            32 => Some(B256::from_slice(&w.block_hash)),
+            _ => {
+                return Err(alloy_rlp::Error::Custom(
+                    "vote block hash must be 0 or 32 bytes",
+                ))
+            }
+        };
+        Ok(Self {
+            vote_type,
+            height: w.height,
+            round: w.round,
+            block_hash,
+            validator: w.validator,
+            signature: w.signature,
+        })
     }
 }
 
@@ -564,6 +655,47 @@ impl Evidence {
             Self::DoubleVote(c) => c.first.height,
             Self::DoubleProposal { height, .. } => *height,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Block consensus data (Phase 3)
+// ---------------------------------------------------------------------------
+
+/// What execution needs from consensus, carried in every block from the staking
+/// activation on (`Block::consensus`, committed by the header's `requests_hash`):
+///
+/// * `proposer` — consensus address of the validator that built the block (receives the
+///   proposer bonus through `Staking.recordParticipation`);
+/// * `last_commit` — the commit certificate of the parent block (empty only for block 1);
+///   its signers are the "signed" bits of the liveness bitmap (downtime slashing);
+/// * `evidence` — verified double-sign evidence to slash (`Staking.slash`).
+///
+/// RLP: `[proposer, [last_commit?], [evidence...]]`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+pub struct BlockConsensusData {
+    /// Consensus address of the block's proposer.
+    pub proposer: ValidatorAddress,
+    /// Commit certificate of the parent block (0 or 1 entries).
+    pub last_commit: Vec<CommitCertificate>,
+    /// Double-sign evidence included in this block.
+    pub evidence: Vec<ConflictingVotes>,
+}
+
+impl BlockConsensusData {
+    /// The parent's commit certificate, if any.
+    pub fn last_commit(&self) -> Option<&CommitCertificate> {
+        self.last_commit.first()
+    }
+
+    /// Canonical RLP bytes (what `Block::consensus` holds).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        alloy_rlp::encode(self)
+    }
+
+    /// Decode canonical RLP, rejecting trailing bytes.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CertificateError> {
+        alloy_rlp::decode_exact(bytes).map_err(|e| CertificateError::Decode(e.to_string()))
     }
 }
 
@@ -856,5 +988,50 @@ mod tests {
         let e = Evidence::DoubleVote(ev);
         assert_eq!(e.validator(), a.validator);
         assert_eq!(e.height(), 3);
+
+        // RLP round trip (nil and non-nil votes) and the canonical order.
+        let with_nil = ConflictingVotes {
+            first: a,
+            second: nil,
+        };
+        let back = ConflictingVotes::from_bytes(&with_nil.to_bytes()).unwrap();
+        assert_eq!(back, with_nil);
+        assert_eq!(with_nil.canonical().first, nil);
+        assert_eq!(
+            ConflictingVotes {
+                first: b,
+                second: a
+            }
+            .canonical(),
+            ev.canonical()
+        );
+        assert_eq!(ev.canonical().hash(), ev.canonical().canonical().hash());
+        assert_ne!(ev.hash(), with_nil.hash());
+        let mut bytes = ev.to_bytes();
+        bytes.push(0);
+        assert!(ConflictingVotes::from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn block_consensus_data_roundtrip() {
+        let (sks, s) = set(&[1, 1, 1, 1]);
+        let hash = B256::repeat_byte(5);
+        let c = cert(&sks[..3], 9, 1, hash);
+        assert!(c.verify(CHAIN, &s).is_ok());
+        let data = BlockConsensusData {
+            proposer: vkey(&sks[2]).address(),
+            last_commit: vec![c.clone()],
+            evidence: vec![],
+        };
+        let back = BlockConsensusData::from_bytes(&data.to_bytes()).unwrap();
+        assert_eq!(back, data);
+        assert_eq!(back.last_commit(), Some(&c));
+        let empty = BlockConsensusData::default();
+        assert_eq!(empty.last_commit(), None);
+        assert_eq!(
+            BlockConsensusData::from_bytes(&empty.to_bytes()).unwrap(),
+            empty
+        );
+        assert!(BlockConsensusData::from_bytes(&[0xc0]).is_err());
     }
 }

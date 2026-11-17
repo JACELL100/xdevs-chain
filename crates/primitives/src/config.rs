@@ -2,7 +2,7 @@
 
 use crate::{
     constants::*,
-    serde_helpers::{opt_u64_flex, u64_flex},
+    serde_helpers::{opt_u64_flex, u256_flex, u64_flex},
 };
 use alloy_primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,12 @@ const fn d_treasury() -> Address {
 const fn d_system() -> Address {
     SYSTEM_ADDRESS
 }
+const fn d_epoch_length() -> u64 {
+    DEFAULT_EPOCH_LENGTH
+}
+fn is_zero_u256(v: &U256) -> bool {
+    v.is_zero()
+}
 
 impl Default for BaseFeeParams {
     fn default() -> Self {
@@ -82,7 +88,7 @@ impl BaseFeeParams {
 /// Consensus-relevant chain parameters, shared by execution, mempool, RPC and node.
 ///
 /// Deserializes from the genesis `config` object (§21.1); unknown keys such as
-/// `name`, `hardfork`, `epochLength` or `consensus` are ignored in Phase 1.
+/// `name`, `hardfork` or `consensus` are ignored.
 /// `blockGasLimit` is not part of the genesis `config` object — the genesis loader
 /// overrides it with the top-level `gasLimit`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,6 +121,31 @@ pub struct ChainConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub xip0001_block: Option<u64>,
+    /// Blocks per staking epoch (JSON `epochLength`, default 3600, plan §11.5). Block
+    /// `B` is an epoch boundary when the staking-driven validator set is active at `B`
+    /// and `B % epochLength == 0` (see [`ChainConfig::is_epoch_boundary`]).
+    #[serde(with = "u64_flex", default = "d_epoch_length")]
+    pub epoch_length: u64,
+    /// First block of the staking-driven validator set (Phase 3, plan §11.4–11.6): from
+    /// this block on every block makes the Staking system calls (rewards, liveness,
+    /// evidence, `onEpoch` at epoch boundaries) and the consensus validator set is read
+    /// from the Staking contract at each epoch boundary. JSON `stakingValidatorsBlock`;
+    /// absent = never (the genesis validator set stays in force, Phase 2 behaviour).
+    /// Activated on a live network by a coordinated upgrade
+    /// (`docs/runbooks/activate-staking-validators.md`).
+    #[serde(
+        default,
+        with = "opt_u64_flex",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub staking_validators_block: Option<u64>,
+    /// Block reward in wei credited to the Staking contract in every block from
+    /// [`ChainConfig::staking_validators_block`] on and distributed by
+    /// `recordParticipation` (proposer bonus + signers pro rata, plan §11.5). JSON
+    /// `blockReward` (decimal or hex string); default 0 = no new issuance. A fork
+    /// parameter.
+    #[serde(default, with = "u256_flex", skip_serializing_if = "is_zero_u256")]
+    pub block_reward: U256,
 }
 
 impl ChainConfig {
@@ -128,6 +159,9 @@ impl ChainConfig {
             treasury: TREASURY_ADDRESS,
             system_address: SYSTEM_ADDRESS,
             xip0001_block: None,
+            epoch_length: DEFAULT_EPOCH_LENGTH,
+            staking_validators_block: None,
+            block_reward: U256::ZERO,
         }
     }
 
@@ -143,6 +177,47 @@ impl ChainConfig {
     /// `true` if the XIP-0001 rules apply to block `number` (`number >= xip0001Block`).
     pub fn xip0001_active(&self, number: u64) -> bool {
         self.xip0001_block.is_some_and(|start| number >= start)
+    }
+
+    /// `true` if the Staking system calls run in block `number`
+    /// (`number >= stakingValidatorsBlock`).
+    pub fn staking_active(&self, number: u64) -> bool {
+        self.staking_validators_block
+            .is_some_and(|start| number >= start)
+    }
+
+    /// `true` if block `number` is an epoch boundary: staking is active at `number`,
+    /// `number > 0` and `number % epochLength == 0`. The boundary block calls
+    /// `Staking.onEpoch()` and fixes the validator set of the blocks after it.
+    pub fn is_epoch_boundary(&self, number: u64) -> bool {
+        number > 0
+            && self.epoch_length > 0
+            && self.staking_active(number)
+            && number.is_multiple_of(self.epoch_length)
+    }
+
+    /// The epoch-boundary block whose validator set is in force at `height`: the
+    /// highest boundary `B < height`. `None` = no boundary yet (or staking never
+    /// activates): the genesis validator set applies. Sets change only at boundaries,
+    /// so the heights `B + 1 ..= B + epochLength` share one set.
+    pub fn validator_set_boundary(&self, height: u64) -> Option<u64> {
+        let start = self.staking_validators_block?;
+        if self.epoch_length == 0 || height < 2 {
+            return None;
+        }
+        let last = (height - 1) / self.epoch_length * self.epoch_length;
+        (last > 0 && last >= start).then_some(last)
+    }
+
+    /// The first epoch boundary `>= number` (`None` if staking never activates).
+    pub fn next_epoch_boundary(&self, number: u64) -> Option<u64> {
+        let start = self.staking_validators_block?;
+        if self.epoch_length == 0 {
+            return None;
+        }
+        let from = number.max(start).max(1);
+        from.div_ceil(self.epoch_length)
+            .checked_mul(self.epoch_length)
     }
 
     /// Split a base-fee amount (wei) into `(burned, to_treasury)` using `burn_bps`.
@@ -206,6 +281,65 @@ mod tests {
         let dev = serde_json::to_string(&ChainConfig::dev()).unwrap();
         assert!(dev.contains(r#""xip0001Block":0"#), "{dev}");
         assert!(ChainConfig::dev().xip0001_active(0));
+    }
+
+    #[test]
+    fn staking_fork_fields() {
+        let cfg: ChainConfig = serde_json::from_str(
+            r#"{"chainId": 1, "epochLength": 20, "stakingValidatorsBlock": "0x1e",
+                "blockReward": "1000000000000000000"}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.epoch_length, 20);
+        assert_eq!(cfg.staking_validators_block, Some(30));
+        assert_eq!(cfg.block_reward, U256::from(10u64).pow(U256::from(18u64)));
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert_eq!(serde_json::from_str::<ChainConfig>(&json).unwrap(), cfg);
+        // Defaults: 3600-block epochs, never active, no reward; unset fields are not
+        // serialized (a stored config of an older binary compares equal).
+        let d = ChainConfig::new(1);
+        assert_eq!(d.epoch_length, 3600);
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(!json.contains("stakingValidatorsBlock") && !json.contains("blockReward"));
+        assert!(!d.staking_active(u64::MAX) && !d.is_epoch_boundary(3600));
+        assert_eq!(d.validator_set_boundary(1_000_000), None);
+        assert_eq!(d.next_epoch_boundary(5), None);
+    }
+
+    #[test]
+    fn epoch_math() {
+        let cfg = ChainConfig {
+            epoch_length: 20,
+            staking_validators_block: Some(30),
+            ..ChainConfig::new(1)
+        };
+        assert!(!cfg.staking_active(29) && cfg.staking_active(30));
+        // 20 is a multiple of the epoch length but before the activation.
+        assert!(!cfg.is_epoch_boundary(20));
+        assert!(!cfg.is_epoch_boundary(30) && !cfg.is_epoch_boundary(39));
+        assert!(cfg.is_epoch_boundary(40) && cfg.is_epoch_boundary(60));
+        // The genesis set governs every height up to and including the first boundary.
+        for h in [0, 1, 20, 21, 39, 40] {
+            assert_eq!(cfg.validator_set_boundary(h), None, "{h}");
+        }
+        // The set fixed by block 40 governs 41..=60, then the set of block 60.
+        assert_eq!(cfg.validator_set_boundary(41), Some(40));
+        assert_eq!(cfg.validator_set_boundary(60), Some(40));
+        assert_eq!(cfg.validator_set_boundary(61), Some(60));
+        assert_eq!(cfg.next_epoch_boundary(0), Some(40));
+        assert_eq!(cfg.next_epoch_boundary(40), Some(40));
+        assert_eq!(cfg.next_epoch_boundary(41), Some(60));
+
+        // Activation at genesis: block 0 is never a boundary.
+        let cfg = ChainConfig {
+            epoch_length: 5,
+            staking_validators_block: Some(0),
+            ..ChainConfig::new(1)
+        };
+        assert!(!cfg.is_epoch_boundary(0) && cfg.is_epoch_boundary(5));
+        assert_eq!(cfg.validator_set_boundary(5), None);
+        assert_eq!(cfg.validator_set_boundary(6), Some(5));
+        assert_eq!(cfg.next_epoch_boundary(0), Some(5));
     }
 
     #[test]

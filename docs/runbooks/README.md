@@ -12,6 +12,7 @@ Operational runbooks (plan §33.8). The testnet's infrastructure as code is in
 6. Faucet wallet refill and compromise response: [faucet.md](faucet.md)
 7. Responding to a security report: [security-report.md](security-report.md)
 8. Emergency coordinated restart from a known-good height: [emergency-restart.md](emergency-restart.md)
+9. Activating the staking-driven validator set (Phase 3 fork-height upgrade): [activate-staking-validators.md](activate-staking-validators.md)
 
 ## Infrastructure
 

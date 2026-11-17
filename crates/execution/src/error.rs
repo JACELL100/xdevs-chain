@@ -74,6 +74,10 @@ pub enum ExecutionError {
     /// Unexpected EVM / database error.
     #[error("evm error: {0}")]
     Evm(String),
+    /// A protocol system call (Staking, Phase 3) reverted, halted or returned data that
+    /// does not decode. The block cannot be executed: a node bug or a corrupt state.
+    #[error("system call failed: {0}")]
+    SystemCall(String),
 }
 
 impl From<StateError> for ExecutionError {

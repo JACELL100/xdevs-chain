@@ -214,6 +214,16 @@ pub trait RpcBackend: Send + Sync + 'static {
         ))
     }
 
+    /// `xdevs_submitEvidence(raw)` (Phase 3): submit double-sign evidence, the RLP of two
+    /// conflicting signed votes of one validator (`xdevs_consensus::ConflictingVotes`).
+    /// The node verifies both signatures against the validator set of that height and
+    /// includes the evidence in a block it proposes (the offender is slashed and
+    /// tombstoned by `Staking.slash`). Returns the evidence hash. The default reports the
+    /// method as unsupported.
+    async fn submit_evidence(&self, _raw: Bytes) -> BackendResult<B256> {
+        Err(RpcBackendError::Unsupported("xdevs_submitEvidence".into()))
+    }
+
     /// `eth_subscribe("newHeads" | "logs")`: a receiver of every block committed from
     /// now on, in commit order (see [`events::ChainEvents::subscribe_blocks`]). The
     /// default (`None`) answers these subscriptions with -32601.

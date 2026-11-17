@@ -10,6 +10,10 @@
 //!   `eth_call` / `eth_estimateGas`; the `*_with_limits` variants stop a simulation at a
 //!   wall-clock deadline or when it is cancelled ([`CallLimits`]).
 //!
+//! Phase 3: [`EvmExecutor::execute_with`] / [`EvmExecutor::build_with`] run the Staking
+//! system calls of every block from `ChainConfig::staking_validators_block` on
+//! ([`staking`]: rewards, liveness, double-sign slashing, `onEpoch` at epoch boundaries).
+//!
 //! XIP-0001 (EOA lock, `docs/specs/xip-0001-eoa-lock.md`) is enforced by both
 //! [`BlockExecutor::execute`] (an invalid tx fails the block) and
 //! [`BlockExecutor::build`] (invalid txs are left out), from
@@ -28,6 +32,7 @@ mod db;
 mod env;
 mod error;
 mod executor;
+pub mod staking;
 #[cfg(test)]
 mod tests;
 mod xip0001;
@@ -37,6 +42,7 @@ pub use db::StateDbError;
 pub use env::{BLOB_TX_TYPE, SPEC};
 pub use error::ExecutionError;
 pub use executor::CALL_LIMIT_CHECK_INTERVAL;
+pub use staking::{SlashEvidence, StakingInputs, StakingValidator};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -65,6 +71,9 @@ pub struct ExecutionOutcome {
     pub receipts: Vec<ReceiptEnvelope>,
     /// All state changes of the block (accounts, storage, code, fee payouts).
     pub state_diff: StateDiff,
+    /// At an epoch boundary (Phase 3): the Staking contract's consensus set after
+    /// `onEpoch()`, i.e. the validator set of the next epoch. `None` otherwise.
+    pub next_validators: Option<Vec<StakingValidator>>,
 }
 
 /// Inputs for building a new block that are not derived from the parent.

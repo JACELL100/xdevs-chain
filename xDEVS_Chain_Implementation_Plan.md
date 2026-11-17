@@ -623,6 +623,8 @@ Ethereum format: `{ status, cumulative_gas_used, logs_bloom, logs[] }`. xDEVS Ch
 3. **Post‑block system call**: record proposer/signer participation for rewards and downtime tracking.
 4. Compute `state_root`, `receipts_root`, `logs_bloom`.
 
+> **As implemented (Phase 3, `docs/specs/predeploys-system.md` §1.3):** from `stakingValidatorsBlock` on, *all* Staking system calls run **before** the block's transactions: block-reward credit to Staking → `recordParticipation(proposer, signedBitmap)` (signers taken from the parent's commit certificate carried in the block) → `slash(evidence)` per evidence item → `onEpoch()` at an epoch boundary, after which the node reads `consensusValidatorSet()` as the next epoch's set.
+
 ### 10.3 Precompiles
 
 | Address | Name | Phase | Purpose |
@@ -718,6 +720,13 @@ stateDiagram-v2
 - At each epoch boundary, the `onEpoch` system call writes the next validator set into the Staking contract's storage.
 - The consensus layer reads it via the `ConsensusApp::validator_set(height)` hook (a direct state read, not an RPC call).
 - **Evidence**: double‑sign evidence (two signed votes for the same height/round with different block hashes) is gossiped and included in blocks; execution calls `Staking.slash(evidence)`.
+
+> **As implemented (Phase 3):**
+> - The set read after `onEpoch()` at boundary `B` is stored by the node (`ValidatorSets` table) and governs heights `B+1 ..= B+epochLength`; `validator_set(h)` serves it, so every node switches at `B+1`. The contract's active set can shrink mid-epoch (jail, tombstone, exit), but consensus changes only at boundaries; the liveness bitmap is built by operator address, so the two views never get confused.
+> - Each block carries consensus data (proposer, the parent's commit certificate, evidence) committed by the header's `requestsHash`; validators verify it before execution. Evidence is not gossiped as such: each node collects the equivocations its Malachite engine reports, plus evidence submitted with `xdevs_submitEvidence`, verifies them against the set of their height (≤ 10,000 blocks old) and includes them when it proposes.
+> - Downtime uses the contract's tumbling `downtimeWindow` (10,000 blocks), not a sliding window, and is evaluated per block, not only at epoch boundaries.
+> - Rewards are a fixed `blockReward` per block from the genesis config (1 tXDS on Enclave, ~1.6%/year), not yet the §20.1 inflation curve; tips still go to the proposer's fee recipient.
+> - Activation is a fork height (`stakingValidatorsBlock`, absent = never) so the live Enclave network upgrades in a coordinated way (`docs/runbooks/activate-staking-validators.md`).
 
 ### 11.7 Long‑range attacks & weak subjectivity
 
@@ -1470,7 +1479,7 @@ Alerts:
 
 **Tasks**
 - [ ] Contracts: `Staking`, `Governance`, `Treasury`, `FeeConfig`, `WXDS` + Foundry tests.
-- [ ] Epoch system calls, dynamic validator set, rewards, downtime & double‑sign slashing, evidence handling.
+- [x] Epoch system calls, dynamic validator set, rewards, downtime & double‑sign slashing, evidence handling. *(Built behind `stakingValidatorsBlock`; deviations noted in §10.2 and §11.6; Enclave activation is a scheduled upgrade.)*
 - [ ] Genesis builder with predeploys (+ Multicall3, CREATE2 deployer, EntryPoint).
 - [ ] Oracle Cloud: 4 validators + bootnode; Cloudflare Tunnel RPC from home node.
 - [ ] CI release pipeline (x86_64 + ARM64); Ansible deploy.

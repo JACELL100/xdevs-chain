@@ -9,7 +9,7 @@
 use crate::chain::{self, Db};
 use parking_lot::Mutex;
 use std::sync::Arc;
-use xdevs_execution::{next_base_fee, BlockAttributes, BlockExecutor, BuiltBlock, EvmExecutor};
+use xdevs_execution::{next_base_fee, BlockAttributes, BuiltBlock, EvmExecutor, StakingInputs};
 use xdevs_mempool::{Pool, TxPool};
 use xdevs_primitives::{Address, Block, Bytes, ChainConfig, Header, ReceiptEnvelope, TxHash, B256};
 use xdevs_rpc::ChainEvents;
@@ -112,6 +112,7 @@ impl BlockProducer {
                 extra_data: self.extra_data.clone(),
                 with_txs: true,
             },
+            &StakingInputs::default(),
         )?;
         let hash = chain::commit_block(&*self.db, &built, self.state_history)?;
         crate::events::publish_block(
@@ -157,13 +158,15 @@ pub(crate) struct NextBlock {
 /// Build AND execute the next block on the latest committed state of `snapshot`
 /// without committing it (dev producer and consensus proposer). Returns the parent
 /// header and the built block: base fee `next_base_fee(parent)`, `prev_randao` = parent
-/// hash, gas limit from `cfg`, the best pool txs up to [`MAX_BLOCK_BYTES`].
+/// hash, gas limit from `cfg`, the best pool txs up to [`MAX_BLOCK_BYTES`]. `staking` are
+/// the Staking system-call inputs (Phase 3; ignored before the activation).
 pub(crate) fn build_next_block(
     snapshot: &dyn DbRead,
     pool: &Pool,
     executor: &EvmExecutor,
     cfg: &ChainConfig,
     next: &NextBlock,
+    staking: &StakingInputs,
 ) -> anyhow::Result<(Header, BuiltBlock)> {
     let (_, parent) = chain::latest_header(snapshot)?;
     let base_fee = next_base_fee(&parent, cfg);
@@ -187,7 +190,7 @@ pub(crate) fn build_next_block(
         gas_limit: cfg.block_gas_limit,
     };
     let state = DbStateProvider::new(snapshot);
-    let built = executor.build(&parent, attrs, candidates, &state)?;
+    let built = executor.build_with(&parent, attrs, candidates, &state, staking)?;
     Ok((parent, built))
 }
 
@@ -225,6 +228,7 @@ pub fn unix_now() -> u64 {
 mod tests {
     use super::*;
     use xdevs_crypto::{sign_tx_envelope, signer_from_hex};
+    use xdevs_execution::BlockExecutor;
     use xdevs_genesis::{genesis_state, Genesis, DEV_ACCOUNTS, DEV_PRIVATE_KEYS};
     use xdevs_mempool::{FromState, PoolConfig, PoolParams, TxOrigin};
     use xdevs_primitives::{

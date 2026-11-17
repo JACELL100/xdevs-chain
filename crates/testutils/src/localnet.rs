@@ -12,7 +12,13 @@
 //! * Assertions over JSON-RPC: [`LocalNet::wait_for_height`],
 //!   [`LocalNet::assert_no_fork`] (same block hash and state root at every height on
 //!   every live node, every stored commit certificate verifies against the validator
-//!   set, no safety alert in the logs).
+//!   set of its height, no safety alert in the logs).
+//! * Phase 3 ([`StakingNet`]): the genesis also holds the Staking predeploy (runtime
+//!   bytecode from `deploy/configs/predeploys-alloc.json`, initialised in Rust like the
+//!   genesis builder does) with every genesis validator registered, a
+//!   `stakingValidatorsBlock` and a short epoch; extra *candidate* validators run with
+//!   keys that are not in the genesis set and can join through `Staking.register()`
+//!   ([`LocalNet::register_validator`]).
 //!
 //! Only one `LocalNet` runs at a time per process: [`LocalNet::start`] waits for a
 //! process-wide lock, so the tests of one binary do not compete for CPU and skew
@@ -35,11 +41,15 @@ use tempfile::TempDir;
 use xdevs_consensus::ValidatorSet;
 use xdevs_consensus::{CommitCertificate, ConsensusTimeouts, ValidatorAddress, ValidatorKey};
 use xdevs_crypto::{sign_tx_envelope, signer_from_hex, Ed25519Seed};
-use xdevs_genesis::{Genesis, GenesisValidator, DEV_PRIVATE_KEYS};
+use xdevs_execution::{
+    staking::{self, calls, GenesisStake, StakingParams, ValidatorInfo},
+    EvmExecutor,
+};
+use xdevs_genesis::{Genesis, GenesisAccount, GenesisValidator, DEV_ACCOUNTS, DEV_PRIVATE_KEYS};
 use xdevs_node::{Node, NodeConfig, NodeHandle, NodeMode};
 use xdevs_primitives::{
-    constants::{DEV_CHAIN_ID, GWEI},
-    hex, Address, Bytes, Encodable2718, TxEip1559, TxKind, B256, U256,
+    constants::{DEV_CHAIN_ID, GOVERNANCE_ADDRESS, GWEI, STAKING_ADDRESS},
+    hex, Address, Bytes, ChainConfig, Encodable2718, TxEip1559, TxKind, B256, U256,
 };
 
 /// Serialises the nets of one process (see the module docs).
@@ -60,6 +70,8 @@ pub struct LocalNetOptions {
     /// Target block time; the round timeouts scale with it
     /// ([`ConsensusTimeouts::fast_for_tests`]).
     pub block_time_ms: u64,
+    /// Phase 3: a staking-driven validator set (`None` = the static genesis set).
+    pub staking: Option<StakingNet>,
 }
 
 impl Default for LocalNetOptions {
@@ -68,8 +80,112 @@ impl Default for LocalNetOptions {
             validators: 4,
             full_nodes: 0,
             block_time_ms: 400,
+            staking: None,
         }
     }
+}
+
+/// Phase 3 options of a [`LocalNet`]: every genesis validator is registered in the
+/// Staking predeploy with [`StakingNet::stake`] (voting power `stake / 1e18`), operator
+/// = dev account `i`.
+#[derive(Clone, Debug)]
+pub struct StakingNet {
+    /// `stakingValidatorsBlock`.
+    pub activation: u64,
+    /// `epochLength` (short in tests).
+    pub epoch_length: u64,
+    /// Staking `downtimeWindow` (blocks per liveness window).
+    pub downtime_window: u64,
+    /// Validator nodes started with keys outside the genesis set (they register later);
+    /// node indices follow the genesis validators, operator = dev account of that index.
+    pub candidates: usize,
+    /// `blockReward` (wei).
+    pub block_reward: U256,
+    /// Genesis stake of each validator (wei); also the Staking `minSelfStake`.
+    pub stake: U256,
+}
+
+impl Default for StakingNet {
+    fn default() -> Self {
+        Self {
+            activation: 1,
+            epoch_length: 20,
+            downtime_window: 10_000,
+            candidates: 0,
+            block_reward: U256::from(10u64).pow(U256::from(18u64)),
+            stake: U256::from(1_000u64) * U256::from(10u64).pow(U256::from(18u64)),
+        }
+    }
+}
+
+/// Runtime bytecode of the Staking predeploy as shipped in the genesis artifacts.
+pub fn staking_runtime_code() -> anyhow::Result<Bytes> {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/configs/predeploys-alloc.json"
+    );
+    let json: Value = serde_json::from_str(&std::fs::read_to_string(path)?)?;
+    let code = json["alloc"]["0x0000000000000000000000000000000000001000"]["code"]
+        .as_str()
+        .context("Staking code in predeploys-alloc.json")?;
+    Ok(hex::decode(code.trim_start_matches("0x"))?.into())
+}
+
+/// Seed of the consensus key of LocalNet validator `i` (genesis validators first, then
+/// candidates).
+fn validator_seed(i: usize) -> Ed25519Seed {
+    Ed25519Seed::from_bytes(&[0x40 + i as u8; 32])
+}
+
+/// Add the Staking predeploy with `genesis.validators` registered (operator = dev
+/// account `i`) and schedule the staking-driven set.
+fn add_staking(genesis: &mut Genesis, st: &StakingNet) -> anyhow::Result<()> {
+    ensure!(
+        genesis.validators.len() <= DEV_ACCOUNTS.len(),
+        "at most {} staking validators",
+        DEV_ACCOUNTS.len()
+    );
+    genesis.config.staking_validators_block = Some(st.activation);
+    genesis.config.epoch_length = st.epoch_length;
+    genesis.config.block_reward = st.block_reward;
+    let stakes: Vec<GenesisStake> = genesis
+        .validators
+        .iter()
+        .enumerate()
+        .map(|(i, v)| GenesisStake {
+            operator: DEV_ACCOUNTS[i],
+            consensus_key: B256::from(v.consensus_key),
+            commission_bps: 1_000,
+            stake: st.stake,
+        })
+        .collect();
+    let params = StakingParams {
+        min_self_stake: st.stake,
+        downtime_window: st.downtime_window,
+        unbonding_seconds: 3_600,
+        commission_change_interval: 0,
+        ..StakingParams::default()
+    };
+    let code = staking_runtime_code()?;
+    let executor = EvmExecutor::new(genesis.chain_config());
+    let (balance, storage) = staking::genesis_storage(
+        &executor,
+        code.clone(),
+        GOVERNANCE_ADDRESS,
+        &params,
+        &stakes,
+    )
+    .map_err(|e| anyhow!("initialise Staking: {e}"))?;
+    genesis.alloc.insert(
+        STAKING_ADDRESS,
+        GenesisAccount {
+            balance,
+            code: Some(code),
+            storage,
+            nonce: 0,
+        },
+    );
+    Ok(())
 }
 
 /// Role of a node in the net.
@@ -94,6 +210,8 @@ pub struct NetNode {
     config: NodeConfig,
     /// Consensus address (validators).
     address: Option<ValidatorAddress>,
+    /// Consensus key seed (validators).
+    seed: Option<[u8; 32]>,
     running: Option<Running>,
     starts: u32,
 }
@@ -124,6 +242,11 @@ impl NetNode {
         self.address
     }
 
+    /// Consensus key seed (validators only; tests sign with it, e.g. to equivocate).
+    pub fn consensus_seed(&self) -> Option<[u8; 32]> {
+        self.seed
+    }
+
     /// `true` between start and stop.
     pub fn is_running(&self) -> bool {
         self.running.is_some()
@@ -145,6 +268,7 @@ pub struct LocalNet {
     nodes: Vec<NetNode>,
     genesis_path: PathBuf,
     chain_id: u64,
+    chain_config: ChainConfig,
     set: ValidatorSet,
     block_time_ms: u64,
     alerts_at_start: SafetyAlerts,
@@ -210,25 +334,35 @@ impl LocalNet {
         let root = tempfile::Builder::new()
             .prefix("xdevs-localnet")
             .tempdir()?;
-        let total = opts.validators + opts.full_nodes;
+        let candidates = opts.staking.as_ref().map_or(0, |s| s.candidates);
+        let signers = opts.validators + candidates;
+        let total = signers + opts.full_nodes;
         let ports = free_ports(2 * total);
         let (p2p, gossip) = ports.split_at(total);
 
-        let seeds: Vec<Ed25519Seed> = (0..opts.validators)
-            .map(|i| Ed25519Seed::from_bytes(&[0x40 + i as u8; 32]))
-            .collect();
+        let seeds: Vec<Ed25519Seed> = (0..signers).map(validator_seed).collect();
+        // Static nets: power 1 each. Staking nets: power = stake in whole tXDS, the
+        // conversion the node applies to the Staking set.
+        let power = match &opts.staking {
+            Some(st) => u64::try_from(st.stake / U256::from(10u64).pow(U256::from(18u64)))
+                .map_err(|_| anyhow!("stake too large"))?,
+            None => 1,
+        };
         let mut genesis = Genesis::dev(DEV_CHAIN_ID);
-        genesis.validators = seeds
+        genesis.validators = seeds[..opts.validators]
             .iter()
             .enumerate()
             .map(|(i, s)| GenesisValidator {
                 name: Some(format!("val{}", i + 1)),
                 consensus_key: s.public_key(),
-                power: 1,
+                power,
                 p2p: Some(tcp_addr(p2p[i])),
                 extra: Default::default(),
             })
             .collect();
+        if let Some(st) = &opts.staking {
+            add_staking(&mut genesis, st)?;
+        }
         let set = xdevs_node::consensus::genesis_validator_set(&genesis)?
             .context("genesis has validators")?;
         let genesis_path = root.path().join("genesis.json");
@@ -238,6 +372,7 @@ impl LocalNet {
             nodes: Vec::new(),
             genesis_path,
             chain_id: genesis.config.chain_id,
+            chain_config: genesis.chain_config(),
             set,
             block_time_ms: opts.block_time_ms,
             alerts_at_start: safety_alerts(),
@@ -247,14 +382,10 @@ impl LocalNet {
         let all_p2p: Vec<String> = p2p.iter().map(|p| tcp_addr(*p)).collect();
         let all_gossip: Vec<String> = gossip.iter().map(|p| tcp_addr(*p)).collect();
         for k in 0..total {
-            let (role, name, seed) = if k < opts.validators {
+            let (role, name, seed) = if k < signers {
                 (Role::Validator, format!("val{}", k + 1), Some(&seeds[k]))
             } else {
-                (
-                    Role::FullNode,
-                    format!("full{}", k - opts.validators + 1),
-                    None,
-                )
+                (Role::FullNode, format!("full{}", k - signers + 1), None)
             };
             let peers = |all: &[String]| -> Vec<String> {
                 all.iter()
@@ -302,7 +433,9 @@ impl LocalNet {
         config.gossip.network.bootnodes = bootnodes;
         config.rpc.http = "127.0.0.1:0".parse().expect("socket addr");
         let mut address = None;
+        let mut seed_bytes = None;
         if let Some(seed) = seed {
+            seed_bytes = Some(*seed.as_bytes());
             let key_file = home.join("consensus.key");
             std::fs::write(&key_file, hex::encode(seed.as_bytes()))?;
             config.validator.enabled = true;
@@ -317,6 +450,7 @@ impl LocalNet {
             home,
             config,
             address,
+            seed: seed_bytes,
             running: None,
             starts: 0,
         })
@@ -434,9 +568,23 @@ impl LocalNet {
         self.chain_id
     }
 
-    /// The (static) validator set.
+    /// The genesis validator set (in force at every height of a static net).
     pub fn validator_set(&self) -> &ValidatorSet {
         &self.set
+    }
+
+    /// Effective chain config of the genesis (staking fork schedule included).
+    pub fn chain_config(&self) -> &ChainConfig {
+        &self.chain_config
+    }
+
+    /// The validator set node `i` has in force at `height` (Phase 3: epoch sets).
+    pub async fn validator_set_at(&self, i: usize, height: u64) -> anyhow::Result<ValidatorSet> {
+        let node = &self.nodes[i];
+        node.handle()
+            .with_context(|| format!("{} is not running", node.name))?
+            .validator_set_at(height)
+            .await
     }
 
     /// Target block time.
@@ -587,6 +735,79 @@ impl LocalNet {
         }
     }
 
+    /// `eth_call` of `data` to `to` at `latest` on node `i`; returns the output.
+    pub async fn eth_call(&self, i: usize, to: Address, data: Bytes) -> anyhow::Result<Bytes> {
+        let v = self
+            .call(
+                i,
+                "eth_call",
+                vec![json!({ "to": to, "data": data }), json!("latest")],
+            )
+            .await?;
+        Ok(hex::decode(
+            v.as_str()
+                .context("eth_call output")?
+                .trim_start_matches("0x"),
+        )?
+        .into())
+    }
+
+    /// `Staking.getValidator(operator)` read through node `i`.
+    pub async fn staking_validator(
+        &self,
+        i: usize,
+        operator: Address,
+    ) -> anyhow::Result<ValidatorInfo> {
+        let out = self
+            .eth_call(i, STAKING_ADDRESS, calls::get_validator(operator))
+            .await?;
+        staking::decode_validator_info(&out).map_err(|e| anyhow!("getValidator: {e}"))
+    }
+
+    /// Operator address of validator node `v` in a staking net (dev account `v`).
+    pub fn operator(&self, v: usize) -> Address {
+        DEV_ACCOUNTS[v]
+    }
+
+    /// `Staking.register(key of node v, 5%)` with `stake` wei, signed by the operator of
+    /// node `v` (dev account `v`) and sent to node `i`. Returns the tx hash.
+    pub async fn register_validator(
+        &self,
+        i: usize,
+        v: usize,
+        stake: U256,
+    ) -> anyhow::Result<B256> {
+        let seed = self.nodes[v]
+            .seed
+            .with_context(|| format!("{} has no consensus key", self.nodes[v].name))?;
+        let key = B256::from(Ed25519Seed::from_bytes(&seed).public_key());
+        let signer = signer_from_hex(DEV_PRIVATE_KEYS[v])?;
+        let nonce = quantity(
+            &self
+                .call(
+                    i,
+                    "eth_getTransactionCount",
+                    vec![json!(self.operator(v)), json!("latest")],
+                )
+                .await?,
+        )?;
+        let tx = sign_tx_envelope(
+            &signer,
+            TxEip1559 {
+                chain_id: self.chain_id,
+                nonce,
+                gas_limit: 1_000_000,
+                max_fee_per_gas: 10 * u128::from(GWEI),
+                max_priority_fee_per_gas: u128::from(GWEI),
+                to: TxKind::Call(STAKING_ADDRESS),
+                value: stake,
+                input: calls::register(key, 500),
+                access_list: Default::default(),
+            },
+        )?;
+        self.send_raw(i, &tx.encoded_2718()).await
+    }
+
     /// `eth_getBalance(addr, latest)` on node `i`.
     pub async fn balance(&self, i: usize, addr: Address) -> anyhow::Result<U256> {
         let v = self
@@ -677,6 +898,18 @@ impl LocalNet {
     /// validator set (> 2/3 of the power, valid signatures). Also fails on any safety
     /// alert logged since the net started. Returns the lowest head checked.
     pub async fn assert_no_fork(&self) -> anyhow::Result<u64> {
+        let lowest = self.assert_consistent().await?;
+        let alerts = self.safety_alerts();
+        ensure!(
+            alerts.is_clean(),
+            "safety alerts in the node logs: {alerts:?}"
+        );
+        Ok(lowest)
+    }
+
+    /// [`LocalNet::assert_no_fork`] without the safety-alert check (for tests that
+    /// provoke equivocation evidence on purpose).
+    pub async fn assert_consistent(&self) -> anyhow::Result<u64> {
         let running = self.running();
         ensure!(!running.is_empty(), "no running node");
         // height -> (hash, state root, node that reported it first)
@@ -732,16 +965,12 @@ impl LocalNet {
                     "{name}: certificate of block {h} is for {}, block is {hash}",
                     cert.block_hash
                 );
-                cert.verify_at(self.chain_id, h, &self.set).map_err(|e| {
+                let set = self.validator_set_at(i, h).await?;
+                cert.verify_at(self.chain_id, h, &set).map_err(|e| {
                     anyhow!("{name}: commit certificate of block {h} does not verify: {e:?}")
                 })?;
             }
         }
-        let alerts = self.safety_alerts();
-        ensure!(
-            alerts.is_clean(),
-            "safety alerts in the node logs: {alerts:?}"
-        );
         Ok(lowest)
     }
 

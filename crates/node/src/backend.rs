@@ -107,6 +107,8 @@ pub struct NodeBackend {
     max_concurrent: usize,
     /// EVM time limit of `eth_call` / `eth_estimateGas` (`None` = unlimited).
     evm_timeout: Option<Duration>,
+    /// The consensus app (validator / full-node mode): `xdevs_submitEvidence`.
+    chain_app: Option<crate::ChainApp>,
 }
 
 impl std::fmt::Debug for NodeBackend {
@@ -175,6 +177,7 @@ impl NodeBackend {
             slots: Arc::new(Semaphore::new(default_max_concurrent_requests())),
             max_concurrent: default_max_concurrent_requests(),
             evm_timeout: Some(DEFAULT_EVM_TIMEOUT),
+            chain_app: None,
         }
     }
 
@@ -203,6 +206,12 @@ impl NodeBackend {
     /// its peers in `net_peerCount`.
     pub fn with_gossip(mut self, gossip: Arc<NetworkHandle>) -> Self {
         self.gossip = Some(gossip);
+        self
+    }
+
+    /// Accept double-sign evidence (`xdevs_submitEvidence`) into `app`'s evidence pool.
+    pub fn with_chain_app(mut self, app: crate::ChainApp) -> Self {
+        self.chain_app = Some(app);
         self
     }
 
@@ -743,6 +752,15 @@ impl RpcBackend for NodeBackend {
             }))
         })
         .await
+    }
+
+    async fn submit_evidence(&self, raw: Bytes) -> BackendResult<B256> {
+        let app = self.chain_app.as_ref().ok_or_else(|| {
+            RpcBackendError::Unsupported("xdevs_submitEvidence (no consensus)".into())
+        })?;
+        app.submit_evidence(&raw)
+            .await
+            .map_err(|e| RpcBackendError::InvalidParams(format!("{e:#}")))
     }
 
     async fn block_by_number(

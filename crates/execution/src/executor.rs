@@ -3,8 +3,10 @@
 use crate::{
     db::{StateDbError, StateOverlay},
     env::{block_env, call_tx_env, cfg_env, tx_env, BLOB_TX_TYPE},
-    next_base_fee, xip0001, BlockAttributes, BlockExecutor, BuiltBlock, CallLimits, CallResult,
-    EvmExecutor, ExecutionError, ExecutionOutcome,
+    next_base_fee,
+    staking::{self, calls, StakingInputs, StakingValidator},
+    xip0001, BlockAttributes, BlockExecutor, BuiltBlock, CallLimits, CallResult, EvmExecutor,
+    ExecutionError, ExecutionOutcome,
 };
 use alloy_consensus::Eip658Value;
 use alloy_rpc_types_eth::TransactionRequest;
@@ -14,7 +16,7 @@ use revm::{
         result::{EVMError, ExecutionResult, HaltReason, InvalidTransaction},
         ContextTr,
     },
-    handler::{MainnetContext, MainnetEvm},
+    handler::{MainnetContext, MainnetEvm, SystemCallEvm},
     inspector::{InspectEvm, Inspector},
     interpreter::{interpreter::EthInterpreter, Interpreter},
     primitives::eip7825::TX_GAS_LIMIT_CAP,
@@ -23,11 +25,11 @@ use revm::{
 use std::collections::BTreeSet;
 use xdevs_primitives::{
     compute_logs_bloom, compute_receipts_root, compute_transactions_root,
-    constants::MAX_EXTRA_DATA_SIZE,
+    constants::{MAX_EXTRA_DATA_SIZE, STAKING_ADDRESS},
     set_compat_header_fields,
     xip0001::{check_shape, check_tx, TxShape, Xip0001Error, Xip0001Violation, MAX_GAS},
-    Address, Block, EoaLockStatus, Header, Log, Receipt, ReceiptEnvelope, RecoveredTx, Transaction,
-    TxKind, Typed2718, U256,
+    Address, Block, Bytes, EoaLockStatus, Header, Log, Receipt, ReceiptEnvelope, RecoveredTx,
+    Transaction, TxKind, Typed2718, B256, U256,
 };
 use xdevs_state::{StateDiff, StateProvider};
 
@@ -168,6 +170,7 @@ impl EvmExecutor {
         state_diff: StateDiff,
         receipts: Vec<ReceiptEnvelope>,
         gas_used: u64,
+        next_validators: Option<Vec<StakingValidator>>,
     ) -> Result<ExecutionOutcome, ExecutionError> {
         Ok(ExecutionOutcome {
             state_root: state.state_root_with(&state_diff)?,
@@ -176,7 +179,207 @@ impl EvmExecutor {
             gas_used,
             receipts,
             state_diff,
+            next_validators,
         })
+    }
+
+    /// One system call (`msg.sender = systemAddress`, no gas charge, no nonce or balance
+    /// change of the caller) to `to`, committed into the overlay. Errors if it reverts or
+    /// halts.
+    fn system_call_to(
+        &self,
+        evm: &mut Evm<'_, '_>,
+        to: Address,
+        data: Bytes,
+        what: &str,
+    ) -> Result<Bytes, ExecutionError> {
+        let caller = self.chain_config().system_address;
+        let out = evm
+            .system_call_with_caller(caller, to, data)
+            .map_err(evm_error)?;
+        let mut changes = out.state;
+        // The caller is only touched (never funded or charged): keep it out of the state.
+        changes.remove(&caller);
+        evm.ctx
+            .db_mut()
+            .try_commit(changes)
+            .map_err(|e| ExecutionError::State(e.0))?;
+        match out.result {
+            ExecutionResult::Success { output, .. } => Ok(output.into_data()),
+            ExecutionResult::Revert { output, .. } => Err(ExecutionError::SystemCall(format!(
+                "{what} reverted: {output:?}"
+            ))),
+            ExecutionResult::Halt { reason, .. } => Err(ExecutionError::SystemCall(format!(
+                "{what} halted: {reason:?}"
+            ))),
+        }
+    }
+
+    /// `consensusKeyOwner(key)`: the operator bound to a consensus key (zero if none).
+    fn key_owner(&self, evm: &mut Evm<'_, '_>, key: B256) -> Result<Address, ExecutionError> {
+        let out = self.system_call_to(
+            evm,
+            STAKING_ADDRESS,
+            calls::consensus_key_owner(key),
+            "Staking.consensusKeyOwner",
+        )?;
+        staking::abi::address_at(&out, 0)
+    }
+
+    /// The Staking system calls of block `header` (see [`crate::staking`]), before its
+    /// transactions. Returns the next epoch's validator set at an epoch boundary.
+    fn run_staking(
+        &self,
+        evm: &mut Evm<'_, '_>,
+        header: &Header,
+        inputs: &StakingInputs,
+    ) -> Result<Option<Vec<StakingValidator>>, ExecutionError> {
+        let cfg = self.chain_config();
+        // 1. Block reward: a direct balance credit, distributed by recordParticipation.
+        evm.ctx
+            .db_mut()
+            .credit(STAKING_ADDRESS, cfg.block_reward)
+            .map_err(|e| ExecutionError::State(e.0))?;
+        // 2. Liveness + rewards.
+        let proposer = match inputs.proposer {
+            Some(key) => self.key_owner(evm, key)?,
+            None => Address::ZERO,
+        };
+        let mut signed = BTreeSet::new();
+        for key in &inputs.signers {
+            let operator = self.key_owner(evm, *key)?;
+            if operator != Address::ZERO {
+                signed.insert(operator);
+            }
+        }
+        let signing_set = staking::decode_operators(&self.system_call_to(
+            evm,
+            STAKING_ADDRESS,
+            calls::signing_set(),
+            "Staking.signingSet",
+        )?)?;
+        let bitmap = staking::signed_bitmap(&signing_set, &signed);
+        self.system_call_to(
+            evm,
+            STAKING_ADDRESS,
+            calls::record_participation(proposer, bitmap),
+            "Staking.recordParticipation",
+        )?;
+        // 3. Double-sign evidence (invalid / duplicate evidence is ignored on chain).
+        for ev in &inputs.evidence {
+            let operator = self.key_owner(evm, ev.consensus_key)?;
+            self.system_call_to(
+                evm,
+                STAKING_ADDRESS,
+                calls::slash(operator, ev.height, ev.reference),
+                "Staking.slash",
+            )?;
+        }
+        // 4. Epoch boundary: new set, read back for the next epoch.
+        if !cfg.is_epoch_boundary(header.number) {
+            return Ok(None);
+        }
+        self.system_call_to(evm, STAKING_ADDRESS, calls::on_epoch(), "Staking.onEpoch")?;
+        let out = self.system_call_to(
+            evm,
+            STAKING_ADDRESS,
+            calls::consensus_validator_set(),
+            "Staking.consensusValidatorSet",
+        )?;
+        staking::decode_validator_set(&out).map(Some)
+    }
+
+    /// Run one system call to `to` on `state` in the context of a block with `header`
+    /// and return its output and state changes (nothing is committed). Used to
+    /// initialise predeploys for a genesis ([`staking::genesis_storage`]) and in tests.
+    pub fn system_call_at(
+        &self,
+        state: &dyn StateProvider,
+        header: &Header,
+        to: Address,
+        data: Bytes,
+    ) -> Result<(Bytes, StateDiff), ExecutionError> {
+        let mut db = StateOverlay::new(state);
+        let output = {
+            let mut evm = new_evm(
+                &mut db,
+                cfg_env(self.chain_config().chain_id),
+                block_env(header),
+            );
+            self.system_call_to(&mut evm, to, data, "system call")?
+        };
+        Ok((output, db.into_diff()))
+    }
+
+    /// [`BlockExecutor::execute`] with the block's Staking inputs (Phase 3). Blocks
+    /// before `stakingValidatorsBlock` ignore `staking`.
+    pub fn execute_with(
+        &self,
+        parent: &Header,
+        block: &Block,
+        state: &dyn StateProvider,
+        staking: &StakingInputs,
+    ) -> Result<ExecutionOutcome, ExecutionError> {
+        let header = &block.header;
+        self.validate_child(parent, header)?;
+        let base_fee = header.base_fee_per_gas.unwrap_or_default();
+
+        let mut db = StateOverlay::new(state);
+        let mut receipts = Vec::with_capacity(block.body.len());
+        let mut cumulative = 0u64;
+        let xip0001_active = self.chain_config().xip0001_active(header.number);
+        let mut senders: BTreeSet<Address> = BTreeSet::new();
+        let mut next_validators = None;
+        {
+            let mut evm = new_evm(
+                &mut db,
+                cfg_env(self.chain_config().chain_id),
+                block_env(header),
+            );
+            if self.chain_config().staking_active(header.number) {
+                next_validators = self.run_staking(&mut evm, header, staking)?;
+            }
+            for tx in &block.body {
+                let hash = *tx.tx_hash();
+                let rtx = RecoveredTx::recover(tx.clone()).map_err(|e| {
+                    ExecutionError::InvalidTransaction {
+                        hash,
+                        reason: format!("invalid signature: {e}"),
+                    }
+                })?;
+                if rtx.ty() == BLOB_TX_TYPE {
+                    return Err(ExecutionError::UnsupportedTxType(BLOB_TX_TYPE));
+                }
+                let needed = cumulative.saturating_add(rtx.gas_limit());
+                if needed > header.gas_limit {
+                    return Err(ExecutionError::BlockGasLimitExceeded {
+                        used: needed,
+                        limit: header.gas_limit,
+                    });
+                }
+                let xip = xip0001_active.then_some(&senders);
+                let applied = match self.apply_tx(&mut evm, &rtx, base_fee, xip) {
+                    Ok(a) => a,
+                    Err(TxFailure::Invalid(e)) => {
+                        return Err(ExecutionError::InvalidTransaction {
+                            hash,
+                            reason: e.to_string(),
+                        })
+                    }
+                    Err(TxFailure::Xip0001(error)) => {
+                        return Err(ExecutionError::Xip0001 {
+                            hash: Some(hash),
+                            error: Box::new(error),
+                        })
+                    }
+                    Err(TxFailure::Fatal(e)) => return Err(e),
+                };
+                senders.insert(rtx.sender);
+                cumulative += applied.gas_used;
+                receipts.push(make_receipt(&rtx, applied, cumulative));
+            }
+        }
+        Self::finish(state, db.into_diff(), receipts, cumulative, next_validators)
     }
 
     /// Header checks of `header` against `parent` and the chain config.
@@ -517,76 +720,43 @@ fn is_transient(e: &InvalidTransaction) -> bool {
 }
 
 impl BlockExecutor for EvmExecutor {
+    /// Without Staking inputs: blocks from `stakingValidatorsBlock` on run the system
+    /// calls with no proposer, no signers and no evidence. Consensus nodes use
+    /// [`EvmExecutor::execute_with`].
     fn execute(
         &self,
         parent: &Header,
         block: &Block,
         state: &dyn StateProvider,
     ) -> Result<ExecutionOutcome, ExecutionError> {
-        let header = &block.header;
-        self.validate_child(parent, header)?;
-        let base_fee = header.base_fee_per_gas.unwrap_or_default();
-
-        let mut db = StateOverlay::new(state);
-        let mut receipts = Vec::with_capacity(block.body.len());
-        let mut cumulative = 0u64;
-        let xip0001_active = self.chain_config().xip0001_active(header.number);
-        let mut senders: BTreeSet<Address> = BTreeSet::new();
-        {
-            let mut evm = new_evm(
-                &mut db,
-                cfg_env(self.chain_config().chain_id),
-                block_env(header),
-            );
-            for tx in &block.body {
-                let hash = *tx.tx_hash();
-                let rtx = RecoveredTx::recover(tx.clone()).map_err(|e| {
-                    ExecutionError::InvalidTransaction {
-                        hash,
-                        reason: format!("invalid signature: {e}"),
-                    }
-                })?;
-                if rtx.ty() == BLOB_TX_TYPE {
-                    return Err(ExecutionError::UnsupportedTxType(BLOB_TX_TYPE));
-                }
-                let needed = cumulative.saturating_add(rtx.gas_limit());
-                if needed > header.gas_limit {
-                    return Err(ExecutionError::BlockGasLimitExceeded {
-                        used: needed,
-                        limit: header.gas_limit,
-                    });
-                }
-                let xip = xip0001_active.then_some(&senders);
-                let applied = match self.apply_tx(&mut evm, &rtx, base_fee, xip) {
-                    Ok(a) => a,
-                    Err(TxFailure::Invalid(e)) => {
-                        return Err(ExecutionError::InvalidTransaction {
-                            hash,
-                            reason: e.to_string(),
-                        })
-                    }
-                    Err(TxFailure::Xip0001(error)) => {
-                        return Err(ExecutionError::Xip0001 {
-                            hash: Some(hash),
-                            error: Box::new(error),
-                        })
-                    }
-                    Err(TxFailure::Fatal(e)) => return Err(e),
-                };
-                senders.insert(rtx.sender);
-                cumulative += applied.gas_used;
-                receipts.push(make_receipt(&rtx, applied, cumulative));
-            }
-        }
-        Self::finish(state, db.into_diff(), receipts, cumulative)
+        self.execute_with(parent, block, state, &StakingInputs::default())
     }
 
+    /// Without Staking inputs (like [`BlockExecutor::execute`]); consensus nodes use
+    /// [`EvmExecutor::build_with`].
     fn build(
         &self,
         parent: &Header,
         attrs: BlockAttributes,
         candidates: Vec<RecoveredTx>,
         state: &dyn StateProvider,
+    ) -> Result<BuiltBlock, ExecutionError> {
+        self.build_with(parent, attrs, candidates, state, &StakingInputs::default())
+    }
+}
+
+impl EvmExecutor {
+    /// [`BlockExecutor::build`] with the block's Staking inputs (Phase 3): the system
+    /// calls run before the candidates. Blocks before `stakingValidatorsBlock` ignore
+    /// `staking`. The header's `requests_hash` is the empty value: a proposer that adds
+    /// consensus data sets it (see `xdevs_primitives::consensus_data_hash`).
+    pub fn build_with(
+        &self,
+        parent: &Header,
+        attrs: BlockAttributes,
+        candidates: Vec<RecoveredTx>,
+        state: &dyn StateProvider,
+        staking: &StakingInputs,
     ) -> Result<BuiltBlock, ExecutionError> {
         if attrs.timestamp <= parent.timestamp {
             return Err(ExecutionError::InvalidHeader(format!(
@@ -624,12 +794,16 @@ impl BlockExecutor for EvmExecutor {
         let mut included: BTreeSet<Address> = BTreeSet::new();
         let xip0001_active = self.chain_config().xip0001_active(header.number);
         let mut cumulative = 0u64;
+        let mut next_validators = None;
         {
             let mut evm = new_evm(
                 &mut db,
                 cfg_env(self.chain_config().chain_id),
                 block_env(&header),
             );
+            if self.chain_config().staking_active(header.number) {
+                next_validators = self.run_staking(&mut evm, &header, staking)?;
+            }
             for tx in candidates {
                 if header.gas_limit.saturating_sub(cumulative) < MIN_TX_GAS {
                     break;
@@ -689,7 +863,7 @@ impl BlockExecutor for EvmExecutor {
             }
         }
 
-        let outcome = Self::finish(state, db.into_diff(), receipts, cumulative)?;
+        let outcome = Self::finish(state, db.into_diff(), receipts, cumulative, next_validators)?;
         header.state_root = outcome.state_root;
         header.transactions_root = compute_transactions_root(&body);
         header.receipts_root = outcome.receipts_root;

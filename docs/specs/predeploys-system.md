@@ -230,6 +230,23 @@ Recommended: `eth_call`-style local calls (the node embeds revm) to `consensusVa
 | 24 | 0 | 32 | `_votes` | `mapping(address => struct Checkpoints.Trace208)` | OZ Checkpoints.Trace208 (array of {uint48 block, uint208 value}) |
 | 25 | 0 | 32 | `_totalVotes` | `struct Checkpoints.Trace208` |  |
 
+### 1.11 Node implementation (Phase 3)
+
+Implemented in `crates/execution/src/staking.rs` (system calls, ABI) and `crates/node/src/staking.rs` + `app.rs`
+(epoch sets, consensus data, evidence), behind the genesis config key `stakingValidatorsBlock` (absent = never):
+
+* From that block on, each block runs, before its transactions: block-reward credit (`blockReward` wei, direct balance
+  credit) → `recordParticipation` → `slash` per evidence item → `onEpoch` + `consensusValidatorSet()` read at an epoch
+  boundary (`number % epochLength == 0`). A reverting system call makes the block invalid.
+* The bitmap is built per operator: the signers of the parent's commit certificate (carried in the block's consensus
+  data, committed by `requestsHash`) are mapped to operators with `consensusKeyOwner(bytes32)` and matched against
+  `signingSet()`; `proposer` is the operator of the proposer's consensus key.
+* The set read at boundary `B` (voting power = stake / 1e18, at least 1; members with an invalid Ed25519 key left out;
+  the current set kept if none is usable) is stored by the node and in force for `B + 1 ..= B + epochLength`.
+  Mid-epoch removals from the contract's active set reach consensus at the next boundary.
+* Evidence: Malachite equivocation reports and `xdevs_submitEvidence`, verified against the set of the offence height,
+  at most 10,000 blocks old, at most 8 per block; `ref = keccak256(rlp(ConflictingVotes))` in canonical vote order.
+
 ---
 
 ## 2. Governance — `0x0000000000000000000000000000000000001001`
@@ -405,6 +422,8 @@ the settlement check above; the suite passes on 28 seeds and at 256 runs × dept
 5. **Voting power = bonded principal**, not current value: slashing does not reduce voting power until the account's
    next delegate/undelegate. No vote delegation separate from stake delegation.
 6. **Inflation schedule lives in the node** (7% → −1%/yr → 2% floor). The contract only distributes what it receives.
+   The node currently mints a fixed `blockReward` per block from the genesis config (1 tXDS on Enclave); the curve is
+   still to be implemented.
 7. **Gas of system calls:** `recordParticipation` writes one slot per signing-set member per block (≤ 256) and
    `onEpoch` sorts up to `maxCandidates` (≤ 2,000) in memory; system calls are gas-free but this is real CPU work —
    benchmark before raising `maxValidators`/`maxCandidates`.

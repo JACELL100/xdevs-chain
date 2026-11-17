@@ -93,6 +93,7 @@ pub fn build_module(
     method!("eth_getLogs", eth_get_logs);
     method!("xdevs_getEoaLock", xdevs_get_eoa_lock);
     method!("xdevs_getCommitCertificate", xdevs_get_commit_certificate);
+    method!("xdevs_submitEvidence", xdevs_submit_evidence);
     crate::subscription::register(&mut m)?;
     Ok(m)
 }
@@ -499,6 +500,14 @@ async fn xdevs_get_commit_certificate(
     let mut seq = params.sequence();
     let block = normalize_block_id(seq.optional_next()?);
     Ok(ctx.backend.commit_certificate(block).await?)
+}
+
+async fn xdevs_submit_evidence(params: Params<'static>, ctx: Arc<RpcContext>) -> RpcResult<B256> {
+    let raw: Bytes = params.one()?;
+    if raw.is_empty() {
+        return Err(invalid("empty evidence"));
+    }
+    Ok(ctx.backend.submit_evidence(raw).await?)
 }
 
 #[cfg(test)]
