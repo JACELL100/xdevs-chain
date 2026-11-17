@@ -35,6 +35,11 @@ export type ValidatorStatus = 'candidate' | 'active' | 'jailed' | 'tombstoned' |
  * - `HIGH_VALUE_TRANSFER` — value exceeds X% of the sender's balance
  * - `PERMIT_SIGNATURE` — EIP-2612 Permit typed-data signature request
  * - `PERMIT2_SIGNATURE` — Permit2 typed-data signature request
+ *
+ * The node (Phase 4) also emits: `REVERT`, `NEVER_EXPIRING_APPROVAL`, `CONTRACT_CREATION`, `SELF_DESTRUCT`,
+ * `VAULT_QUEUED`, `BURN`, `INSUFFICIENT_FUNDS`, `TRACE_TRUNCATED` (simulation) and `POISONING_PATTERN`,
+ * `ZERO_ADDRESS`, `PRECOMPILE`, `SYSTEM_CONTRACT`, `CONTRACT_RECIPIENT`, `NEW_ADDRESS`, `NAME_MISMATCH`
+ * (recipient flags). Codes are open-ended: treat unknown ones by severity.
  */
 export type XdevsWarningCode =
   | 'UNLIMITED_APPROVAL'
@@ -80,23 +85,65 @@ export type XdevsWarning = {
 // xdevs_simulateTransaction (§16.4)
 // =====================================================================================================
 
+export type XdevsAssetStandard = 'native' | 'erc20' | 'erc721' | 'erc1155'
+
 export type XdevsAssetChange = {
   /** `"native"` for tXDS/XDS, otherwise the token contract. */
   token: 'native' | Address
-  symbol: string
+  /** Self-reported by the token contract (`null` if it has no `symbol()`). */
+  symbol: string | null
   from: Address
   to: Address
-  /** Human-readable decimal amount, already scaled by token decimals (e.g. `"12.5"`). */
+  /** Human-readable decimal amount, already scaled by token decimals (e.g. `"12.5"`); raw if decimals are unknown. */
   amount: string
+  /** Token standard (node simulation). */
+  standard?: XdevsAssetStandard
+  /** Self-reported decimals, `null` if unknown (node simulation). */
+  decimals?: number | null
+  /** Raw amount in base units (node simulation). */
+  rawAmount?: Quantity
+  /** NFT id (ERC-721 / ERC-1155). */
+  tokenId?: Quantity
+}
+
+/** Net change of one address in one asset over the whole simulated transaction. */
+export type XdevsBalanceChange = {
+  address: Address
+  token: 'native' | Address
+  symbol: string | null
+  /** Signed, scaled amount (`"-12.5"`). */
+  delta: string
+  /** Signed raw amount in base units (`"-12500000"`). */
+  rawDelta: string
+  tokenId?: Quantity
 }
 
 export type XdevsApprovalChange = {
   token: Address
   spender: Address
-  /** Decimal amount or `"unlimited"`. */
+  /** Scaled amount, `"unlimited"`, `"all"` (operator approval) or `"0"` (revocation). */
   amount: string
   /** Unix seconds when the approval expires, `null` = never (plan §16.5). */
   expires: number | null
+  /** Approval kind (node simulation). */
+  kind?: ApprovalKind | 'erc721'
+  owner?: Address
+  symbol?: string | null
+  rawAmount?: Quantity
+  unlimited?: boolean
+  tokenId?: Quantity
+}
+
+/** Guardian Vault outcome of a simulated transaction to an xDEVS Smart Account. */
+export type XdevsVaultOutcome = {
+  account: Address
+  /** `true`: queued with a cancel window; `false`: executed instantly. */
+  queued: boolean
+  actionId?: Quantity
+  /** Unix seconds from which the queued action can be executed. */
+  releaseAt?: number
+  executed?: Quantity[]
+  cancelled?: Quantity[]
 }
 
 /** Wire response of `xdevs_simulateTransaction` (plan §16.4). */
@@ -106,9 +153,18 @@ export type RpcSimulationResult = {
   assetChanges: XdevsAssetChange[]
   approvals: XdevsApprovalChange[]
   warnings: XdevsWarning[]
+  /** Always present: "advice, not fact: …". */
   disclaimer: string
-  /** Decoded revert reason when `success` is false (SDK proposal, optional). */
+  /** Decoded revert reason when `success` is false. */
   revertReason?: string | null
+  /** Raw revert data. */
+  revertData?: Hex
+  /** Net change per address and asset. */
+  balanceChanges?: XdevsBalanceChange[]
+  contractsCreated?: { address: Address; creator: Address }[]
+  vault?: XdevsVaultOutcome
+  /** Block whose state the simulation ran on. */
+  blockNumber?: Quantity
 }
 
 export type SimulationResult = Omit<RpcSimulationResult, 'gasUsed'> & { gasUsed: bigint }
@@ -116,6 +172,37 @@ export type SimulationResult = Omit<RpcSimulationResult, 'gasUsed'> & { gasUsed:
 // =====================================================================================================
 // xdevs_checkRecipient (§16.3)
 // =====================================================================================================
+
+/** On-chain facts about a recipient (`xdevs_checkRecipient` → `facts`). */
+export type RecipientFacts = {
+  address: Address
+  /** The XNS name that was entered (normalized), if any. */
+  resolvedFrom: string | null
+  isZeroAddress: boolean
+  isPrecompile: boolean
+  isSystemContract: boolean
+  isContract: boolean
+  codeSize: number
+  /** xDEVS Smart Account (EIP-7702 delegation to, or ERC-1967 proxy of, `0x…1005`). */
+  isSmartAccount: boolean
+  delegatedTo: Address | null
+  /** XIP-0001 lock status, `null` when the node does not serve it. */
+  eoaLock: 'unlocked' | 'locked' | 'sealed' | null
+  nonce: number
+  balance: Quantity
+  primaryName: string | null
+}
+
+/** Advisory part of `xdevs_checkRecipient` (heuristics — advice, not fact). */
+export type RecipientAdvice = {
+  /** `null` when no `from` was given. */
+  firstTime: boolean | null
+  lookAlikeOf: Address[]
+  flags: XdevsWarning[]
+  /** Block range of the bounded `Transfer` log scan behind `firstTime` / `lookAlikeOf`. */
+  history: { fromBlock: number; toBlock: number; complete: boolean } | null
+  disclaimer: string
+}
 
 /** Wire response of `xdevs_checkRecipient(from, to)`. */
 export type RecipientCheck = {
@@ -129,6 +216,13 @@ export type RecipientCheck = {
   isContract: boolean
   /** Optional advisory warnings (same catalogue as simulation). */
   warnings?: XdevsWarning[]
+  /** Resolved recipient address (node ≥ Phase 4). */
+  address?: Address
+  /** On-chain facts (node ≥ Phase 4). */
+  facts?: RecipientFacts
+  /** Advice, kept apart from the facts (node ≥ Phase 4). */
+  advice?: RecipientAdvice
+  blockNumber?: Quantity
 }
 
 // =====================================================================================================
@@ -143,15 +237,24 @@ export type XdevsApproval = {
   token: Address
   symbol?: string | null
   spender: Address
-  /** Decimal amount, or `"unlimited"`; `"all"` for operator approvals (`*-all` kinds). */
+  /** Remaining raw amount in base units (decimal integer string), `"unlimited"`, or `"all"` for operator approvals. */
   amount: string
   /** Unix seconds, `null` = never expires. */
   expires: number | null
+  owner?: Address
+  rawAmount?: Quantity
+  unlimited?: boolean
+  /** Block of the last approval event seen for this pair. */
+  lastUpdatedBlock?: Quantity
+  transactionHash?: Hash | null
 }
 
 // =====================================================================================================
 // xdevs_getVaultQueue (§16.2)
 // =====================================================================================================
+
+/** One call of a queued Guardian Vault action. */
+export type RpcVaultCall = { target: Address; value: Quantity; data: Hex }
 
 /** Wire form of a queued Guardian Vault action (mirrors the `VaultActionQueued` event). */
 export type RpcVaultAction = {
@@ -161,6 +264,14 @@ export type RpcVaultAction = {
   data: Hex
   /** Unix seconds after which anyone may `execute(id)`. */
   executeAfter: Quantity
+  /** Smart account (node ≥ Phase 4). */
+  account?: Address
+  /** Unix seconds after which the action can no longer be executed. */
+  expiresAt?: Quantity
+  /** `queued` (cancel window) or `ready` (executable). */
+  status?: 'queued' | 'ready'
+  calls?: RpcVaultCall[]
+  cancelVotes?: number
 }
 
 export type VaultAction = {
@@ -169,6 +280,52 @@ export type VaultAction = {
   value: bigint
   data: Hex
   executeAfter: bigint
+  account?: Address
+  expiresAt?: bigint
+  status?: 'queued' | 'ready'
+  calls?: { target: Address; value: bigint; data: Hex }[]
+  cancelVotes?: number
+}
+
+// =====================================================================================================
+// eth_subscribe("vaultEvents") (§16.2)
+// =====================================================================================================
+
+export type VaultEventType = 'queued' | 'cancelled' | 'executed' | 'invalidated' | 'frozen' | 'unfrozen'
+
+/** Wire form of a `vaultEvents` notification. */
+export type RpcVaultEvent = {
+  type: VaultEventType
+  account: Address
+  id?: Quantity
+  target?: Address
+  value?: Quantity
+  data?: Hex
+  executeAfter?: Quantity
+  by?: Address
+  frozenUntil?: Quantity
+  epoch?: number
+  blockNumber?: Quantity
+  blockHash?: Hash
+  transactionHash?: Hash
+  logIndex?: Quantity
+}
+
+export type VaultEvent = {
+  type: VaultEventType
+  account: Address
+  id?: bigint
+  target?: Address
+  value?: bigint
+  data?: Hex
+  executeAfter?: bigint
+  by?: Address
+  frozenUntil?: bigint
+  epoch?: number
+  blockNumber?: bigint
+  blockHash?: Hash
+  transactionHash?: Hash
+  logIndex?: number
 }
 
 // =====================================================================================================
@@ -269,12 +426,14 @@ export type XdevsRpcSchema = [
   },
   {
     Method: 'xdevs_checkRecipient'
-    Parameters: [from: Address, to: Address]
+    Parameters: [from: Address, to: Address] | [to: Address | string] | [from: Address | null, to: Address | string, block: RpcBlockParameter]
     ReturnType: RecipientCheck
   },
   {
     Method: 'xdevs_getApprovals'
-    Parameters: [owner: Address, block: RpcBlockParameter]
+    Parameters:
+      | [owner: Address, block: RpcBlockParameter]
+      | [owner: Address, options: { tokens?: Address[]; fromBlock?: Quantity }, block: RpcBlockParameter]
     ReturnType: XdevsApproval[]
   },
   {

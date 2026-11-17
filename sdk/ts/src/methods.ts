@@ -12,7 +12,7 @@ export type XdevsMethodInfo = {
  * Every `xdevs_` JSON-RPC method this SDK knows, with the phase in which the node implements it
  * (plan §19.2). Calling a method on a node older than its phase raises {@link XdevsMethodNotAvailableError}.
  *
- * Not wrapped yet: `xdevs_subscribe("vaultEvents")` (Phase 4, WebSocket only).
+ * Subscriptions: `eth_subscribe("vaultEvents", {account?})` (Phase 4, WebSocket only) — see `watchVaultEvents`.
  */
 export const XDEVS_RPC_METHODS = {
   xdevs_getCommitCertificate: { phase: 2, spec: '§8.1', description: 'Commit certificate for a height' },

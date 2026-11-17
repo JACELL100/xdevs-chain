@@ -20,9 +20,11 @@ import type {
   LocalFee,
   RecipientCheck,
   RpcBlockParameter,
+  RpcVaultEvent,
   SimulationResult,
   Validator,
   VaultAction,
+  VaultEvent,
   XdevsApproval,
   XdevsRpcSchema,
 } from './types.ts'
@@ -116,22 +118,53 @@ export async function simulateTransaction(
 // xdevs_checkRecipient — Phase 4 (§16.3)
 // -----------------------------------------------------------------------------------------------------
 
-export type CheckRecipientParameters = { from: Address; to: Address }
+export type CheckRecipientParameters = {
+  /** Sender (enables the first-time / look-alike / poisoning checks). */
+  from?: Address | null | undefined
+  /** Recipient: an address or an XNS name (`alice` / `alice.xdevs`). */
+  to: Address | string
+} & BlockParameter
 
-/** Address-poisoning / first-time-recipient checks for a transfer. Node support: **Phase 4**. */
-export async function checkRecipient(client: AnyClient, { from, to }: CheckRecipientParameters): Promise<RecipientCheck> {
-  return xdevsRequest(client, 'xdevs_checkRecipient', [checkedAddress(from, 'from'), checkedAddress(to, 'to')])
+/**
+ * Recipient checks for a transfer (plan §16.3): on-chain `facts` (contract / smart account / EOA lock / XNS name)
+ * kept apart from `advice` (first-time recipient, look-alike of a past recipient, address-poisoning pattern,
+ * zero / precompile / system address). Node support: **Phase 4**. Advice, not fact.
+ */
+export async function checkRecipient(client: AnyClient, args: CheckRecipientParameters): Promise<RecipientCheck> {
+  const to = /^0x/i.test(args.to) ? checkedAddress(args.to, 'to') : normalizeXnsName(args.to)
+  const from = args.from ? checkedAddress(args.from, 'from') : null
+  const hasBlock = args.blockNumber !== undefined || args.blockTag !== undefined
+  if (hasBlock) return xdevsRequest(client, 'xdevs_checkRecipient', [from, to, blockParam(args)])
+  if (from) return xdevsRequest(client, 'xdevs_checkRecipient', [from, to as Address])
+  return xdevsRequest(client, 'xdevs_checkRecipient', [to])
 }
 
 // -----------------------------------------------------------------------------------------------------
 // xdevs_getApprovals — Phase 4 (§16.5)
 // -----------------------------------------------------------------------------------------------------
 
-export type GetApprovalsParameters = { owner: Address } & BlockParameter
+export type GetApprovalsParameters = {
+  owner: Address
+  /** Only these token contracts (Permit2 allowances on them are included). */
+  tokens?: readonly Address[] | undefined
+  /** First block of the log scan (default: the node's `max_logs_range` window ending at the block). */
+  fromBlock?: bigint | undefined
+} & BlockParameter
 
-/** All live approvals of `owner` (for a one-click revoke screen). Node support: **Phase 4**. */
+/**
+ * Live approvals of `owner` (for a one-click revoke screen): the node scans approval events of the last
+ * `max_logs_range` blocks and checks each pair's live allowance. The indexer API is the full-history source.
+ * Node support: **Phase 4**.
+ */
 export async function getApprovals(client: AnyClient, args: GetApprovalsParameters): Promise<XdevsApproval[]> {
-  return xdevsRequest(client, 'xdevs_getApprovals', [checkedAddress(args.owner, 'owner'), blockParam(args)])
+  const owner = checkedAddress(args.owner, 'owner')
+  if (args.tokens === undefined && args.fromBlock === undefined) {
+    return xdevsRequest(client, 'xdevs_getApprovals', [owner, blockParam(args)])
+  }
+  const options: { tokens?: Address[]; fromBlock?: Hex } = {}
+  if (args.tokens) options.tokens = args.tokens.map((t) => checkedAddress(t, 'token'))
+  if (args.fromBlock !== undefined) options.fromBlock = numberToHex(args.fromBlock)
+  return xdevsRequest(client, 'xdevs_getApprovals', [owner, options, blockParam(args)])
 }
 
 // -----------------------------------------------------------------------------------------------------
@@ -143,13 +176,90 @@ export type GetVaultQueueParameters = { vault: Address } & BlockParameter
 /** Pending (not executed, not cancelled) Guardian Vault actions. Node support: **Phase 4**. */
 export async function getVaultQueue(client: AnyClient, args: GetVaultQueueParameters): Promise<VaultAction[]> {
   const res = await xdevsRequest(client, 'xdevs_getVaultQueue', [checkedAddress(args.vault, 'vault'), blockParam(args)])
-  return res.map((a) => ({
-    id: toBigInt(a.id, 'id'),
-    target: a.target,
-    value: toBigInt(a.value, 'value'),
-    data: a.data,
-    executeAfter: toBigInt(a.executeAfter, 'executeAfter'),
-  }))
+  return res.map((a) => {
+    const action: VaultAction = {
+      id: toBigInt(a.id, 'id'),
+      target: a.target,
+      value: toBigInt(a.value, 'value'),
+      data: a.data,
+      executeAfter: toBigInt(a.executeAfter, 'executeAfter'),
+    }
+    if (a.account !== undefined) action.account = a.account
+    if (a.expiresAt !== undefined) action.expiresAt = toBigInt(a.expiresAt, 'expiresAt')
+    if (a.status !== undefined) action.status = a.status
+    if (a.calls !== undefined) {
+      action.calls = a.calls.map((c) => ({ target: c.target, value: toBigInt(c.value, 'calls.value'), data: c.data }))
+    }
+    if (a.cancelVotes !== undefined) action.cancelVotes = a.cancelVotes
+    return action
+  })
+}
+
+// -----------------------------------------------------------------------------------------------------
+// eth_subscribe("vaultEvents") — Phase 4 (§16.2)
+// -----------------------------------------------------------------------------------------------------
+
+/** Parses a `vaultEvents` notification (quantities to bigint). */
+export function parseVaultEvent(raw: RpcVaultEvent): VaultEvent {
+  const event: VaultEvent = { type: raw.type, account: raw.account }
+  if (raw.id !== undefined) event.id = toBigInt(raw.id, 'id')
+  if (raw.target !== undefined) event.target = raw.target
+  if (raw.value !== undefined) event.value = toBigInt(raw.value, 'value')
+  if (raw.data !== undefined) event.data = raw.data
+  if (raw.executeAfter !== undefined) event.executeAfter = toBigInt(raw.executeAfter, 'executeAfter')
+  if (raw.by !== undefined) event.by = raw.by
+  if (raw.frozenUntil !== undefined) event.frozenUntil = toBigInt(raw.frozenUntil, 'frozenUntil')
+  if (raw.epoch !== undefined) event.epoch = raw.epoch
+  if (raw.blockNumber !== undefined) event.blockNumber = toBigInt(raw.blockNumber, 'blockNumber')
+  if (raw.blockHash !== undefined) event.blockHash = raw.blockHash
+  if (raw.transactionHash !== undefined) event.transactionHash = raw.transactionHash
+  if (raw.logIndex !== undefined) event.logIndex = Number(toBigInt(raw.logIndex, 'logIndex'))
+  return event
+}
+
+export type WatchVaultEventsParameters = {
+  /** Only events emitted by this smart account (recommended: without it any contract's events are delivered). */
+  account?: Address | undefined
+  onEvent: (event: VaultEvent) => void
+  onError?: ((error: Error) => void) | undefined
+}
+
+type SubscribingTransport = {
+  subscribe?: (args: {
+    params: unknown[]
+    onData: (data: unknown) => void
+    onError?: (error: unknown) => void
+  }) => Promise<{ unsubscribe: () => Promise<unknown> }>
+}
+
+/**
+ * Streams Guardian Vault alerts (`queued`, `cancelled`, `executed`, `invalidated`, `frozen`, `unfrozen`) through
+ * `eth_subscribe("vaultEvents", {account})`. Needs a WebSocket transport (viem `webSocket()`). Returns an unsubscribe
+ * function. Node support: **Phase 4**.
+ */
+export async function watchVaultEvents(client: AnyClient, args: WatchVaultEventsParameters): Promise<() => Promise<void>> {
+  const transport = client.transport as unknown as SubscribingTransport
+  if (typeof transport.subscribe !== 'function') {
+    throw new TypeError('watchVaultEvents needs a WebSocket transport (viem webSocket())')
+  }
+  const params: unknown[] = ['vaultEvents']
+  if (args.account) params.push({ account: checkedAddress(args.account, 'account') })
+  const subscription = await transport.subscribe({
+    params,
+    onData: (data) => {
+      const result = (data as { result?: RpcVaultEvent } | undefined)?.result
+      if (!result) return
+      try {
+        args.onEvent(parseVaultEvent(result))
+      } catch (e) {
+        args.onError?.(e as Error)
+      }
+    },
+    onError: (e) => args.onError?.(e as Error),
+  })
+  return async () => {
+    await subscription.unsubscribe()
+  }
 }
 
 // -----------------------------------------------------------------------------------------------------
@@ -249,6 +359,8 @@ export type XdevsActions = {
   getApprovals: (args: GetApprovalsParameters) => Promise<XdevsApproval[]>
   /** `xdevs_getVaultQueue` (Phase 4). */
   getVaultQueue: (args: GetVaultQueueParameters) => Promise<VaultAction[]>
+  /** `eth_subscribe("vaultEvents")` (Phase 4, WebSocket transport). */
+  watchVaultEvents: (args: WatchVaultEventsParameters) => Promise<() => Promise<void>>
   /** `xdevs_resolveName` (Phase 4). */
   resolveXnsName: (args: ResolveXnsNameParameters) => Promise<Address | null>
   /** `xdevs_reverseName` (Phase 4). */
@@ -282,6 +394,7 @@ export function xdevsActions<
     checkRecipient: (args) => checkRecipient(c, args),
     getApprovals: (args) => getApprovals(c, args),
     getVaultQueue: (args) => getVaultQueue(c, args),
+    watchVaultEvents: (args) => watchVaultEvents(c, args),
     resolveXnsName: (args) => resolveXnsName(c, args),
     reverseXnsName: (args) => reverseXnsName(c, args),
     getLocalFee: (args) => getLocalFee(c, args),

@@ -33,7 +33,7 @@ describe('xdevs_ actions', () => {
   it('decorator does not shadow any built-in viem public action', () => {
     const base = createPublicClient({ chain: xdevsLocal, transport: custom({ request: async () => null }) })
     const added = Object.keys(xdevsActions(base))
-    assert.equal(added.length, 10)
+    assert.equal(added.length, 11)
     for (const key of added) assert.equal(key in base, false, `${key} collides with viem`)
   })
 
