@@ -13,9 +13,15 @@ import { createServer, type AddressInfo } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createPublicClient, createWalletClient, getAddress, http, parseEther, type Abi, type Hex } from 'viem'
+import { createPublicClient, createWalletClient, defineChain, getAddress, http, parseEther, type Abi, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { xdevsLocal } from '@xdevs/sdk'
+// Defined with the indexer's own viem: the SDK's chain objects are typed against the workspace copy.
+const xdevsLocal = defineChain({
+  id: 7117,
+  name: 'xDEVS Chain Local',
+  nativeCurrency: { name: 'Test XDS', symbol: 'tXDS', decimals: 18 },
+  rpcUrls: { default: { http: ['http://127.0.0.1:8545'] } },
+})
 import { createPgliteDb, migrate } from '../src/db.ts'
 import { Indexer } from '../src/indexer.ts'
 import { HttpRpc, followNewHeads } from '../src/rpc.ts'

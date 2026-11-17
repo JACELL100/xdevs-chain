@@ -23,5 +23,24 @@ ignore = [
   # Re-check: when Malachite moves to a newer libp2p, or by 2027-01-31.
   "RUSTSEC-2026-0118",
   "RUSTSEC-2026-0119",
+  # Nov 2026 batch, same root cause as above (hickory-proto/-resolver 0.25 via libp2p-dns 0.44,
+  # fixed only in 0.26, which needs a newer libp2p than Malachite 0.8.2's =0.56.0):
+  # DNSSEC validation flaws (0504, 0505, 0511, 0512, 0514, 0530-0532, 0549-0551) are not reachable
+  # because libp2p-dns does not enable DNSSEC; the SVCB/HTTPS text-parsing and zone-lexer panics
+  # (0487, 0489, 0490) parse text formats the node never reads; 0491 (memory amplification from
+  # header record counts) is limited to answers from the system resolver for our own configured
+  # peer hostnames (validators dial /ip4 addresses today).
+  # Re-check: when Malachite moves to a newer libp2p, or by 2027-01-31.
+  "RUSTSEC-2026-0487", "RUSTSEC-2026-0489", "RUSTSEC-2026-0490", "RUSTSEC-2026-0491",
+  "RUSTSEC-2026-0504", "RUSTSEC-2026-0505", "RUSTSEC-2026-0511", "RUSTSEC-2026-0512",
+  "RUSTSEC-2026-0514", "RUSTSEC-2026-0530", "RUSTSEC-2026-0531", "RUSTSEC-2026-0532",
+  "RUSTSEC-2026-0549", "RUSTSEC-2026-0550", "RUSTSEC-2026-0551",
+  # RUSTSEC-2026-0534: libp2p-gossipsub 0.49.5 keeps unbounded backoff state for PRUNE messages
+  # about unknown topics (memory growth driven by a connected peer). Fixed in 0.50.1, which needs
+  # libp2p 0.57+, blocked by Malachite's libp2p =0.56.0 pin. Partial mitigation: the tx-gossip
+  # network caps peers (gossip.max_peers / max_inbound_peers) and bans flooding peers; the
+  # consensus network does not use gossipsub topics from strangers. KNOWN RISK for public nodes.
+  # Re-check: when Malachite moves to a newer libp2p, or by 2027-01-31.
+  "RUSTSEC-2026-0534",
 ]
 informational_warnings = ["unmaintained", "unsound", "notice"]

@@ -152,6 +152,10 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
+      # web job anvil: the wallet's passkey/e2e tests run against a local anvil chain.
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.9.0
       - run: npm ci --no-audit --no-fund
       - id: sdk
         name: "@xdevs/sdk: build, typecheck, test"
