@@ -25,6 +25,8 @@
 //! the same batch as the block; `TrieNodes` (Phase 2) caches Merkle-Patricia trie nodes
 //! for incremental state roots. Both are additive: [`crate::SCHEMA_VERSION`] is unchanged
 //! and backends create missing tables on open. `LogIndex` arrives in a later phase.
+// The table! declarations are laid out by hand (one line each); rustfmt versions disagree on them.
+#![rustfmt::skip::macros(table)]
 
 use crate::codec::{Decode, Encode};
 use xdevs_primitives::{
