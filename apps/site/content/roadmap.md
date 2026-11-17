@@ -38,7 +38,7 @@ Repository, Apache-2.0 license, contribution and security policies, and the arch
 
 Most of the on-chain part is already written and tested ahead of schedule: smart accounts with passkeys, social recovery, session keys, Guardian Vault, guardian freeze, XNS, Permit2Expiring, XDRC-20, paymasters, EIP-7702 and the XIP-0001 EOA lock (enforced by the node). Still to do:
 
-- `xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, XNS RPCs and `vaultEvents` subscriptions.
+- ~~`xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, XNS RPCs and `vaultEvents` subscriptions~~: built and tested (the `simulator` crate and the safety RPCs; the SDK, wallet and explorer use them).
 - A reference wallet: passkey sign-up, vault setup, simulation preview, approvals manager, sending to names.
 - An alert bot for vault events (email / Telegram).
 - Exit criteria: a new user creates an account with only a passkey; the stolen-key demo works end to end in a wallet; simulation flags an unlimited approval in plain language.
