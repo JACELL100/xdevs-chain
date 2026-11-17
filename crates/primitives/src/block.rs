@@ -24,7 +24,7 @@ pub struct Block {
     /// Transactions in execution order.
     pub body: Vec<TxEnvelope>,
     /// Consensus data (RLP), empty before the staking activation.
-    #[serde(default, skip_serializing_if = "Bytes::is_empty")]
+    #[serde(default, skip_serializing_if = "is_empty")]
     pub consensus: Bytes,
 }
 
@@ -82,6 +82,10 @@ impl Block {
     pub fn compute_transactions_root(&self) -> B256 {
         compute_transactions_root(&self.body)
     }
+}
+
+fn is_empty(b: &Bytes) -> bool {
+    b.is_empty()
 }
 
 /// Header `requests_hash` committing to a block's consensus data: the EIP-7685 empty
