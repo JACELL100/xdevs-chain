@@ -345,7 +345,7 @@ impl LocalNet {
         // conversion the node applies to the Staking set.
         let power = match &opts.staking {
             Some(st) => u64::try_from(st.stake / U256::from(10u64).pow(U256::from(18u64)))
-                .context("stake")?,
+                .map_err(|_| anyhow!("stake too large"))?,
             None => 1,
         };
         let mut genesis = Genesis::dev(DEV_CHAIN_ID);

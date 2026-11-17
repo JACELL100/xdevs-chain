@@ -5,9 +5,7 @@
 //! No Malachite types appear here. Everything is deterministic: validators are kept sorted
 //! by address, voting-power math is integer-only, and every encoding is fixed-length or RLP.
 
-use alloy_rlp::{
-    Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
-};
+use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use xdevs_primitives::{hex, keccak256, Bytes, B256};
@@ -586,17 +584,17 @@ impl From<&SignedVote> for WireVote {
 
 impl alloy_rlp::Encodable for SignedVote {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        WireVote::from(self).encode(out);
+        alloy_rlp::Encodable::encode(&WireVote::from(self), out);
     }
 
     fn length(&self) -> usize {
-        WireVote::from(self).length()
+        alloy_rlp::Encodable::length(&WireVote::from(self))
     }
 }
 
 impl alloy_rlp::Decodable for SignedVote {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let w = WireVote::decode(buf)?;
+        let w = <WireVote as alloy_rlp::Decodable>::decode(buf)?;
         let vote_type = match w.vote_type {
             1 => VoteType::Prevote,
             2 => VoteType::Precommit,

@@ -267,7 +267,7 @@ impl Inner {
         let height = evidence.first.height;
         let (head, _) = chain::latest_header(&*self.db)?;
         ensure!(
-            height >= 1 && height <= head + 1,
+            (1..=head + 1).contains(&height),
             "evidence height {height} is not at or below the next height {}",
             head + 1
         );
@@ -384,7 +384,7 @@ impl Inner {
         let mut evidence = Vec::with_capacity(data.evidence.len());
         for ev in &data.evidence {
             let h = ev.first.height;
-            if h == 0 || h >= height || height - h > MAX_EVIDENCE_AGE_BLOCKS {
+            if !(1..height).contains(&h) || height - h > MAX_EVIDENCE_AGE_BLOCKS {
                 return Ok(Err(format!("evidence height {h} out of range")));
             }
             if *ev != ev.canonical() {
