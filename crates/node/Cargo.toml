@@ -14,6 +14,7 @@ xdevs-crypto.workspace = true
 xdevs-storage.workspace = true
 xdevs-state.workspace = true
 xdevs-execution.workspace = true
+xdevs-simulator.workspace = true
 xdevs-genesis.workspace = true
 xdevs-mempool.workspace = true
 xdevs-rpc.workspace = true
