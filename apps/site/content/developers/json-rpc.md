@@ -94,6 +94,7 @@ Requests are limited to 5 MiB and responses to 32 MiB.
 |---|---|---|
 | `xdevs_getEoaLock(address, block?)` | [XIP-0001](/concepts/eoa-lock) lock state of an address | <span class="status ok">Implemented</span> |
 | `xdevs_getCommitCertificate(block)` | The validator signatures that finalized a block | <span class="status ok">Implemented</span> |
+| `xdevs_submitEvidence(raw)` | Submit double-sign evidence (two conflicting signed votes) for slashing | <span class="status ok">Implemented</span> |
 | `xdevs_validators(block?)` | Active validator set, power, uptime | <span class="status planned">Phase 3</span> |
 | `xdevs_epochInfo(block?)` | Current epoch and next transition | <span class="status planned">Phase 3</span> |
 | `xdevs_simulateTransaction(tx, block?)` | Asset changes and plain-language warnings before signing | <span class="status planned">Phase 4</span> |
@@ -136,6 +137,10 @@ curl -s http://127.0.0.1:8545 -H 'content-type: application/json' -d '{
 | `status` | `"unlocked"`, `"locked"` or `"sealed"` at the requested block |
 | `word` | Raw lock word (32 bytes) |
 | `delegatedTo` | EIP-7702 delegation target, or `null` if not delegated |
+
+### `xdevs_submitEvidence`
+
+Takes one parameter: the RLP of two conflicting votes signed by the same validator for the same height, round and vote type (`xdevs_consensus::ConflictingVotes`: `[[type, height, round, blockHash or empty for nil, validator, signature], [...]]`). The node verifies both Ed25519 signatures against the validator set of that height and that the evidence is at most 10,000 blocks old, then queues it: a block it proposes includes it and `Staking.slash` slashes and tombstones the validator (see [Validators](/operators/validators)). Returns the evidence hash (`keccak256` of the canonical RLP). Invalid evidence is refused with `-32602`. Nodes also collect the equivocations their consensus engine observes, without this call.
 
 ### `xdevs_getCommitCertificate`
 

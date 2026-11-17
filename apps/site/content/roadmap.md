@@ -29,7 +29,7 @@ Repository, Apache-2.0 license, contribution and security policies, and the arch
 - **Enclave testnet live** (17 Nov 2026): chain id 717171, 4 validators (Oracle Cloud, Hyderabad + Mumbai), public RPC/WebSocket through a Cloudflare Tunnel, explorer, wallet preview, network status page. <span class="status ok">Live</span>
 
 - System contracts in genesis (Staking, Governance, Treasury, FeeConfig, WXDS, the safety contracts, Multicall3, EntryPoint). <span class="status ok">Contracts written</span>
-- Epoch system calls, dynamic validator set, rewards, downtime and double-sign slashing.
+- Epoch system calls, dynamic validator set from the Staking contract, block rewards, downtime and double-sign slashing (evidence from consensus or `xdevs_submitEvidence`), behind the `stakingValidatorsBlock` activation height. <span class="status ok">Built</span> Tested on in-process networks (a 5th validator joins at the next epoch, an offline validator is jailed and removed, a double-signing validator is slashed); activation on Enclave is a coordinated upgrade still to schedule.
 - Public devnet on free cloud VMs, faucet, explorer v1 and indexer, chainlist registration, dashboards and alerts.
 - Release pipeline (x86_64 and ARM64) <span class="status ok">Built</span>, faucet <span class="status ok">Built</span>, this docs site <span class="status ok">Built</span>.
 - Exit criteria: anyone can add the devnet to MetaMask, use the faucet, deploy contracts and see them in the explorer; a new validator joins through `register()`; slashing proven with a deliberately double-signing node.

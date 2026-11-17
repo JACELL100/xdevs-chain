@@ -1,33 +1,80 @@
 # Validators
 
-<span class="status next">Phase 3 — coming</span>
+<span class="status next">Phase 3 — staking-driven set built, activation on Enclave pending</span>
 
-Running a validator on a **public** xDEVS network isn't possible yet, because no public network exists. This page describes what already works and what Phase 3 adds.
+xDEVS Chain validators run Tendermint-style BFT consensus (Malachite). The Enclave testnet (chain id 717171) started with 4 validators fixed in `genesis.json`. Phase 3 adds a **validator set chosen by stake** in the Staking system contract (`0x0000000000000000000000000000000000001000`): anyone with enough tXDS can register, the top validators by stake sign blocks, they earn block rewards, and misbehaviour is slashed.
+
+The node implements it behind an activation height (`stakingValidatorsBlock` in the genesis config). Until the network is upgraded at that height, the genesis validator set stays in force; the upgrade is announced with its block number.
+
+## How the set is chosen
+
+- Time is divided into **epochs** of `epochLength` blocks (3,600 on Enclave, about 2 hours at 2 s blocks). Block `B` is an epoch boundary when `B % 3600 == 0`.
+- At each boundary the node calls `Staking.onEpoch()`, which selects the **top 100 eligible validators by bonded stake** (ties: lower operator address first). That set signs blocks `B + 1` to `B + 3600`. It is fixed for the whole epoch on every node.
+- Voting power = bonded stake in **whole tXDS** (self-stake plus delegations).
+- Eligible = registered, not jailed, not tombstoned, self-stake ≥ 10,000 tXDS.
+- Jailing, tombstoning or exiting during an epoch removes the validator from the contract's active set at once (it stops earning), and from consensus at the next boundary.
+
+## Join as a validator
+
+1. **Run a node that follows the chain**, with a consensus key (see [Run a node](/operators/run-a-node) and the [bootstrap runbook](https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/bootstrap-validator.md)):
+   ```bash
+   xdevs-cli keygen --consensus --out consensus_key.json   # prints the Ed25519 public key
+   ```
+   In `config.toml`: `[validator] enabled = true`, `key_file = "consensus_key.json"`, and `[p2p] persistent_peers` pointing at the existing validators. A key that is not in the set yet is fine: the node follows the chain and starts signing when it is selected. Ask the validator operators to allow your IP on the consensus port (30333), if their firewall uses an allow-list.
+2. **Register** from the account that will operate the validator, sending at least the minimum self-stake (10,000 tXDS) as value:
+   ```bash
+   cast send 0x0000000000000000000000000000000000001000 \
+     "register(bytes32,uint16)" 0x<consensus public key, 32 bytes hex> 500 \
+     --value 10000ether --rpc-url https://rpc.xdevschain.tech --private-key $OPERATOR_KEY
+   ```
+   `500` is the commission in basis points (5%, at most 20%). One registration per operator address; the consensus key is bound to it for good.
+3. **Wait for the next epoch boundary.** Check your status with `getValidator(operator)` (`status`: 1 Candidate, 2 Active, 3 Jailed, 4 Tombstoned, 5 Exited) and the signatures in `xdevs_getCommitCertificate`.
+
+Others can `delegate(validator)` to you (minimum 1 tXDS); stake leaves through `undelegate` and a 1-day unbonding period (`withdrawUnbonded`).
+
+## Rewards
+
+From the activation on, every block credits a fixed **block reward** to the Staking contract (1 tXDS per block on Enclave, about 1.6% of the supply per year) and calls `recordParticipation`:
+
+- 5% of it goes to the block's proposer as a bonus;
+- the rest is split between the validators that signed the parent block, pro rata to voting power;
+- each validator keeps its commission, the remainder is shared by its delegators (the operator's self-stake included) pro rata to stake.
+
+Rewards accumulate in the contract; claim them with `claimRewards(validator)` (the operator also receives its commission there). Priority fees (tips) still go to the proposer's fee recipient; 80% of the base fee is burned and 20% goes to the Treasury.
+
+## Slashing
+
+| Offence | Detection | Penalty |
+|---|---|---|
+| **Double signing**: two different votes for the same height and round | Conflicting signed votes seen by consensus, or submitted with `xdevs_submitEvidence`; verified by the node and included in a block | 5% of bonded **and** unbonding stake, **tombstoned** (permanently removed) |
+| **Downtime**: signed fewer than 50% of the blocks it was expected to sign in a 10,000-block window | The previous block's commit certificate, recorded every block | 0.01% of bonded stake and **jailed for 10 minutes**; after that, the operator calls `unjail()` (self-stake must still be ≥ the minimum) |
+
+Never run the same consensus key on two machines: that is how validators double-sign. The node's double-sign guard protects one machine only.
+
+## Parameters (Enclave)
+
+| Parameter | Value | Changed by |
+|---|---|---|
+| Epoch length | 3,600 blocks | Network upgrade (fork) |
+| Block reward | 1 tXDS per block | Network upgrade (fork) |
+| Max active validators | 100 | Governance |
+| Minimum self-stake | 10,000 tXDS | Governance |
+| Minimum delegation | 1 tXDS | Governance |
+| Commission | 0–20%, at most 1 point per day | Governance |
+| Unbonding | 1 day | Governance |
+| Proposer bonus | 5% of the block reward | Governance |
+| Double-sign slash | 5% + tombstone | Governance |
+| Downtime | < 50% of 10,000 blocks → 0.01% + 10 min jail | Governance |
 
 ## What works today
 
-- **BFT consensus** (Tendermint-style, Malachite) between validators listed in `genesis.json`, with equal or configured voting power.
-- **Ed25519 consensus keys** in encrypted keystores (`xdevs-cli keygen --consensus`), a libp2p node identity (`--node-key`), and a persistent double-sign guard.
-- **Validator and full-node modes**, block sync for late joiners, and transaction gossip.
+- BFT consensus with stored commit certificates, Ed25519 consensus keys in encrypted keystores, a libp2p node identity and a persistent double-sign guard.
+- Validator and full-node modes, block sync for late joiners, transaction gossip.
+- The staking-driven validator set described above, tested on in-process networks (a 5th validator joining, an offline validator jailed, a double-signing validator slashed); live on Enclave after the activation upgrade ([runbook](https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/activate-staking-validators.md)).
 
 Try it locally: [Local multi-validator network](/operators/local-network).
-
-## What Phase 3 adds
-
-| Item | Description |
-|---|---|
-| Staking-driven validator set | Register with `register(consensusKey, commission)` plus a self-stake in the Staking contract (`0x…1000`). The active set (top N by stake) is recomputed every epoch (3,600 blocks) |
-| Rewards | Block rewards to validators that signed, with a 5% proposer bonus and a commission, then shared with delegators |
-| Slashing | Double-signing: 5% slash and a permanent ban (tombstone). Downtime below 50% of a 10,000-block window: a small slash and a 10-minute jail |
-| Delegation | Delegate and undelegate stake; 1-day unbonding on testnet |
-| Public devnet | 4 validators and a bootnode on cloud VMs, then community validators |
-| Operator docs | Bootstrapping a validator, key rotation, upgrades, halt diagnosis (runbooks) |
-
-The Staking, Governance, Treasury and FeeConfig contracts are already written and tested in Foundry; Phase 3 places them in genesis and has the node call them each block. Parameters (from the [plan](https://github.com/JACELL100/xdevs-chain/blob/main/xDEVS_Chain_Implementation_Plan.md), §33.1, subject to change): up to 100 validators on testnet, minimum self-stake 10,000 tXDS.
 
 ## Planned later
 
 - **Phase 5:** BLS aggregate signatures for commit certificates.
-- **Phase 6:** a long-lived public testnet with 20+ independent validators (no single operator above 1/3 of voting power), validator onboarding guide, remote signer and sentry-node support, snapshot sync.
-
-Want to run a validator on the public testnet? Watch the [GitHub repository](https://github.com/JACELL100/xdevs-chain) and [xdevs.in](https://xdevs.in) for the announcement.
+- **Phase 6:** a long-lived public testnet with 20+ independent validators (no single operator above 1/3 of voting power), a validator onboarding guide, remote signer and sentry-node support, snapshot sync.

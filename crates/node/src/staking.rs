@@ -56,7 +56,9 @@ pub fn decode_set(bytes: &[u8]) -> anyhow::Result<ValidatorSet> {
         bail!("stored validator set has {} bytes", bytes.len());
     }
     let validators = bytes
-        .chunks_exact(40)
+        .as_chunks::<40>()
+        .0
+        .iter()
         .map(|c| {
             let mut key = [0u8; 32];
             key.copy_from_slice(&c[..32]);

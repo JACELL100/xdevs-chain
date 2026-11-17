@@ -6,7 +6,7 @@ xDEVS Chain is an EVM-equivalent, Proof-of-Stake Layer 1 written in Rust, built 
 
 The native coin is **XDS** (testnet: **tXDS**, 18 decimals; the smallest unit is the "dev"). Names end in `.xdevs` (XNS, the xDEVS Name Service).
 
-> **Status: the Enclave public testnet is live (chain id 717171, since 17 Nov 2026).** Phase 2 (multi-validator BFT network) is complete and Phase 3 has started. Validators reach BFT consensus with Malachite, survive one validator going down, halt safely with two down and resume, and late nodes sync from genesis. Findings from an internal security review (denial-of-service in proposal streaming, gossip and RPC) are fixed and covered by tests; an external audit is still required before mainnet. The system and user-safety contracts, the TypeScript SDK and the faucet are built and tested. Staking-driven validators, the faucet and the explorer API are the next Phase 3 steps. Testnet tokens have no value.
+> **Status: the Enclave public testnet is live (chain id 717171, since 17 Nov 2026).** Phase 2 (multi-validator BFT network) is complete and Phase 3 has started. Validators reach BFT consensus with Malachite, survive one validator going down, halt safely with two down and resume, and late nodes sync from genesis. Findings from an internal security review (denial-of-service in proposal streaming, gossip and RPC) are fixed and covered by tests; an external audit is still required before mainnet. The system and user-safety contracts, the TypeScript SDK and the faucet are built and tested. The staking-driven validator set (epoch system calls, rewards, downtime and double-sign slashing) is built and tested behind an activation height; switching Enclave over is a coordinated upgrade still to schedule. Testnet tokens have no value.
 
 ## Why xDEVS Chain?
 
@@ -44,7 +44,7 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | DoS hardening of consensus streaming, gossip and RPC (from the Phase 2 security review) | ✅ Built and tested |
 | 24-hour soak test of a multi-validator network | 📋 Planned on the testnet VMs (5-hour soaks run in CI) |
 | Public testnet (Enclave, 4 validators) | ✅ Live since 17 Nov 2026 |
-| Staking-driven validator set | 📋 Next (Phase 3) |
+| Staking-driven validator set (epochs, rewards, downtime and double-sign slashing) | ✅ Built and tested on local networks; Enclave activation pending (Phase 3) |
 | Transaction simulation and recipient-check RPCs, reference wallet | 📋 Planned (Phase 4) |
 | Encrypted mempool, parallel execution, local fee markets | 📋 Planned (Phase 5) |
 | Light-client bridges | 📋 Planned (Phase 7) |
@@ -66,7 +66,7 @@ Works and is covered by tests (unit tests per crate plus in-process end-to-end t
 
 Not done yet:
 
-- Staking-contract-driven validator sets and slashing (Phase 3; Phase 2 uses a static validator set from genesis).
+- The staking-driven validator set is not active on Enclave yet: it is enabled by `stakingValidatorsBlock` in a coordinated upgrade ([runbook](docs/runbooks/activate-staking-validators.md)); until then the genesis validator set signs. The block reward is a fixed amount per block (the plan's 7% → 2% inflation curve is not implemented).
 - Filter methods (`eth_newFilter`, `eth_getFilterChanges`, ...), `eth_getProof`, and `debug_` / `trace_` / `txpool_` namespaces.
 - No pending block: the `pending` tag means `latest`, except that `eth_getTransactionCount` with `pending` counts pool transactions.
 - Block and receipt pruning (all blocks are kept) and JSON log output.
