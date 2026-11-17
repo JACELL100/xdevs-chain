@@ -22,7 +22,7 @@ pub use app::{BlockOrigin, ConsensusApp, ConsensusEngine, Validity};
 pub use config::{ConsensusTimeouts, EngineConfig, P2pConfig};
 pub use engine::{EngineKeys, EngineStatus, MalachiteEngine};
 pub use types::{
-    parts_sign_bytes, proposal_sign_bytes, vote_sign_bytes, CertificateError, CommitCertificate,
-    CommitSig, ConflictingVotes, Evidence, SignedVote, Validator, ValidatorAddress, ValidatorKey,
-    ValidatorSet, ValidatorSetError, VoteType,
+    parts_sign_bytes, proposal_sign_bytes, vote_sign_bytes, BlockConsensusData, CertificateError,
+    CommitCertificate, CommitSig, ConflictingVotes, Evidence, SignedVote, Validator,
+    ValidatorAddress, ValidatorKey, ValidatorSet, ValidatorSetError, VoteType,
 };

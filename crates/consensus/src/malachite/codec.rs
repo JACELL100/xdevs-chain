@@ -6,7 +6,8 @@
 //! string. Vote extensions are unsupported in Phase 2 and are rejected on encode.
 //!
 //! Blocks (proposal `Data` chunks and sync `value_bytes`) use [`encode_block`]: the plain
-//! RLP list `[header, [tx_2718, ...]]`.
+//! RLP list `[header, [tx_2718, ...]]`, plus a third element (the block's consensus data)
+//! for blocks from the staking activation on (Phase 3).
 
 use super::context::{BlockValue, Height, Proposal, ProposalPart, Vote, XdevsContext};
 use super::streaming::MAX_STREAM_ID_LEN;
@@ -846,33 +847,68 @@ pub(crate) fn to_malachite_commit(c: &crate::CommitCertificate) -> CommitCertifi
 // Blocks
 // ---------------------------------------------------------------------------
 
-#[derive(RlpEncodable, RlpDecodable)]
+#[derive(RlpEncodable)]
 struct WBlock {
     header: Header,
     txs: Vec<Bytes>,
 }
 
-/// `rlp([header, [tx_2718, ...]])`: the block bytes streamed in `Data` parts and served
-/// by sync.
-pub(crate) fn encode_block(block: &Block) -> Vec<u8> {
-    alloy_rlp::encode(WBlock {
-        header: block.header.clone(),
-        txs: block
-            .body
-            .iter()
-            .map(|tx| Bytes::from(tx.encoded_2718()))
-            .collect(),
-    })
+/// A block with consensus data (Phase 3): one more list element.
+#[derive(RlpEncodable)]
+struct WBlockWithConsensus {
+    header: Header,
+    txs: Vec<Bytes>,
+    consensus: Bytes,
 }
 
-/// Inverse of [`encode_block`]; rejects trailing bytes, non-canonical txs and a body
-/// that does not match the header's `transactions_root`. The block hash is the header
-/// hash, so only with this check does `(height, hash)` identify one block: a block
+/// `rlp([header, [tx_2718, ...]])`, or `rlp([header, [tx_2718, ...], consensus])` for a
+/// block with consensus data: the block bytes streamed in `Data` parts and served by sync.
+/// Blocks without consensus data encode exactly as before Phase 3.
+pub(crate) fn encode_block(block: &Block) -> Vec<u8> {
+    let header = block.header.clone();
+    let txs = block
+        .body
+        .iter()
+        .map(|tx| Bytes::from(tx.encoded_2718()))
+        .collect();
+    if block.consensus.is_empty() {
+        alloy_rlp::encode(WBlock { header, txs })
+    } else {
+        alloy_rlp::encode(WBlockWithConsensus {
+            header,
+            txs,
+            consensus: block.consensus.clone(),
+        })
+    }
+}
+
+/// Inverse of [`encode_block`]; rejects trailing bytes, non-canonical txs, an empty
+/// third element, a body that does not match the header's `transactions_root` and
+/// consensus data that does not match its `requests_hash`. The block hash is the header
+/// hash, so only with these checks does `(height, hash)` identify one block: a block
 /// that passes can be stored and served under its hash.
 pub(crate) fn decode_block(bytes: &[u8]) -> Result<Block, CodecError> {
-    let w: WBlock = alloy_rlp::decode_exact(bytes)?;
-    let body = w
-        .txs
+    let mut buf = bytes;
+    let list = alloy_rlp::Header::decode(&mut buf)?;
+    if !list.list {
+        return Err(CodecError::new("block is not an RLP list"));
+    }
+    if buf.len() != list.payload_length {
+        return Err(CodecError::new("block length mismatch / trailing bytes"));
+    }
+    let mut payload = buf;
+    let header = Header::decode(&mut payload)?;
+    let txs = Vec::<Bytes>::decode(&mut payload)?;
+    let consensus = if payload.is_empty() {
+        Bytes::new()
+    } else {
+        let c = Bytes::decode(&mut payload)?;
+        if c.is_empty() || !payload.is_empty() {
+            return Err(CodecError::new("non-canonical block consensus data"));
+        }
+        c
+    };
+    let body = txs
         .iter()
         .map(|raw| {
             let mut buf = &raw[..];
@@ -884,16 +920,23 @@ pub(crate) fn decode_block(bytes: &[u8]) -> Result<Block, CodecError> {
             Ok(tx)
         })
         .collect::<Result<_, _>>()?;
-    let block = Block::new(w.header, body);
-    if !body_matches_header(&block) {
+    let block = Block::with_consensus(header, body, consensus);
+    if block.header.transactions_root != block.compute_transactions_root() {
         return Err(CodecError::new("transactions root does not match the body"));
+    }
+    if !block.consensus_matches_header() {
+        return Err(CodecError::new(
+            "requests hash does not match the consensus data",
+        ));
     }
     Ok(block)
 }
 
-/// `header.transactions_root` commits to the body.
+/// `header.transactions_root` commits to the body and `header.requests_hash` to the
+/// consensus data (Phase 3).
 pub(crate) fn body_matches_header(block: &Block) -> bool {
     block.header.transactions_root == block.compute_transactions_root()
+        && block.consensus_matches_header()
 }
 
 #[cfg(test)]
@@ -1108,6 +1151,46 @@ mod tests {
         assert_eq!(back.hash(), block.hash());
         assert_eq!(back, block);
         assert!(decode_block(&bytes[..bytes.len() - 1]).is_err());
+    }
+
+    /// Phase 3: a block with consensus data round-trips (one more list element bound by
+    /// `requests_hash`); a mismatching commitment or an empty third element is refused.
+    #[test]
+    fn block_with_consensus_data_roundtrip() {
+        let consensus = Bytes::from_static(b"consensus data");
+        let header = Header {
+            number: 4,
+            requests_hash: Some(xdevs_primitives::consensus_data_hash(&consensus)),
+            ..Default::default()
+        };
+        let block = Block::with_consensus(header.clone(), vec![], consensus);
+        let bytes = encode_block(&block);
+        assert_ne!(bytes, encode_block(&Block::new(header.clone(), vec![])));
+        let back = decode_block(&bytes).unwrap();
+        assert_eq!(back, block);
+        assert!(decode_block(&bytes[..bytes.len() - 1]).is_err());
+        let mut trailing = bytes.clone();
+        trailing.push(0x80);
+        assert!(decode_block(&trailing).is_err());
+
+        // Same header, other data: refused.
+        let other = Block::with_consensus(header.clone(), vec![], Bytes::from_static(b"x"));
+        let err = decode_block(&encode_block(&other)).unwrap_err();
+        assert!(err.to_string().contains("requests hash"), "{err}");
+
+        // An explicit empty third element is not canonical.
+        #[derive(RlpEncodable)]
+        struct Three {
+            header: Header,
+            txs: Vec<Bytes>,
+            consensus: Bytes,
+        }
+        let raw = alloy_rlp::encode(Three {
+            header,
+            txs: vec![],
+            consensus: Bytes::new(),
+        });
+        assert!(decode_block(&raw).is_err());
     }
 
     /// Finding 5: a body that does not match the header's transactions root is refused
