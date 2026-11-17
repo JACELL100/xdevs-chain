@@ -1,7 +1,7 @@
 // Direct node reads (viem). Used for the live head, the commit certificate, validators, EOA lock, XNS reverse lookup,
 // token metadata, and as the fallback for every view when the indexer API is down. Results use the API's shapes.
 
-import { createClient, getAddress, http, parseAbi, type Client, type Hex, type Block, type Transaction, type TransactionReceipt } from 'viem'
+import { createClient, encodeFunctionData, getAddress, http, maxUint256, parseAbi, toHex, type Client, type Hex, type Block, type Transaction, type TransactionReceipt } from 'viem'
 import {
   getBalance,
   getBlock,
@@ -15,10 +15,10 @@ import {
   getTransactionReceipt,
   readContract,
 } from 'viem/actions'
-import { getCommit, getValidators, predeploys, XdevsMethodNotAvailableError } from '@xdevs/sdk'
+import { getApprovals, getCommit, getValidators, getVaultQueue, predeploys, XdevsMethodNotAvailableError, type XdevsApproval } from '@xdevs/sdk'
 import { config } from './config.ts'
 import { decodeLog, vaultAbi } from './decode.ts'
-import type { AddressSummary, BlockDetail, BlockSummary, CommitDetail, DecodedLog, TokenInfo, TokenPage, TokenTransfer, TxDetail, TxSummary, ValidatorRow, ValidatorSet } from './types.ts'
+import type { AddressSummary, Approval, BlockDetail, BlockSummary, CommitDetail, DecodedLog, TokenInfo, TokenPage, TokenTransfer, TxDetail, TxSummary, ValidatorRow, ValidatorSet, VaultAction } from './types.ts'
 
 const BURN_BPS = 8000n
 const hx = (v: bigint | number) => `0x${BigInt(v).toString(16)}`
@@ -174,6 +174,81 @@ export async function rpcBlock(id: string): Promise<BlockDetail | null> {
     ...summary,
     transactions: b.transactions.map((t) => toTxSummary(t as Transaction, ts, byHash.get((t as Transaction).hash) ?? null)),
     commit: null,
+  }
+}
+
+const revokeAbi = parseAbi([
+  'function approve(address spender, uint256 amount) returns (bool)',
+  'function lockdown((address token, address spender)[] approvals)',
+])
+
+type FungibleApproval = XdevsApproval & { kind: 'erc20' | 'xdrc20' | 'permit2' }
+
+/**
+ * `xdevs_getApprovals` (Phase 4 node): live fungible approvals found in the node's bounded log window (the indexer has
+ * the full history). `null` when the node does not serve it.
+ */
+export async function rpcApprovals(owner: string): Promise<Approval[] | null> {
+  let items: XdevsApproval[]
+  try {
+    items = await getApprovals(rpcClient().base, { owner: getAddress(owner) })
+  } catch (e) {
+    if (e instanceof XdevsMethodNotAvailableError) return null
+    throw e
+  }
+  const now = Math.floor(Date.now() / 1000)
+  return items
+    .filter((i): i is FungibleApproval => i.kind === 'erc20' || i.kind === 'xdrc20' || i.kind === 'permit2')
+    .map((i) => {
+      const amount = i.rawAmount ?? toHex(i.amount === 'unlimited' ? maxUint256 : BigInt(i.amount))
+      const permit2 = i.kind === 'permit2'
+      return {
+        kind: i.kind,
+        token: { address: i.token, name: null, symbol: i.symbol ?? null, decimals: null, known: false },
+        spender: i.spender,
+        amount,
+        unlimited: i.unlimited ?? i.amount === 'unlimited',
+        expiry: i.expires,
+        expired: i.expires !== null && i.expires <= now,
+        remaining: amount,
+        blockNumber: i.lastUpdatedBlock ? Number(i.lastUpdatedBlock) : 0,
+        txHash: i.transactionHash ?? '',
+        revoke: permit2
+          ? {
+              to: predeploys.PERMIT2_EXPIRING,
+              data: encodeFunctionData({ abi: revokeAbi, functionName: 'lockdown', args: [[{ token: i.token, spender: i.spender }]] }),
+              description: 'lockdown([(token, spender)])',
+            }
+          : {
+              to: i.token,
+              data: encodeFunctionData({ abi: revokeAbi, functionName: 'approve', args: [i.spender, 0n] }),
+              description: 'approve(spender, 0)',
+            },
+      }
+    })
+}
+
+/** `xdevs_getVaultQueue` (Phase 4 node): pending Guardian Vault actions read from the account. `null` when not served. */
+export async function rpcVaultQueue(account: string): Promise<VaultAction[] | null> {
+  try {
+    const items = await getVaultQueue(rpcClient().base, { vault: getAddress(account) })
+    return items.map((v) => ({
+      account: v.account ?? getAddress(account),
+      id: toHex(v.id),
+      target: v.target,
+      value: toHex(v.value),
+      data: v.data,
+      executeAfter: Number(v.executeAfter),
+      status: v.status ?? 'queued',
+      queuedBlock: 0,
+      queuedTx: '',
+      cancelledBy: null,
+      finalBlock: null,
+      finalTx: null,
+    }))
+  } catch (e) {
+    if (e instanceof XdevsMethodNotAvailableError) return null
+    throw e
   }
 }
 

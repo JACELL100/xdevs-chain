@@ -58,7 +58,9 @@ export async function checkRecipient(
   try {
     const r = await sdkCheckRecipient(client, { from, to })
     const lookAlikeOf = [...new Set([...r.lookAlikeOf, ...localLookAlikes].map((a) => getAddress(a)))]
-    return { firstTime: r.firstTime, lookAlikeOf, name: r.name, isContract: r.isContract, source: 'node' }
+    // The node only scans a bounded window of token transfers: the wallet's own history also counts.
+    const firstTime = r.firstTime && !history.some((h) => h.toLowerCase() === to.toLowerCase())
+    return { firstTime, lookAlikeOf, name: r.name, isContract: r.isContract, source: 'node' }
   } catch (e) {
     if (!notAvailable(e)) throw e
   }

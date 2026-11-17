@@ -186,6 +186,9 @@ export async function loadApprovals(a: string, includeExpired: boolean, signal?:
   }
   const r = await viaApi(() => api.approvals(a, includeExpired, signal))
   if (r && r !== 'notfound') return r
+  // Indexer down: the node's xdevs_getApprovals (bounded window, live allowances only).
+  const items = await viaRpc(() => rpc.rpcApprovals(a)).catch(() => null)
+  if (items) return { items, live: true }
   return { items: [], live: false, unavailable: true }
 }
 
@@ -197,6 +200,9 @@ export async function loadVaultQueue(a: string, cursor: string | null, all: bool
   }
   const r = await viaApi(() => api.vaultQueue(a, { cursor, status: all ? 'all' : 'open' }, signal))
   if (r && r !== 'notfound') return r
+  // Indexer down: pending actions straight from the account via the node's xdevs_getVaultQueue (no history).
+  const items = await viaRpc(() => rpc.rpcVaultQueue(a)).catch(() => null)
+  if (items) return { items, nextCursor: null }
   return { items: [], nextCursor: null, unavailable: true }
 }
 

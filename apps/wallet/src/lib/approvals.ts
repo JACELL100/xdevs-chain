@@ -125,7 +125,8 @@ export async function listApprovals(
   if (o.apiUrl) return approvalsFromApi(o.apiUrl, owner)
   try {
     const items = await sdkGetApprovals(client, { owner })
-    return items.map((i) => ({
+    // Operator (NFT) approvals are not managed by this screen.
+    return items.filter((i) => i.kind === 'erc20' || i.kind === 'xdrc20' || i.kind === 'permit2').map((i) => ({
       kind: i.kind === 'permit2' ? 'permit2' : i.kind === 'xdrc20' ? 'xdrc20' : 'erc20',
       token: i.token,
       symbol: i.symbol ?? null,
