@@ -21,7 +21,9 @@ use xdevs_primitives::{
     },
     set_compat_header_fields, Address, Block, Bytes, Header, Log, LogData, B256, U256,
 };
-use xdevs_rpc::{convert, types::*, BackendResult, RpcBackend, RpcBackendError, RpcServerConfig};
+use xdevs_rpc::{
+    convert, types::*, BackendResult, RpcBackend, RpcBackendError, RpcServerConfig, RpcServerHandle,
+};
 
 const HEAD: u64 = 100;
 const NOW: u64 = 1_700_000_000;
@@ -338,7 +340,8 @@ impl RpcBackend for Mock {
     }
 }
 
-async fn start(config: RpcServerConfig) -> (Arc<Mock>, HttpClient) {
+/// Start a server over a fresh mock. Keep the returned handle alive: dropping it stops the server.
+async fn start(config: RpcServerConfig) -> (Arc<Mock>, HttpClient, RpcServerHandle) {
     let mut config = config;
     config.http = SocketAddr::from(([127, 0, 0, 1], 0));
     let mock = Arc::new(Mock::new());
@@ -349,7 +352,7 @@ async fn start(config: RpcServerConfig) -> (Arc<Mock>, HttpClient) {
         .request_timeout(Duration::from_secs(10))
         .build(format!("http://{}", handle.local_addr))
         .unwrap();
-    (mock, client)
+    (mock, client, handle)
 }
 
 async fn ok(client: &HttpClient, method: &str, params: Vec<Value>) -> Value {
@@ -368,7 +371,7 @@ async fn err(client: &HttpClient, method: &str, params: Vec<Value>) -> (i32, Str
 
 #[tokio::test]
 async fn check_recipient_name_facts_and_advice() {
-    let (_, client) = start(RpcServerConfig::default()).await;
+    let (_, client, _server) = start(RpcServerConfig::default()).await;
     let r = ok(&client, "xdevs_checkRecipient", vec![json!("Alice")]).await;
     assert_eq!(r["address"], json!(ALICE));
     assert_eq!(r["facts"]["resolvedFrom"], "alice.xdevs");
@@ -395,7 +398,7 @@ async fn check_recipient_name_facts_and_advice() {
 
 #[tokio::test]
 async fn check_recipient_flags_lookalikes_and_poisoning() {
-    let (_, client) = start(RpcServerConfig::default()).await;
+    let (_, client, _server) = start(RpcServerConfig::default()).await;
     let r = ok(
         &client,
         "xdevs_checkRecipient",
@@ -431,7 +434,7 @@ async fn check_recipient_flags_lookalikes_and_poisoning() {
 
 #[tokio::test]
 async fn check_recipient_names_errors() {
-    let (_, client) = start(RpcServerConfig::default()).await;
+    let (_, client, _server) = start(RpcServerConfig::default()).await;
     // `a1ice` has the skeleton of the registered `alice`: not registrable, not resolvable.
     let (code, msg) = err(&client, "xdevs_checkRecipient", vec![json!("a1ice.xdevs")]).await;
     assert_eq!(code, -32602);
@@ -468,7 +471,7 @@ async fn check_recipient_names_errors() {
 
 #[tokio::test]
 async fn get_approvals_checks_live_allowances() {
-    let (mock, client) = start(RpcServerConfig::default()).await;
+    let (mock, client, _server) = start(RpcServerConfig::default()).await;
     let r = ok(
         &client,
         "xdevs_getApprovals",
@@ -504,7 +507,7 @@ async fn get_approvals_checks_live_allowances() {
         max_logs_range: 10,
         ..Default::default()
     };
-    let (_, small) = start(config).await;
+    let (_, small, _small_server) = start(config).await;
     let (code, msg) = err(
         &small,
         "xdevs_getApprovals",
@@ -529,7 +532,7 @@ async fn get_approvals_checks_live_allowances() {
 
 #[tokio::test]
 async fn get_vault_queue_reads_pending_actions() {
-    let (_, client) = start(RpcServerConfig::default()).await;
+    let (_, client, _server) = start(RpcServerConfig::default()).await;
     let r = ok(&client, "xdevs_getVaultQueue", vec![json!(ACCOUNT)]).await;
     let items = r.as_array().unwrap();
     assert_eq!(
@@ -557,7 +560,7 @@ async fn get_vault_queue_reads_pending_actions() {
 
 #[tokio::test]
 async fn simulate_transaction_plumbing() {
-    let (_, client) = start(RpcServerConfig::default()).await;
+    let (_, client, _server) = start(RpcServerConfig::default()).await;
     let tx = json!({"from": OWNER, "to": TOKEN, "data": "0x"});
     // The mock backend has no simulator.
     let (code, msg) = err(&client, "xdevs_simulateTransaction", vec![tx]).await;
