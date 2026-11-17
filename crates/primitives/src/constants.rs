@@ -38,6 +38,9 @@ pub const BPS_DENOMINATOR: u16 = 10_000;
 /// Maximum encoded transaction size accepted by the mempool (128 KiB, plan §13.1).
 pub const MAX_TX_SIZE: usize = 128 * 1024;
 
+/// Default staking epoch length in blocks (3,600 = 2 h at 2 s blocks, plan §11.5).
+pub const DEFAULT_EPOCH_LENGTH: u64 = 3_600;
+
 /// Maximum `extra_data` length in a header (Ethereum rule).
 pub const MAX_EXTRA_DATA_SIZE: usize = 32;
 
@@ -58,6 +61,10 @@ pub const SYSTEM_ADDRESS: Address = address!("0xffffffffffffffffffffffffffffffff
 
 /// Client version string reported by `web3_clientVersion` and put in dev-mode `extra_data`.
 pub const CLIENT_VERSION: &str = concat!("xdevs/v", env!("CARGO_PKG_VERSION"));
+
+/// Domain byte of the consensus data commitment in `requests_hash`
+/// (see [`crate::consensus_data_hash`]).
+pub const CONSENSUS_DATA_DOMAIN: u8 = 0x78;
 
 /// EIP-7685 `requests_hash` of a block with no requests: `sha256("")`.
 pub const EMPTY_REQUESTS_HASH: alloy_primitives::B256 =

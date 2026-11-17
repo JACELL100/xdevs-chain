@@ -19,8 +19,8 @@ pub mod xip0001;
 
 pub use account::{Account, AccountInfo};
 pub use block::{
-    compute_logs_bloom, compute_receipts_root, compute_transactions_root, set_compat_header_fields,
-    Block, SealedHeader,
+    compute_logs_bloom, compute_receipts_root, compute_transactions_root, consensus_data_hash,
+    set_compat_header_fields, Block, SealedHeader,
 };
 pub use config::{BaseFeeParams, ChainConfig};
 pub use tx::{RecoveredTx, TxLocation};
