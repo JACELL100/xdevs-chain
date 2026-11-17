@@ -7926,6 +7926,7 @@ name = "xdevs-testutils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ed25519-consensus",
  "jsonrpsee",
  "serde_json",
  "tempfile",
@@ -7934,6 +7935,7 @@ dependencies = [
  "tracing-subscriber",
  "xdevs-consensus",
  "xdevs-crypto",
+ "xdevs-execution",
  "xdevs-genesis",
  "xdevs-node",
  "xdevs-primitives",

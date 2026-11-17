@@ -13,6 +13,7 @@ repository.workspace = true
 xdevs-node.workspace = true
 xdevs-consensus.workspace = true
 xdevs-crypto.workspace = true
+xdevs-execution.workspace = true
 xdevs-genesis.workspace = true
 xdevs-primitives.workspace = true
 anyhow.workspace = true
@@ -24,4 +25,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+ed25519-consensus.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
