@@ -391,6 +391,22 @@ describe('configuration and operator key', () => {
     assert.throws(() => loadConfig({ OPERATOR_MIN_BALANCE: '2', OPERATOR_LOW_BALANCE: '1' }), /OPERATOR_LOW_BALANCE/)
   })
 
+  it('the deployment env example (deploy/bundler/bundler.env.example) is valid', () => {
+    const text = readFileSync(join(import.meta.dirname, '..', '..', '..', 'deploy', 'bundler', 'bundler.env.example'), 'utf8')
+    const env: Record<string, string> = {}
+    for (const line of text.split(/\r?\n/)) {
+      const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim())
+      if (m) env[m[1]!] = m[2]!
+    }
+    const c = loadConfig(env)
+    assert.equal(c.expectedChainId, 717171)
+    assert.equal(c.trustProxy, 'cloudflare')
+    assert.deepEqual(c.corsOrigins, ['https://wallet.xdevschain.tech'])
+    assert.equal(c.metricsAccess, 'local')
+    assert.equal(c.dataDir, '/var/lib/xdevs-bundler')
+    assert.ok(!/PRIVATE_KEY=0x/.test(text), 'no key in the env file')
+  })
+
   it('decrypts a Foundry (cast) scrypt keystore and refuses a wrong password', () => {
     const ks = JSON.parse(readFileSync(FIXTURE, 'utf8'))
     assert.equal(decryptKeystore(ks, 'correct horse'), FIXTURE_KEY)

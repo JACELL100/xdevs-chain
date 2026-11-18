@@ -77,6 +77,8 @@ export type BundlerConfig = {
   sendPerMinute: number
   estimatePerMinute: number
   maxConcurrentSimulations: number
+  /** `local`: /metrics only for direct loopback scrapes (not through the tunnel); `all`: anyone. */
+  metricsAccess: 'local' | 'all'
   // --- persistence / logs
   dataDir?: string
   logLevel: 'debug' | 'info' | 'warn' | 'error' | 'silent'
@@ -130,6 +132,7 @@ export const DEFAULT_CONFIG: BundlerConfig = {
   sendPerMinute: 30,
   estimatePerMinute: 60,
   maxConcurrentSimulations: 4,
+  metricsAccess: 'local',
   logLevel: 'info',
 }
 
@@ -231,9 +234,11 @@ export function loadConfig(env: Env): BundlerConfig {
     sendPerMinute: int(env, 'SEND_PER_MINUTE', d.sendPerMinute, 1),
     estimatePerMinute: int(env, 'ESTIMATE_PER_MINUTE', d.estimatePerMinute, 1),
     maxConcurrentSimulations: int(env, 'MAX_CONCURRENT_SIMULATIONS', d.maxConcurrentSimulations, 1),
+    metricsAccess: (env.METRICS_ACCESS || d.metricsAccess) as BundlerConfig['metricsAccess'],
     dataDir: env.DATA_DIR || undefined,
     logLevel,
   }
+  if (!['local', 'all'].includes(cfg.metricsAccess)) throw new Error('METRICS_ACCESS must be local|all')
   if (cfg.banSlack < cfg.throttlingSlack) throw new Error('BAN_SLACK must be >= THROTTLING_SLACK')
   if (cfg.operatorLowBalance < cfg.operatorMinBalance) throw new Error('OPERATOR_LOW_BALANCE must be >= OPERATOR_MIN_BALANCE')
   return cfg

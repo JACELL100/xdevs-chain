@@ -94,6 +94,7 @@ describe('bundler HTTP server', () => {
     assert.equal(r.error.code, RpcCodes.internal)
     assert.doesNotMatch(r.error.message, /10\.0\.0\.5|secret/)
     assert.equal((await fetch(`${url}/health`)).status, 503)
+    assert.equal((await fetch(`${url}/metrics`, { headers: { 'cf-connecting-ip': '203.0.113.9' } })).status, 404, 'not through the tunnel')
     const metrics = await (await fetch(`${url}/metrics`)).text()
     assert.match(metrics, /bundler_rpc_requests_total\{method="other"\} 1/)
     const info = await J(fetch(url))

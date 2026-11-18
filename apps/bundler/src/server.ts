@@ -22,6 +22,7 @@ export type ServerOptions = Partial<
     | 'rateLimitBurst'
     | 'sendPerMinute'
     | 'estimatePerMinute'
+    | 'metricsAccess'
   >
 > & { logger?: Logger }
 
@@ -114,6 +115,7 @@ export function createBundlerServer(bundler: BundlerLike, o: ServerOptions = {})
         return json(res, h.ok ? 200 : 503, h.body)
       }
       if (path === '/metrics') {
+        if (cfg.metricsAccess === 'local' && !isDirectLocal(req)) return json(res, 404, { error: 'not found' })
         res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4', 'cache-control': 'no-store' })
         res.end(bundler.metricsText())
         return
@@ -204,6 +206,13 @@ const KNOWN_METHODS = new Set([
   'eth_getUserOperationReceipt',
   'eth_getUserOperationByHash',
 ])
+
+/** A loopback peer that is not relaying a proxied request (cloudflared adds CF-Connecting-IP / X-Forwarded-For). */
+function isDirectLocal(req: IncomingMessage): boolean {
+  const peer = req.socket.remoteAddress ?? ''
+  const loopback = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1'
+  return loopback && !req.headers['cf-connecting-ip'] && !req.headers['x-forwarded-for'] && !req.headers['cf-ray']
+}
 
 function stripUndefined<T extends object>(o: T): Partial<T> {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>
