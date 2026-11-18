@@ -1,39 +1,65 @@
-// Entry point: `BUNDLER_PRIVATE_KEY=0x… RPC_URL=http://127.0.0.1:8545 node src/index.ts`
-// DEV ONLY: single operator, no ERC-7562 rules, no mempool. Bind to localhost; never expose publicly.
+// Entry point: `node src/index.ts` with the configuration in the environment (see README / deploy/bundler/bundler.env.example).
 import type { AddressInfo } from 'node:net'
-import type { Address, Hex } from 'viem'
 import { Bundler } from './bundler.ts'
+import { loadConfig, loadOperatorKey } from './config.ts'
+import { createLogger } from './log.ts'
 import { createBundlerServer } from './server.ts'
 
 export { Bundler } from './bundler.ts'
 export { createBundlerServer } from './server.ts'
+export { loadConfig } from './config.ts'
 
 export async function startBundler(env: Record<string, string | undefined> = process.env) {
-  const privateKey = env.BUNDLER_PRIVATE_KEY as Hex | undefined
-  if (!privateKey || !/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
-    throw new Error('BUNDLER_PRIVATE_KEY (0x + 64 hex) is required: a funded key of the dev chain')
-  }
+  const cfg = loadConfig(env)
+  const privateKey = loadOperatorKey(env)
+  const log = createLogger(cfg.logLevel)
   const rpcUrl = env.RPC_URL ?? 'http://127.0.0.1:8545'
   const port = Number(env.PORT ?? 4337)
   const host = env.HOST ?? '127.0.0.1'
-  const bundler = new Bundler({
-    rpcUrl,
-    privateKey,
-    entryPoint: env.ENTRY_POINT as Address | undefined,
-    beneficiary: env.BENEFICIARY as Address | undefined,
-    log: env.QUIET ? () => {} : undefined,
-  })
+  const bundler = new Bundler({ rpcUrl, privateKey, config: cfg, logger: log })
   await bundler.init()
-  const server = createBundlerServer(bundler)
-  await new Promise<void>((resolve) => server.listen(port, host, resolve))
+  bundler.start()
+  const server = createBundlerServer(bundler, { logger: log })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, host, resolve)
+  })
   const addr = server.address() as AddressInfo
-  if (!env.QUIET) console.log(`[bundler] DEV-ONLY bundler listening on http://${addr.address}:${addr.port} (RPC ${rpcUrl})`)
-  return { bundler, server, url: `http://${addr.address}:${addr.port}` }
+  log.info('listening', { url: `http://${addr.address}:${addr.port}`, trustProxy: cfg.trustProxy, cors: cfg.corsOrigins })
+  let stopped: Promise<void> | undefined
+  const stop = () => {
+    stopped ??= (async () => {
+      log.info('shutting down')
+      await new Promise<void>((r) => {
+        server.close(() => r())
+        server.closeIdleConnections()
+        setTimeout(r, 5_000).unref()
+      })
+      await bundler.stop()
+      log.info('stopped')
+    })()
+    return stopped
+  }
+  return { bundler, server, url: `http://${addr.address}:${addr.port}`, stop }
 }
 
 if (import.meta.main) {
-  startBundler().catch((e) => {
-    console.error(`[bundler] ${(e as Error).message}`)
-    process.exit(1)
-  })
+  startBundler()
+    .then(({ stop }) => {
+      const onSignal = (sig: string) => {
+        void stop().then(
+          () => process.exit(0),
+          (e) => {
+            console.error(JSON.stringify({ level: 'error', msg: 'shutdown failed', signal: sig, error: (e as Error).message }))
+            process.exit(1)
+          },
+        )
+      }
+      process.once('SIGTERM', () => onSignal('SIGTERM'))
+      process.once('SIGINT', () => onSignal('SIGINT'))
+    })
+    .catch((e) => {
+      console.error(JSON.stringify({ level: 'error', msg: 'startup failed', error: (e as Error).message }))
+      process.exit(1)
+    })
 }
