@@ -19,6 +19,8 @@
 //!   `stakingValidatorsBlock` and a short epoch; extra *candidate* validators run with
 //!   keys that are not in the genesis set and can join through `Staking.register()`
 //!   ([`LocalNet::register_validator`]).
+//! * Phase 5 ([`EncryptedMempoolNet`]): a dealer-generated t-of-n committee key in the
+//!   genesis (`encryptedMempoolBlock`) and one key share file per genesis validator.
 //!
 //! Only one `LocalNet` runs at a time per process: [`LocalNet::start`] waits for a
 //! process-wide lock, so the tests of one binary do not compete for CPU and skew
@@ -40,7 +42,7 @@ use std::{
 use tempfile::TempDir;
 use xdevs_consensus::ValidatorSet;
 use xdevs_consensus::{CommitCertificate, ConsensusTimeouts, ValidatorAddress, ValidatorKey};
-use xdevs_crypto::{sign_tx_envelope, signer_from_hex, Ed25519Seed};
+use xdevs_crypto::{sign_tx_envelope, signer_from_hex, threshold::deal_random, Ed25519Seed};
 use xdevs_execution::{
     staking::{self, calls, GenesisStake, StakingParams, ValidatorInfo},
     EvmExecutor,
@@ -49,7 +51,8 @@ use xdevs_genesis::{Genesis, GenesisAccount, GenesisValidator, DEV_ACCOUNTS, DEV
 use xdevs_node::{Node, NodeConfig, NodeHandle, NodeMode};
 use xdevs_primitives::{
     constants::{DEV_CHAIN_ID, GOVERNANCE_ADDRESS, GWEI, STAKING_ADDRESS},
-    hex, Address, Bytes, ChainConfig, Encodable2718, TxEip1559, TxKind, B256, U256,
+    hex, Address, Bytes, ChainConfig, Encodable2718, EncryptedMempoolParams, TxEip1559, TxKind,
+    B256, U256,
 };
 
 /// Serialises the nets of one process (see the module docs).
@@ -72,6 +75,27 @@ pub struct LocalNetOptions {
     pub block_time_ms: u64,
     /// Phase 3: a staking-driven validator set (`None` = the static genesis set).
     pub staking: Option<StakingNet>,
+    /// Phase 5: the encrypted mempool prototype (`None` = off).
+    pub encrypted_mempool: Option<EncryptedMempoolNet>,
+}
+
+/// Phase 5 options of a [`LocalNet`]: a fresh committee key (trusted dealer) whose share
+/// `i` is held by genesis validator `i`.
+#[derive(Clone, Debug)]
+pub struct EncryptedMempoolNet {
+    /// `encryptedMempoolBlock`.
+    pub activation: u64,
+    /// Shares needed to decrypt (`t`, at most the number of validators).
+    pub threshold: u32,
+}
+
+impl Default for EncryptedMempoolNet {
+    fn default() -> Self {
+        Self {
+            activation: 1,
+            threshold: 3,
+        }
+    }
 }
 
 impl Default for LocalNetOptions {
@@ -81,6 +105,7 @@ impl Default for LocalNetOptions {
             full_nodes: 0,
             block_time_ms: 400,
             staking: None,
+            encrypted_mempool: None,
         }
     }
 }
@@ -271,6 +296,8 @@ pub struct LocalNet {
     chain_config: ChainConfig,
     set: ValidatorSet,
     block_time_ms: u64,
+    /// Encrypted-mempool key share (text form) of genesis validator `i`.
+    mempool_shares: Vec<String>,
     alerts_at_start: SafetyAlerts,
     // Dropped last: the directory outlives the nodes, the lock outlives everything.
     root: TempDir,
@@ -363,6 +390,27 @@ impl LocalNet {
         if let Some(st) = &opts.staking {
             add_staking(&mut genesis, st)?;
         }
+        let mut mempool_shares = Vec::new();
+        if let Some(em) = &opts.encrypted_mempool {
+            let n = u32::try_from(opts.validators).context("validator count")?;
+            let dealt = deal_random(em.threshold, n)
+                .map_err(|e| anyhow!("deal the mempool committee key: {e}"))?;
+            genesis.config.encrypted_mempool_block = Some(em.activation);
+            genesis.config.encrypted_mempool = Some(EncryptedMempoolParams {
+                threshold: em.threshold,
+                public_key: Bytes::copy_from_slice(dealt.public_key.as_bytes()),
+                verification_keys: dealt
+                    .verification_keys
+                    .iter()
+                    .map(|k| Bytes::copy_from_slice(k.as_bytes()))
+                    .collect(),
+            });
+            mempool_shares = dealt
+                .shares
+                .iter()
+                .map(|s| s.to_text().as_str().to_owned())
+                .collect();
+        }
         let set = xdevs_node::consensus::genesis_validator_set(&genesis)?
             .context("genesis has validators")?;
         let genesis_path = root.path().join("genesis.json");
@@ -375,6 +423,7 @@ impl LocalNet {
             chain_config: genesis.chain_config(),
             set,
             block_time_ms: opts.block_time_ms,
+            mempool_shares,
             alerts_at_start: safety_alerts(),
             root,
             _lock: lock,
@@ -443,6 +492,11 @@ impl LocalNet {
             config.validator.fee_recipient =
                 Address::repeat_byte(0xf0u8.wrapping_add(self.nodes.len() as u8));
             address = Some(ValidatorKey(seed.public_key()).address());
+            if let Some(share) = self.mempool_shares.get(self.nodes.len()) {
+                let share_file = home.join("mempool.share");
+                std::fs::write(&share_file, share)?;
+                config.validator.mempool_share_file = Some(share_file);
+            }
         }
         Ok(NetNode {
             name,
