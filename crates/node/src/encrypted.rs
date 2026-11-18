@@ -30,7 +30,7 @@
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use parking_lot::Mutex;
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{btree_map, BTreeMap, BTreeSet, VecDeque},
     sync::{Arc, OnceLock},
 };
 use xdevs_crypto::{
@@ -515,8 +515,8 @@ impl SharePool {
         let mut added = false;
         for (tx_index, share) in verified {
             let slot = block.shares.entry(tx_index).or_default();
-            if !slot.contains_key(&share.index) {
-                slot.insert(share.index, share);
+            if let btree_map::Entry::Vacant(v) = slot.entry(share.index) {
+                v.insert(share);
                 added = true;
             }
         }

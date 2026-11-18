@@ -236,7 +236,7 @@ impl KeyShare {
             return Err(ThresholdError::BadShareIndex(0));
         }
         let hex = hex.trim().trim_start_matches("0x");
-        if hex.len() != 2 * SCALAR_LEN {
+        if hex.len() != 2 * SCALAR_LEN || !hex.is_ascii() {
             return Err(ThresholdError::Malformed("share scalar length".into()));
         }
         let mut bytes = Zeroizing::new([0u8; SCALAR_LEN]);
