@@ -113,15 +113,15 @@ deploy/            dev genesis, systemd unit, local Docker setup
 
 | Service | URL | Status |
 |---|---|---|
-| JSON-RPC | `https://rpc.xdevschain.tech` | ✅ Live |
-| WebSocket | `wss://ws.xdevschain.tech` | ✅ Live |
-| Network status | https://status.xdevschain.tech | ✅ Live |
-| Block explorer | https://explorer.xdevschain.tech | ✅ Live |
-| Wallet | https://wallet.xdevschain.tech | ✅ Live (preview; passkey accounts need the bundler) |
-| Faucet | https://faucet.xdevschain.tech | ✅ Live (100 tXDS per claim, every 24 h) |
-| Explorer API | `https://explorer-api.xdevschain.tech/api/v1/…` | ✅ Live (indexer on Postgres) |
-| Bundler | `https://bundler.xdevschain.tech` | 📋 Next |
-| Website and docs | https://xdevschain.tech | ✅ Live |
+| JSON-RPC (HTTPS) | [`https://rpc.xdevschain.tech`](https://rpc.xdevschain.tech) | ✅ Live. Use it as the RPC URL in wallets and tools; opened in a browser it shows the [RPC info page](https://status.xdevschain.tech/rpc) |
+| WebSocket | `wss://ws.xdevschain.tech` | ✅ Live (subscriptions: `newHeads`, `logs`, `newPendingTransactions`) |
+| Network status | [status.xdevschain.tech](https://status.xdevschain.tech) | ✅ Live |
+| Block explorer | [explorer.xdevschain.tech](https://explorer.xdevschain.tech) | ✅ Live |
+| Wallet | [wallet.xdevschain.tech](https://wallet.xdevschain.tech) | ✅ Live (preview; creating passkey accounts needs the bundler) |
+| Faucet | [faucet.xdevschain.tech](https://faucet.xdevschain.tech) | ✅ Live (100 tXDS per claim, once every 24 h) |
+| Explorer API | `https://explorer-api.xdevschain.tech` · [`/api/v1/stats`](https://explorer-api.xdevschain.tech/api/v1/stats) · [`/health`](https://explorer-api.xdevschain.tech/health) | ✅ Live (indexer on Postgres; [API spec](docs/specs/explorer-api.md)) |
+| ERC-4337 bundler | `https://bundler.xdevschain.tech` (not deployed yet) | 🚧 In progress |
+| Website and docs | [xdevschain.tech](https://xdevschain.tech) · [network endpoints](https://xdevschain.tech/network/endpoints) | ✅ Live |
 
 ```bash
 cast block-number --rpc-url https://rpc.xdevschain.tech
