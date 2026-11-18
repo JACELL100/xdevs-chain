@@ -1,8 +1,8 @@
 {
-  "name": "@xdevs/dev-bundler",
+  "name": "@xdevs/bundler",
   "version": "0.1.0",
   "private": true,
-  "description": "DEV-ONLY, single-operator ERC-4337 v0.9 bundler for xDEVS Chain dev chains (xdevs run --dev, anvil). Not for production.",
+  "description": "Single-operator ERC-4337 v0.9 bundler for xDEVS Chain (Enclave testnet and dev chains): validated mempool, ERC-7562 reputation and limits, multi-op bundles.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -12,7 +12,9 @@
     "start": "node src/index.ts",
     "devnet": "node scripts/devnet.ts",
     "build:meter": "node scripts/build-meter.ts",
+    "build:test-contracts": "node scripts/build-test-contracts.ts",
     "test": "node --test --test-concurrency=1 \"test/**/*.test.ts\"",
+    "test:unit": "node --test test/unit.test.ts test/server.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test"
   },

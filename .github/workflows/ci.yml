@@ -115,7 +115,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [apps/faucet, apps/indexer]
+        package: [apps/faucet, apps/indexer, apps/bundler]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -135,9 +135,16 @@ jobs:
         if: matrix.package == 'apps/indexer'
         working-directory: .
         run: npm ci --no-audit --no-fund && npm run build:sdk
+      # The bundler's integration / end-to-end tests run against anvil (--hardfork osaka + the dev genesis alloc).
+      - uses: foundry-rs/foundry-toolchain@v1
+        if: matrix.package == 'apps/bundler'
+        with:
+          version: v1.9.0
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm test
+        env:
+          XDEVS_TEST_CHAIN: anvil
 
   # The npm workspace at the repo root: @xdevs/sdk, @xdevs/ui and the Next.js apps
   # (explorer, wallet, faucet-web, status). One install, then typecheck + test + static build per package.
