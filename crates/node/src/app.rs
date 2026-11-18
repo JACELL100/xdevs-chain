@@ -15,6 +15,11 @@
 //!   validators verify before executing the Staking system calls; an epoch-boundary
 //!   commit stores the next epoch's validator set; `validator_set(h)` follows the epoch
 //!   sets; reported / submitted evidence is verified and pooled for inclusion.
+//! * **Phase 5 prototype** (from `encryptedMempoolBlock`, see [`crate::encrypted`]): a
+//!   committee member releases its decryption shares for the envelopes of every block it
+//!   commits; the next block must start with their decryption (shares carried in the
+//!   block, verified and re-executed by validators). The proposer waits (bounded) for
+//!   enough shares before building.
 //!
 //! Every storage / EVM step runs on the app's own [`WorkerPool`] threads, never on
 //! tokio's shared blocking pool: RPC requests (`eth_call`, `eth_estimateGas`, ...) use
@@ -34,6 +39,7 @@
 
 use crate::{
     chain::{self, Db},
+    encrypted::{self, BlockEnvelope, DecryptionData, Encryption},
     producer::{after_commit, build_next_block, drop_rejected, unix_now, NextBlock},
     staking::{self, EvidencePool, MAX_EVIDENCE_AGE_BLOCKS, MAX_EVIDENCE_PER_BLOCK},
     workers::WorkerPool,
@@ -42,20 +48,21 @@ use anyhow::{bail, ensure, Context};
 use parking_lot::Mutex;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    sync::Arc,
-    time::Instant,
+    sync::{Arc, OnceLock},
+    time::{Duration, Instant},
 };
 use xdevs_consensus::{
     BlockConsensusData, BlockOrigin, CommitCertificate, ConflictingVotes, ConsensusApp, Evidence,
     ValidatorAddress, ValidatorSet, Validity,
 };
 use xdevs_execution::{
-    next_base_fee, EvmExecutor, ExecutionError, ExecutionOutcome, SlashEvidence, StakingInputs,
+    next_base_fee, BlockAttributes, EvmExecutor, ExecutionError, ExecutionOutcome, SlashEvidence,
+    StakingInputs,
 };
 use xdevs_mempool::Pool;
 use xdevs_primitives::{
     consensus_data_hash, constants::MAX_EXTRA_DATA_SIZE, set_compat_header_fields, Address, Block,
-    Bytes, ChainConfig, Encodable2718, Header, Transaction, Typed2718, B256,
+    Bytes, ChainConfig, Encodable2718, Header, RecoveredTx, Transaction, Typed2718, B256,
 };
 use xdevs_rpc::ChainEvents;
 use xdevs_state::DbStateProvider;
@@ -136,7 +143,9 @@ struct Inner {
     /// Serialises commits (the only chain writer in consensus modes).
     commit_lock: Mutex<()>,
     /// Committed blocks are published here (`eth_subscribe`); set once.
-    events: std::sync::OnceLock<Arc<ChainEvents>>,
+    events: OnceLock<Arc<ChainEvents>>,
+    /// Encrypted mempool (Phase 5 prototype); set once.
+    encryption: OnceLock<Arc<Encryption>>,
 }
 
 /// The node's [`ConsensusApp`] (see the module docs). Cheap to clone.
@@ -180,7 +189,8 @@ impl ChainApp {
                 app,
                 verdicts: Mutex::new(HashMap::new()),
                 commit_lock: Mutex::new(()),
-                events: std::sync::OnceLock::new(),
+                events: OnceLock::new(),
+                encryption: OnceLock::new(),
             }),
             workers: Arc::new(
                 WorkerPool::new("xdevs-consensus", CONSENSUS_THREADS)
@@ -193,6 +203,14 @@ impl ChainApp {
     /// subscriptions). Only the first call has an effect.
     pub fn with_events(self, events: Arc<ChainEvents>) -> Self {
         let _ = self.inner.events.set(events);
+        self
+    }
+
+    /// Enable the encrypted mempool (share pool, own key share, gossip). Only the first
+    /// call has an effect. Required when the chain config schedules
+    /// `encryptedMempoolBlock`.
+    pub fn with_encryption(self, encryption: Arc<Encryption>) -> Self {
+        let _ = self.inner.encryption.set(encryption);
         self
     }
 
@@ -414,6 +432,164 @@ impl Inner {
         }))
     }
 
+    fn encryption(&self) -> anyhow::Result<&Encryption> {
+        self.encryption.get().map(|e| &**e).context(
+            "the encrypted mempool is active but this node has no committee key configured",
+        )
+    }
+
+    /// The decryptable envelopes of block `height - 1` with its hash, `None` when there
+    /// is nothing to decrypt. Registers the block with the share pool and releases this
+    /// node's own shares if that has not happened yet (e.g. after a restart).
+    fn parent_envelopes(
+        &self,
+        snapshot: &dyn DbRead,
+        height: u64,
+    ) -> anyhow::Result<Option<(B256, Vec<BlockEnvelope>)>> {
+        if height < 2 || !self.cfg.encrypted_mempool_active(height - 1) {
+            return Ok(None);
+        }
+        let enc = self.encryption()?;
+        let parent = chain::block(snapshot, height - 1)?
+            .with_context(|| format!("missing block {}", height - 1))?;
+        let hash = parent.hash();
+        enc.on_committed(&self.cfg, &parent, hash);
+        let envs = encrypted::decryptable_envelopes(&self.cfg, enc.pool.key(), &parent);
+        Ok((!envs.is_empty()).then_some((hash, envs)))
+    }
+
+    /// `true` once this node holds `t` shares for every envelope of the parent of
+    /// `height` (or there is nothing to decrypt).
+    fn decryption_ready(&self, height: u64) -> anyhow::Result<bool> {
+        if height < 2 || !self.cfg.encrypted_mempool_active(height - 1) {
+            return Ok(true);
+        }
+        let snapshot = self.db.snapshot()?;
+        let Some((hash, _)) = self.parent_envelopes(&*snapshot, height)? else {
+            return Ok(true);
+        };
+        Ok(self
+            .encryption()?
+            .pool
+            .selection(height - 1, hash)
+            .is_some())
+    }
+
+    /// The decryption data and decrypted transactions of the block this node proposes at
+    /// `height` (`None` = the parent has no decryptable envelope).
+    fn own_decryption(
+        &self,
+        snapshot: &dyn DbRead,
+        height: u64,
+    ) -> anyhow::Result<Option<(DecryptionData, Vec<RecoveredTx>)>> {
+        let Some((hash, envs)) = self.parent_envelopes(snapshot, height)? else {
+            return Ok(None);
+        };
+        let enc = self.encryption()?;
+        let envelopes = enc.pool.selection(height - 1, hash).with_context(|| {
+            format!(
+                "not enough decryption shares yet for the {} envelopes of block {}",
+                envs.len(),
+                height - 1
+            )
+        })?;
+        let data = DecryptionData {
+            block_hash: hash,
+            envelopes,
+        };
+        let txs = encrypted::decrypted_candidates(&self.cfg, enc.pool.key(), &envs, &data)
+            .map_err(|r| anyhow::anyhow!("own decryption data is invalid: {r}"))?;
+        tracing::info!(target: LOG, height, envelopes = envs.len(), decrypted = txs.len(),
+                       "decrypting the parent's envelopes first");
+        Ok(Some((data, txs)))
+    }
+
+    /// The encrypted-mempool rule of block `height`: it carries the decryption of every
+    /// decryptable envelope of its parent (and nothing otherwise), and its body starts
+    /// with exactly the decrypted transactions the executor includes, in committed order.
+    /// `Ok(Err(reason))` = invalid block; `Err` = local failure.
+    fn check_decryption(
+        &self,
+        height: u64,
+        parent: &Header,
+        block: &Block,
+        snapshot: &dyn DbRead,
+        staking: &StakingInputs,
+    ) -> anyhow::Result<Result<(), String>> {
+        if !self.cfg.encrypted_mempool_active(height) {
+            return Ok(Ok(()));
+        }
+        let decryption = match encrypted::split_block_data(&self.cfg, height, &block.consensus) {
+            Ok((_, d)) => d,
+            Err(reason) => return Ok(Err(reason)),
+        };
+        let expected = if height >= 2 && self.cfg.encrypted_mempool_active(height - 1) {
+            let enc = self.encryption()?;
+            let parent_block = chain::block(snapshot, height - 1)?
+                .with_context(|| format!("missing block {}", height - 1))?;
+            encrypted::decryptable_envelopes(&self.cfg, enc.pool.key(), &parent_block)
+        } else {
+            Vec::new()
+        };
+        let prefix = match (expected.is_empty(), decryption) {
+            (true, None) => return Ok(Ok(())),
+            (true, Some(_)) => {
+                return Ok(Err(
+                    "decryption data but the parent has no decryptable envelope".into(),
+                ))
+            }
+            (false, None) => {
+                return Ok(Err(format!(
+                    "missing the decryption of the {} envelopes of block {}",
+                    expected.len(),
+                    height - 1
+                )))
+            }
+            (false, Some(data)) => {
+                if data.block_hash != parent.hash_slow() {
+                    return Ok(Err("decryption data for another block".into()));
+                }
+                let key = self.encryption()?.pool.key();
+                match encrypted::decrypted_candidates(&self.cfg, key, &expected, &data) {
+                    Ok(txs) => txs,
+                    Err(reason) => return Ok(Err(reason)),
+                }
+            }
+        };
+        if prefix.is_empty() {
+            return Ok(Ok(()));
+        }
+        // Rebuild the prefix with the executor's skip rules on the same state and header.
+        let h = &block.header;
+        let attrs = BlockAttributes {
+            timestamp: h.timestamp,
+            beneficiary: h.beneficiary,
+            prev_randao: h.mix_hash,
+            extra_data: h.extra_data.clone(),
+            gas_limit: h.gas_limit,
+        };
+        let state = DbStateProvider::new(snapshot);
+        let built = match self
+            .executor
+            .build_with(parent, attrs, prefix, &state, staking)
+        {
+            Ok(b) => b,
+            Err(ExecutionError::State(e)) => bail!("state read failed: {e}"),
+            Err(e) => return Ok(Err(format!("decrypted prefix does not build: {e}"))),
+        };
+        let want: Vec<B256> = built.block.tx_hashes().collect();
+        let have: Vec<B256> = block.tx_hashes().take(want.len()).collect();
+        if have != want {
+            return Ok(Err(format!(
+                "the body does not start with the {} decrypted transactions of block {} in \
+                 committed order",
+                want.len(),
+                height - 1
+            )));
+        }
+        Ok(Ok(()))
+    }
+
     /// Build and execute block `height` on the committed head (no commit).
     fn build(&self, height: u64, with_txs: bool) -> anyhow::Result<Block> {
         let snapshot = self.db.snapshot()?;
@@ -438,6 +614,12 @@ impl Inner {
             .as_ref()
             .map(|(_, i)| i.clone())
             .unwrap_or_default();
+        // Phase 5: the parent's envelopes, decrypted, go first.
+        let decryption = self.own_decryption(&*snapshot, height)?;
+        let prefix = decryption
+            .as_ref()
+            .map(|(_, txs)| txs.clone())
+            .unwrap_or_default();
         let (_, mut built) = build_next_block(
             &*snapshot,
             &self.pool,
@@ -448,12 +630,21 @@ impl Inner {
                 beneficiary: self.app.fee_recipient,
                 extra_data: self.app.extra_data.clone(),
                 with_txs,
+                prefix,
             },
             &inputs,
         )?;
         drop(snapshot);
-        if let Some((data, _)) = consensus {
-            let bytes = Bytes::from(data.to_bytes());
+        let staking_data = consensus
+            .map(|(data, _)| Bytes::from(data.to_bytes()))
+            .unwrap_or_default();
+        let bytes = encrypted::join_block_data(
+            &self.cfg,
+            height,
+            staking_data,
+            decryption.as_ref().map(|(d, _)| d),
+        );
+        if !bytes.is_empty() {
             built.block.header.requests_hash = Some(consensus_data_hash(&bytes));
             built.block.consensus = bytes;
         }
@@ -513,17 +704,22 @@ impl Inner {
         let verdict = match inputs {
             Err(reason) => Verdict::invalid(reason),
             Ok(inputs) => {
-                let state = DbStateProvider::new(&*snapshot);
-                match self.executor.execute_with(&parent, block, &state, &inputs) {
-                    Ok(outcome) => match compare_outcome(header, &outcome) {
-                        Ok(()) => Verdict::Valid(Arc::new(outcome)),
-                        Err(reason) => Verdict::invalid(reason),
-                    },
-                    // A storage failure says nothing about the block.
-                    Err(ExecutionError::State(e)) => bail!("state read failed: {e}"),
-                    // Never happens for blocks (no limits); not a verdict either way.
-                    Err(e @ ExecutionError::Aborted(_)) => bail!("block execution {e}"),
-                    Err(e) => Verdict::invalid(e),
+                match self.check_decryption(height, &parent, block, &*snapshot, &inputs)? {
+                    Err(reason) => Verdict::invalid(reason),
+                    Ok(()) => {
+                        let state = DbStateProvider::new(&*snapshot);
+                        match self.executor.execute_with(&parent, block, &state, &inputs) {
+                            Ok(outcome) => match compare_outcome(header, &outcome) {
+                                Ok(()) => Verdict::Valid(Arc::new(outcome)),
+                                Err(reason) => Verdict::invalid(reason),
+                            },
+                            // A storage failure says nothing about the block.
+                            Err(ExecutionError::State(e)) => bail!("state read failed: {e}"),
+                            // Never happens for blocks (no limits); not a verdict either way.
+                            Err(e @ ExecutionError::Aborted(_)) => bail!("block execution {e}"),
+                            Err(e) => Verdict::invalid(e),
+                        }
+                    }
                 }
             }
         };
@@ -539,18 +735,24 @@ impl Inner {
         parent: &Header,
         block: &Block,
     ) -> anyhow::Result<Result<StakingInputs, String>> {
+        // From the encrypted-mempool activation on, `Block::consensus` also carries the
+        // decryption data (checked by `check_decryption`).
+        let staking_data = match encrypted::split_block_data(&self.cfg, height, &block.consensus) {
+            Ok((s, _)) => s,
+            Err(reason) => return Ok(Err(reason)),
+        };
         if !self.cfg.staking_active(height) {
-            if !block.consensus.is_empty() {
+            if !staking_data.is_empty() {
                 return Ok(Err("consensus data before the staking activation".into()));
             }
             return Ok(Ok(StakingInputs::default()));
         }
-        if block.consensus.is_empty() {
+        if staking_data.is_empty() {
             return Ok(Err(
                 "missing consensus data (staking-driven validator set active)".into(),
             ));
         }
-        let data = match BlockConsensusData::from_bytes(&block.consensus) {
+        let data = match BlockConsensusData::from_bytes(&staking_data) {
             Ok(data) => data,
             Err(e) => return Ok(Err(format!("undecodable consensus data: {e}"))),
         };
@@ -724,8 +926,11 @@ impl Inner {
             );
             self.epoch_sets.lock().insert(number, set);
         }
-        if !block.consensus.is_empty() {
-            let included: Vec<B256> = BlockConsensusData::from_bytes(&block.consensus)
+        let staking_data = encrypted::split_block_data(&self.cfg, number, &block.consensus)
+            .map(|(s, _)| s)
+            .unwrap_or_default();
+        if !staking_data.is_empty() {
+            let included: Vec<B256> = BlockConsensusData::from_bytes(&staking_data)
                 .map(|d| d.evidence.iter().map(ConflictingVotes::hash).collect())
                 .unwrap_or_default();
             self.evidence
@@ -738,6 +943,10 @@ impl Inner {
             &outcome.receipts,
         );
         after_commit(&self.pool, &self.cfg, &block, &outcome.receipts);
+        // Phase 5: release this node's decryption shares for the block's envelopes.
+        if let Some(enc) = self.encryption.get() {
+            enc.on_committed(&self.cfg, &block, hash);
+        }
         self.verdicts.lock().retain(|_, (n, _)| *n > number);
         tracing::info!(
             target: LOG,
@@ -804,6 +1013,19 @@ impl ConsensusApp for ChainApp {
     }
 
     async fn propose(&self, height: u64, round: u32, deadline: Instant) -> anyhow::Result<Block> {
+        // Phase 5: the block must decrypt its parent's envelopes; wait (at most half the
+        // time to the deadline) for the committee's shares to arrive by gossip.
+        let wait_until = Instant::now() + deadline.saturating_duration_since(Instant::now()) / 2;
+        loop {
+            let ready = self
+                .blocking(move |s| s.decryption_ready(height))
+                .await
+                .unwrap_or(true);
+            if ready || Instant::now() >= wait_until {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         let full = self.blocking(move |s| s.build(height, true));
         match tokio::time::timeout_at(deadline.into(), full).await {
             Ok(block) => block,

@@ -23,12 +23,16 @@ use std::{
 };
 use tokio::sync::{broadcast, OwnedSemaphorePermit, Semaphore};
 use xdevs_consensus::{CommitCertificate, EngineStatus};
-use xdevs_crypto::decode_and_recover;
+use xdevs_crypto::{
+    decode_and_recover,
+    encrypted_tx::{is_envelope_target, EncryptedPayload, MempoolKey, PAYLOAD_VERSION},
+};
 use xdevs_execution::{next_base_fee, CallLimits, CallResult, EvmExecutor, ExecutionError};
 use xdevs_mempool::{Pool, PoolError, TxOrigin, TxPool};
 use xdevs_network::NetworkHandle;
 use xdevs_primitives::reexports::alloy_primitives::U64;
 use xdevs_primitives::{
+    constants::ENCRYPTED_INBOX_ADDRESS,
     xip0001::{Xip0001Error, LOCK_SLOT},
     Address, Block, Bytes, ChainConfig, Header, ReceiptEnvelope, RecoveredTx, Transaction,
     TxEnvelope, TxKind, B256, U256,
@@ -773,6 +777,53 @@ impl RpcBackend for NodeBackend {
             }))
         })
         .await
+    }
+
+    async fn mempool_encryption_key(&self) -> BackendResult<Option<MempoolEncryptionKey>> {
+        let Some(key) = MempoolKey::from_config(&self.cfg)
+            .map_err(|e| RpcBackendError::Internal(format!("encryptedMempool: {e}")))?
+        else {
+            return Ok(None);
+        };
+        let next = self.block_number().await?.saturating_add(1);
+        Ok(Some(MempoolEncryptionKey {
+            active: self.cfg.encrypted_mempool_active(next),
+            activation_block: self.cfg.encrypted_mempool_block.map(U64::from),
+            key_id: key.key_id,
+            public_key: Bytes::copy_from_slice(key.public_key.as_bytes()),
+            threshold: U64::from(key.threshold),
+            committee_size: U64::from(key.committee_size()),
+            inbox: ENCRYPTED_INBOX_ADDRESS,
+            max_inner_gas: U64::from(self.cfg.encrypted_gas_budget()),
+            payload_version: U64::from(PAYLOAD_VERSION),
+        }))
+    }
+
+    async fn send_encrypted_transaction(&self, raw: Bytes) -> BackendResult<B256> {
+        let key = MempoolKey::from_config(&self.cfg)
+            .map_err(|e| RpcBackendError::Internal(format!("encryptedMempool: {e}")))?
+            .ok_or_else(|| {
+                RpcBackendError::Unsupported(
+                    "xdevs_sendEncryptedTransaction (the chain has no encrypted mempool)".into(),
+                )
+            })?;
+        let tx = decode_and_recover(&raw, self.cfg.chain_id)
+            .map_err(|e| RpcBackendError::Rejected(e.to_string()))?;
+        if !is_envelope_target(tx.to()) {
+            return Err(RpcBackendError::Rejected(format!(
+                "an encrypted transaction is a call to {ENCRYPTED_INBOX_ADDRESS}"
+            )));
+        }
+        let payload = EncryptedPayload::decode(tx.input())
+            .map_err(|e| RpcBackendError::Rejected(format!("encrypted payload: {e}")))?;
+        key.check(
+            self.cfg.chain_id,
+            tx.sender,
+            &payload,
+            self.cfg.encrypted_gas_budget(),
+        )
+        .map_err(|e| RpcBackendError::Rejected(format!("encrypted payload: {e}")))?;
+        self.send_raw_transaction(raw).await
     }
 
     async fn submit_evidence(&self, raw: Bytes) -> BackendResult<B256> {

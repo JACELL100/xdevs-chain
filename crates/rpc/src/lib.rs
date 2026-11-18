@@ -15,6 +15,10 @@
 //! and the `vaultEvents` subscription live in `safety` / [`subscription`]; only the
 //! simulation needs the backend ([`RpcBackend::simulate_transaction`]).
 //!
+//! Phase 5 encrypted mempool prototype: `xdevs_getMempoolEncryptionKey` and
+//! `xdevs_sendEncryptedTransaction` ([`RpcBackend::mempool_encryption_key`],
+//! [`RpcBackend::send_encrypted_transaction`]).
+//!
 //! Finality tags: `latest`, `safe` and `finalized` all mean the latest committed
 //! block (BFT finality); `pending` = latest state + pool view (nonce only in Phase 1);
 //! `earliest` = block 0.
@@ -91,6 +95,32 @@ pub mod types {
         pub signatures: Vec<CommitSigInfo>,
         /// Canonical RLP of the certificate (as stored and served by block sync).
         pub raw: xdevs_primitives::Bytes,
+    }
+
+    /// Result of `xdevs_getMempoolEncryptionKey()` (Phase 5 prototype): what a client
+    /// needs to build an envelope for the encrypted mempool.
+    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct MempoolEncryptionKey {
+        /// Envelopes sent now go into an encrypted-mempool block (active for the block
+        /// after the latest one).
+        pub active: bool,
+        /// `encryptedMempoolBlock` (`null` = not scheduled).
+        pub activation_block: Option<xdevs_primitives::reexports::alloy_primitives::U64>,
+        /// `keccak256(publicKey)`, the payload's key id.
+        pub key_id: xdevs_primitives::B256,
+        /// Committee public key (33-byte compressed secp256k1 point).
+        pub public_key: xdevs_primitives::Bytes,
+        /// Decryption shares needed (`t`).
+        pub threshold: xdevs_primitives::reexports::alloy_primitives::U64,
+        /// Share holders (`n`).
+        pub committee_size: xdevs_primitives::reexports::alloy_primitives::U64,
+        /// Envelope target address.
+        pub inbox: xdevs_primitives::Address,
+        /// Max inner gas limit one envelope may commit to (the per-block budget).
+        pub max_inner_gas: xdevs_primitives::reexports::alloy_primitives::U64,
+        /// Payload format version.
+        pub payload_version: xdevs_primitives::reexports::alloy_primitives::U64,
     }
 
     /// One signature of a [`CommitCertificateInfo`].
@@ -248,6 +278,26 @@ pub trait RpcBackend: Send + Sync + 'static {
     ) -> BackendResult<SimulationReport> {
         Err(RpcBackendError::Unsupported(
             "xdevs_simulateTransaction".into(),
+        ))
+    }
+
+    /// `xdevs_getMempoolEncryptionKey()` (Phase 5 prototype): the encrypted mempool's
+    /// committee key, `None` if the chain has none. The default reports the method as
+    /// unsupported.
+    async fn mempool_encryption_key(&self) -> BackendResult<Option<MempoolEncryptionKey>> {
+        Err(RpcBackendError::Unsupported(
+            "xdevs_getMempoolEncryptionKey".into(),
+        ))
+    }
+
+    /// `xdevs_sendEncryptedTransaction(raw)` (Phase 5 prototype): submit a signed
+    /// envelope (a transaction to the inbox whose calldata is an encrypted payload). The
+    /// node checks the payload (key id, inner gas bound, proof of knowledge for the
+    /// sender) before pooling and gossiping it like `eth_sendRawTransaction`. Returns
+    /// the envelope's hash. The default reports the method as unsupported.
+    async fn send_encrypted_transaction(&self, _raw: Bytes) -> BackendResult<B256> {
+        Err(RpcBackendError::Unsupported(
+            "xdevs_sendEncryptedTransaction".into(),
         ))
     }
 

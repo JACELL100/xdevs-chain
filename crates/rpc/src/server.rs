@@ -103,6 +103,14 @@ pub fn build_module(
     method!("xdevs_getVaultQueue", crate::safety::get_vault_queue);
     method!("xdevs_resolveName", crate::safety::resolve_name);
     method!("xdevs_reverseName", crate::safety::reverse_name);
+    method!(
+        "xdevs_getMempoolEncryptionKey",
+        xdevs_get_mempool_encryption_key
+    );
+    method!(
+        "xdevs_sendEncryptedTransaction",
+        xdevs_send_encrypted_transaction
+    );
     crate::subscription::register(&mut m)?;
     Ok(m)
 }
@@ -517,6 +525,24 @@ async fn xdevs_submit_evidence(params: Params<'static>, ctx: Arc<RpcContext>) ->
         return Err(invalid("empty evidence"));
     }
     Ok(ctx.backend.submit_evidence(raw).await?)
+}
+
+async fn xdevs_get_mempool_encryption_key(
+    _: Params<'static>,
+    ctx: Arc<RpcContext>,
+) -> RpcResult<Option<MempoolEncryptionKey>> {
+    Ok(ctx.backend.mempool_encryption_key().await?)
+}
+
+async fn xdevs_send_encrypted_transaction(
+    params: Params<'static>,
+    ctx: Arc<RpcContext>,
+) -> RpcResult<B256> {
+    let raw: Bytes = params.one()?;
+    if raw.is_empty() {
+        return Err(invalid("empty raw transaction"));
+    }
+    Ok(ctx.backend.send_encrypted_transaction(raw).await?)
 }
 
 #[cfg(test)]
