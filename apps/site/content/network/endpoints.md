@@ -15,7 +15,7 @@ Enclave is a test network. It may be reset (with notice on the [status page](htt
 | Network status | [`https://status.xdevschain.tech`](https://status.xdevschain.tech) | <span class="status ok">Live</span>: blocks, finality, validators, every endpoint |
 | Block explorer | [`https://explorer.xdevschain.tech`](https://explorer.xdevschain.tech) | <span class="status ok">Live</span> |
 | Wallet | [`https://wallet.xdevschain.tech`](https://wallet.xdevschain.tech) | <span class="status ok">Live</span> (preview); passkey accounts need the bundler |
-| Faucet | [`https://faucet.xdevschain.tech`](https://faucet.xdevschain.tech) | <span class="status next">Opening</span>: the page is up, claims open once its captcha is configured |
+| Faucet | [`https://faucet.xdevschain.tech`](https://faucet.xdevschain.tech) | <span class="status ok">Live</span>: 100 tXDS per claim, every 24 h |
 | Explorer API | `https://explorer-api.xdevschain.tech/api/v1/…` | <span class="status ok">Live</span>: indexer for history, tokens, approvals and vault queues ([spec](https://github.com/JACELL100/xdevs-chain/blob/main/docs/specs/explorer-api.md)) |
 | ERC-4337 bundler | `https://bundler.xdevschain.tech` | <span class="status next">Next</span> |
 | Website and docs | `https://xdevschain.tech` | This site |

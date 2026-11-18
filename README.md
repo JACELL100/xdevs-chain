@@ -118,7 +118,7 @@ deploy/            dev genesis, systemd unit, local Docker setup
 | Network status | https://status.xdevschain.tech | ✅ Live |
 | Block explorer | https://explorer.xdevschain.tech | ✅ Live |
 | Wallet | https://wallet.xdevschain.tech | ✅ Live (preview; passkey accounts need the bundler) |
-| Faucet | https://faucet.xdevschain.tech | 🚧 Page live; claims open once the captcha is configured |
+| Faucet | https://faucet.xdevschain.tech | ✅ Live (100 tXDS per claim, every 24 h) |
 | Explorer API | `https://explorer-api.xdevschain.tech/api/v1/…` | ✅ Live (indexer on Postgres) |
 | Bundler | `https://bundler.xdevschain.tech` | 📋 Next |
 | Website and docs | https://xdevschain.tech | ✅ Live |
