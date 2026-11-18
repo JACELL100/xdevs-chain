@@ -47,6 +47,8 @@ Most of the on-chain part is already written and tested ahead of schedule: smart
 
 Profiling and optimization, 1 s blocks if metrics allow, Block-STM parallel execution behind a flag, local fee markets, BLS aggregate signatures, and an **encrypted mempool** (research, prototype, then external review). Exit criteria include published benchmarks (throughput and finality latency) measured on reference hardware.
 
+- Encrypted mempool: research doc and prototype <span class="status ok">Built</span> behind the `encryptedMempoolBlock` activation (off on every network). Threshold encryption to a t-of-n validator committee, transactions ordered blind and decrypted one block later; a test on an in-process network shows a sandwich bot profiting from a plain swap and unable to touch the same swap sent encrypted. Next: a DKG instead of the prototype's trusted dealer, keys that follow the staking set, then external review.
+
 ## Phase 6 — Public testnet and community <span class="status planned">Planned</span>
 
 Long-lived `xdevs-testnet-1` with no resets, 20+ independent validators, snapshot sync, remote signers, an incentivized testnet (points, not tokens), a bug bounty, hackathons, and real governance on testnet.

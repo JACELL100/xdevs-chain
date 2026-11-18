@@ -46,7 +46,8 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | Public testnet (Enclave, 4 validators) | ✅ Live since 17 Nov 2026 |
 | Staking-driven validator set (epochs, rewards, downtime and double-sign slashing) | ✅ Built and tested on local networks; Enclave activation pending (Phase 3) |
 | Transaction simulation and safety RPCs (`xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, `vaultEvents`) | ✅ Built and tested (Phase 4); reference wallet uses them when the node serves them |
-| Encrypted mempool, parallel execution, local fee markets | 📋 Planned (Phase 5) |
+| Encrypted mempool (threshold encryption, commit-then-reveal; `xdevs_sendEncryptedTransaction`) | 🧪 Prototype behind `encryptedMempoolBlock`, off on every network; a test shows it prevents a sandwich attack; needs a DKG and external review ([research doc](docs/research/encrypted-mempool.md)) |
+| Parallel execution, local fee markets | 📋 Planned (Phase 5) |
 | Light-client bridges | 📋 Planned (Phase 7) |
 
 ### Node status (what the Rust node does today)
