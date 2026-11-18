@@ -22,7 +22,7 @@
 
 use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
-    ChaCha20Poly1305, Key, Nonce,
+    ChaCha20Poly1305, Nonce,
 };
 use hkdf::Hkdf;
 use k256::{
@@ -437,18 +437,26 @@ fn derive_key(k: &ProjectivePoint, u: &[u8], label: &[u8]) -> Zeroizing<[u8; 44]
     okm
 }
 
+fn aead_parts(okm: &[u8; 44]) -> (ChaCha20Poly1305, Nonce) {
+    let cipher =
+        ChaCha20Poly1305::new_from_slice(&okm[..32]).expect("a 32-byte ChaCha20-Poly1305 key");
+    let mut nonce = [0u8; 12];
+    nonce.copy_from_slice(&okm[32..]);
+    (cipher, Nonce::from(nonce))
+}
+
 fn aead_seal(okm: &[u8; 44], label: &[u8], msg: &[u8]) -> Vec<u8> {
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(&okm[..32]));
+    let (cipher, nonce) = aead_parts(okm);
     cipher
-        .encrypt(Nonce::from_slice(&okm[32..]), Payload { msg, aad: label })
+        .encrypt(&nonce, Payload { msg, aad: label })
         .expect("ChaCha20-Poly1305 encryption of an in-memory buffer cannot fail")
 }
 
 fn aead_open(okm: &[u8; 44], label: &[u8], body: &[u8]) -> Result<Vec<u8>> {
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(&okm[..32]));
+    let (cipher, nonce) = aead_parts(okm);
     cipher
         .decrypt(
-            Nonce::from_slice(&okm[32..]),
+            &nonce,
             Payload {
                 msg: body,
                 aad: label,
