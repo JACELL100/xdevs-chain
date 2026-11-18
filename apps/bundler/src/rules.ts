@@ -27,7 +27,7 @@ export function requiredPreVerificationGas(op: UserOperation, beneficiary: Addre
 /** The preVerificationGas `eth_estimateUserOperationGas` returns: worst-case bytes for the signature and the PVG field, +10 %. */
 export function estimatePreVerificationGas(op: UserOperation, beneficiary: Address): bigint {
   const sigLen = Math.max(size(op.signature), 65)
-  const filled: UserOperation = { ...op, signature: toHex(new Uint8Array(sigLen).fill(1)), preVerificationGas: 1n << 64n }
+  const filled: UserOperation = { ...op, signature: toHex(new Uint8Array(sigLen).fill(1)), preVerificationGas: (1n << 64n) - 1n }
   return mul(requiredPreVerificationGas(filled, beneficiary), 110n)
 }
 
