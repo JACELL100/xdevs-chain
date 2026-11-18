@@ -163,7 +163,7 @@ pub struct ChainConfig {
 }
 
 /// Committee key of the encrypted mempool prototype (genesis `config.encryptedMempool`):
-/// `{ "threshold": 3, "publicKey": "0x02…", "verificationKeys": ["0x03…", …] }`. Points are
+/// `{ "threshold": 3, "publicKey": "0x02â€¦", "verificationKeys": ["0x03â€¦", â€¦] }`. Points are
 /// 33-byte compressed secp256k1 points; verification key `i - 1` belongs to the holder
 /// of share `i`. Produced by a trusted dealer in the prototype (no DKG yet).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

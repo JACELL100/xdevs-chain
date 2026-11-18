@@ -620,7 +620,10 @@ mod tests {
         for (i, s) in shares.iter().enumerate() {
             s.verify(&d.verification_keys[i], &ct).unwrap();
             let other = &d.verification_keys[(i + 1) % 5];
-            assert_eq!(s.verify(other, &ct), Err(ThresholdError::InvalidShare(s.index)));
+            assert_eq!(
+                s.verify(other, &ct),
+                Err(ThresholdError::InvalidShare(s.index))
+            );
         }
         for subset in [[0, 1, 2], [2, 3, 4], [4, 0, 2], [1, 3, 4]] {
             let pick: Vec<_> = subset.iter().map(|&k| shares[k]).collect();
@@ -652,7 +655,10 @@ mod tests {
         let mut third = shares[0];
         third.index = 3;
         forged.push(third);
-        assert_eq!(combine(3, &forged, &ct, b"l"), Err(ThresholdError::Decryption));
+        assert_eq!(
+            combine(3, &forged, &ct, b"l"),
+            Err(ThresholdError::Decryption)
+        );
         // Duplicate indices are refused.
         let dup = vec![shares[0], shares[1], shares[0]];
         assert_eq!(
@@ -664,7 +670,10 @@ mod tests {
             .iter()
             .map(|s| s.decryption_share(&ct, &mut rng()).unwrap())
             .collect();
-        assert_eq!(combine(3, &all, &ct, b"other"), Err(ThresholdError::Decryption));
+        assert_eq!(
+            combine(3, &all, &ct, b"other"),
+            Err(ThresholdError::Decryption)
+        );
         assert_eq!(ct.verify(b"other"), Err(ThresholdError::InvalidCiphertext));
     }
 
@@ -680,7 +689,10 @@ mod tests {
             .iter()
             .map(|s| s.decryption_share(&t, &mut rng()).unwrap())
             .collect();
-        assert_eq!(combine(2, &shares, &t, b"l"), Err(ThresholdError::Decryption));
+        assert_eq!(
+            combine(2, &shares, &t, b"l"),
+            Err(ThresholdError::Decryption)
+        );
         // Copying U (and the proof) into a new ciphertext under another label fails.
         let mut copy = ct.clone();
         copy.body = encrypt(&d.public_key, b"m", b"payload", &mut rng()).body;

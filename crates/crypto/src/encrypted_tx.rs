@@ -38,7 +38,12 @@ pub fn key_id(public_key: &PublicPoint) -> B256 {
 }
 
 /// The context a payload is bound to.
-pub fn envelope_label(chain_id: u64, key_id: B256, sender: Address, inner_gas_limit: u64) -> Vec<u8> {
+pub fn envelope_label(
+    chain_id: u64,
+    key_id: B256,
+    sender: Address,
+    inner_gas_limit: u64,
+) -> Vec<u8> {
     let mut l = Vec::with_capacity(LABEL_DOMAIN.len() + 8 + 32 + 20 + 8);
     l.extend_from_slice(LABEL_DOMAIN);
     l.extend_from_slice(&chain_id.to_be_bytes());
@@ -272,7 +277,9 @@ mod tests {
         assert!(key.check(1, sender, &back, u64::MAX).is_err());
         let mut more_gas = back.clone();
         more_gas.inner_gas_limit += 1;
-        assert!(key.check(cfg.chain_id, sender, &more_gas, u64::MAX).is_err());
+        assert!(key
+            .check(cfg.chain_id, sender, &more_gas, u64::MAX)
+            .is_err());
         assert!(key.check(cfg.chain_id, sender, &back, 99_999).is_err());
 
         let shares: Vec<_> = d.shares[1..]
@@ -280,9 +287,13 @@ mod tests {
             .map(|s| s.decryption_share_random(&back.ciphertext).unwrap())
             .collect();
         for (s, i) in shares.iter().zip(1..) {
-            s.verify(&key.verification_keys[i], &back.ciphertext).unwrap();
+            s.verify(&key.verification_keys[i], &back.ciphertext)
+                .unwrap();
         }
-        assert_eq!(key.open(cfg.chain_id, sender, &back, &shares).unwrap(), inner);
+        assert_eq!(
+            key.open(cfg.chain_id, sender, &back, &shares).unwrap(),
+            inner
+        );
         assert!(key.open(cfg.chain_id, thief, &back, &shares).is_err());
     }
 
@@ -303,7 +314,9 @@ mod tests {
         data[0] = PAYLOAD_VERSION;
         data[1] ^= 1;
         let p = EncryptedPayload::decode(&data).unwrap();
-        assert!(key.check(cfg.chain_id, Address::ZERO, &p, u64::MAX).is_err());
+        assert!(key
+            .check(cfg.chain_id, Address::ZERO, &p, u64::MAX)
+            .is_err());
 
         assert_eq!(MempoolKey::from_config(&ChainConfig::new(1)).unwrap(), None);
         let mut bad = cfg.clone();

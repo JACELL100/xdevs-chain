@@ -59,8 +59,7 @@ pub const FEE_CONFIG_ADDRESS: Address = address!("0x0000000000000000000000000000
 /// Inbox of the encrypted mempool (Phase 5 prototype): an envelope is an ordinary
 /// transaction to this address (no code) whose calldata is the threshold-encrypted
 /// payload. Its gas pays for ordering and data whether or not the payload decrypts.
-pub const ENCRYPTED_INBOX_ADDRESS: Address =
-    address!("0x0000000000000000000000000000000000001100");
+pub const ENCRYPTED_INBOX_ADDRESS: Address = address!("0x0000000000000000000000000000000000001100");
 
 /// Ethereum's system address: `msg.sender` of protocol-initiated calls (plan §18.2).
 pub const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
