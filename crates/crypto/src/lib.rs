@@ -6,6 +6,9 @@
 //!   `alloy-signer-local`).
 //! * [`keystore`]: Web3 Secret Storage v3 keystores (scrypt / pbkdf2 + AES-128-CTR +
 //!   keccak MAC), compatible with geth, Foundry (`cast wallet`) and MetaMask exports.
+//! * [`threshold`] / [`encrypted_tx`]: Phase-5 encrypted mempool prototype — t-of-n
+//!   threshold encryption over secp256k1 (hashed ElGamal + ChaCha20-Poly1305, DLEQ-proven
+//!   decryption shares) and the envelope payload format. Research-grade, unreviewed.
 //! * [`ed25519`]: Phase-2 Ed25519 key files: the encrypted validator consensus key
 //!   ([`ConsensusKeystore`]) and the libp2p node key ([`NodeKey`]).
 //!
@@ -16,8 +19,10 @@
 #![warn(missing_docs)]
 
 pub mod ed25519;
+pub mod encrypted_tx;
 pub mod keys;
 pub mod keystore;
+pub mod threshold;
 pub mod tx;
 
 pub use alloy_signer_local::PrivateKeySigner;
