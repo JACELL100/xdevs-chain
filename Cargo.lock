@@ -7755,6 +7755,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-signer",
  "alloy-signer-local",
+ "ed25519-consensus",
  "p256",
  "revm",
  "thiserror 2.0.21",

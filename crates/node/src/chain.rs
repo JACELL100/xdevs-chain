@@ -304,6 +304,17 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
                     || stored.encrypted_mempool != configured.encrypted_mempool;
                 let started =
                     |c: &ChainConfig| c.encrypted_mempool_block.is_some_and(|b| head >= b);
+                let ed25519_started =
+                    |c: &ChainConfig| c.ed25519_verify_block.is_some_and(|b| head >= b);
+                if stored.ed25519_verify_block != configured.ed25519_verify_block
+                    && (ed25519_started(&stored) || ed25519_started(&configured))
+                {
+                    bail!(
+                        "the ED25519VERIFY activation (ed25519VerifyBlock) cannot change once it is active: head {head}, stored {:?}, configured {:?}",
+                        stored.ed25519_verify_block,
+                        configured.ed25519_verify_block
+                    );
+                }
                 if encrypted_changed && (started(&stored) || started(&configured)) {
                     bail!(
                         "the encrypted mempool schedule (encryptedMempoolBlock, \
@@ -373,6 +384,7 @@ fn same_but_fork_schedule(a: &ChainConfig, b: &ChainConfig) -> bool {
     let strip = |c: &ChainConfig| ChainConfig {
         encrypted_mempool_block: None,
         encrypted_mempool: None,
+        ed25519_verify_block: None,
         ..c.clone()
     };
     same_but_staking_schedule(&strip(a), &strip(b))

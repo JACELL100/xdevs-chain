@@ -3,7 +3,7 @@
 use crate::{
     db::{StateDbError, StateOverlay},
     env::{block_env, call_tx_env, cfg_env, tx_env, BLOB_TX_TYPE},
-    next_base_fee,
+    next_base_fee, precompiles,
     staking::{self, calls, StakingInputs, StakingValidator},
     xip0001, BlockAttributes, BlockExecutor, BuiltBlock, CallLimits, CallResult, EvmExecutor,
     ExecutionError, ExecutionOutcome,
@@ -28,8 +28,8 @@ use xdevs_primitives::{
     constants::{MAX_EXTRA_DATA_SIZE, STAKING_ADDRESS},
     set_compat_header_fields,
     xip0001::{check_shape, check_tx, TxShape, Xip0001Error, Xip0001Violation, MAX_GAS},
-    Address, Block, Bytes, EoaLockStatus, Header, Log, Receipt, ReceiptEnvelope, RecoveredTx,
-    Transaction, TxKind, Typed2718, B256, U256,
+    Address, Block, Bytes, ChainConfig, EoaLockStatus, Header, Log, Receipt, ReceiptEnvelope,
+    RecoveredTx, Transaction, TxKind, Typed2718, B256, U256,
 };
 use xdevs_state::{StateDiff, StateProvider};
 
@@ -40,12 +40,22 @@ const CALL_STIPEND: u64 = 2_300;
 
 type Evm<'o, 'a> = MainnetEvm<MainnetContext<&'o mut StateOverlay<'a>>>;
 
-fn new_evm<'o, 'a>(db: &'o mut StateOverlay<'a>, cfg: CfgEnv, block: BlockEnv) -> Evm<'o, 'a> {
-    Context::mainnet()
+/// A mainnet EVM over `db` with the xDEVS precompiles of the block (`ED25519VERIFY` from
+/// `ChainConfig::ed25519_verify_block` on).
+fn new_evm<'o, 'a>(
+    db: &'o mut StateOverlay<'a>,
+    cfg: CfgEnv,
+    block: BlockEnv,
+    chain: &ChainConfig,
+) -> Evm<'o, 'a> {
+    let number = block.number.saturating_to::<u64>();
+    let mut evm = Context::mainnet()
         .with_db(db)
         .with_block(block)
         .with_cfg(cfg)
-        .build_mainnet()
+        .build_mainnet();
+    evm.precompiles = precompiles::provider(chain, number);
+    evm
 }
 
 /// EVM instructions between two [`CallLimits`] checks (each check reads the clock).
@@ -305,6 +315,7 @@ impl EvmExecutor {
                 &mut db,
                 cfg_env(self.chain_config().chain_id),
                 block_env(header),
+                self.chain_config(),
             );
             self.system_call_to(&mut evm, to, data, "system call")?
         };
@@ -335,6 +346,7 @@ impl EvmExecutor {
                 &mut db,
                 cfg_env(self.chain_config().chain_id),
                 block_env(header),
+                self.chain_config(),
             );
             if self.chain_config().staking_active(header.number) {
                 next_validators = self.run_staking(&mut evm, header, staking)?;
@@ -432,7 +444,7 @@ impl EvmExecutor {
         }
         let (env, cfg) = self.call_env(db, header, request, gas_limit)?;
         let out = if limits.is_unbounded() {
-            new_evm(db, cfg, block_env(header)).transact(env)
+            new_evm(db, cfg, block_env(header), self.chain_config()).transact(env)
         } else {
             let mut evm = Context::mainnet()
                 .with_db(db)
@@ -443,6 +455,7 @@ impl EvmExecutor {
                     steps: 0,
                     tripped: None,
                 });
+            evm.precompiles = precompiles::provider(self.chain_config(), header.number);
             let out = evm.inspect_tx(env);
             if let Some(reason) = evm.inspector.tripped {
                 return Err(ExecutionError::Aborted(reason));
@@ -486,6 +499,7 @@ impl EvmExecutor {
                 },
                 inspector,
             ));
+        evm.precompiles = precompiles::provider(self.chain_config(), header.number);
         let out = evm.inspect_tx(env);
         if let Some(reason) = evm.inspector.0.tripped {
             return Err(ExecutionError::Aborted(reason));
@@ -878,6 +892,7 @@ impl EvmExecutor {
                 &mut db,
                 cfg_env(self.chain_config().chain_id),
                 block_env(&header),
+                self.chain_config(),
             );
             if self.chain_config().staking_active(header.number) {
                 next_validators = self.run_staking(&mut evm, &header, staking)?;

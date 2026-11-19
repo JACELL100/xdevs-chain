@@ -34,6 +34,7 @@ mod db;
 mod env;
 mod error;
 mod executor;
+pub mod precompiles;
 pub mod staking;
 #[cfg(test)]
 mod tests;

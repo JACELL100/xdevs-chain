@@ -160,6 +160,15 @@ pub struct ChainConfig {
     /// Committee key of the encrypted mempool (JSON `encryptedMempool`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encrypted_mempool: Option<EncryptedMempoolParams>,
+    /// First block in which the `ED25519VERIFY` precompile (`0x0A00…0001`, plan §10.3,
+    /// `docs/specs/precompiles.md`) exists (Phase 7, light clients and bridges). JSON
+    /// `ed25519VerifyBlock`; absent = never (the address is an empty account).
+    #[serde(
+        default,
+        with = "opt_u64_flex",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub ed25519_verify_block: Option<u64>,
 }
 
 /// Committee key of the encrypted mempool prototype (genesis `config.encryptedMempool`):
@@ -193,6 +202,7 @@ impl ChainConfig {
             block_reward: U256::ZERO,
             encrypted_mempool_block: None,
             encrypted_mempool: None,
+            ed25519_verify_block: None,
         }
     }
 
@@ -251,6 +261,13 @@ impl ChainConfig {
             .checked_mul(self.epoch_length)
     }
 
+    /// `true` if the `ED25519VERIFY` precompile exists in block `number`
+    /// (`number >= ed25519VerifyBlock`).
+    pub fn ed25519_verify_active(&self, number: u64) -> bool {
+        self.ed25519_verify_block
+            .is_some_and(|start| number >= start)
+    }
+
     /// `true` if block `number` is in the encrypted-mempool era (`number >=
     /// encryptedMempoolBlock` and a committee key is configured): its envelopes are
     /// decrypted by the next block, and it carries the decryption of its parent's.
@@ -305,6 +322,18 @@ mod tests {
         // F2: absent = never active.
         assert_eq!(cfg.xip0001_block, None);
         assert!(!cfg.xip0001_active(0) && !cfg.xip0001_active(u64::MAX));
+    }
+
+    #[test]
+    fn ed25519_verify_activation() {
+        let cfg: ChainConfig =
+            serde_json::from_str(r#"{"chainId": 1, "ed25519VerifyBlock": "0x10"}"#).unwrap();
+        assert_eq!(cfg.ed25519_verify_block, Some(16));
+        assert!(!cfg.ed25519_verify_active(15) && cfg.ed25519_verify_active(16));
+        // Absent = never, and not serialized.
+        let none = ChainConfig::new(1);
+        assert!(!none.ed25519_verify_active(u64::MAX));
+        assert!(!serde_json::to_string(&none).unwrap().contains("ed25519"));
     }
 
     #[test]
