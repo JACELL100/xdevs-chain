@@ -80,6 +80,8 @@ pub struct LocalNetOptions {
     /// Phase 5: the first `parallel_validators` genesis validators execute blocks with
     /// Block-STM (`[execution] parallel = true`, 4 threads); the others sequentially.
     pub parallel_validators: usize,
+    /// Phase 5: `localFeeMarketsBlock` of the genesis (`None` = never).
+    pub local_fee_markets_block: Option<u64>,
 }
 
 /// Phase 5 options of a [`LocalNet`]: a fresh committee key (trusted dealer) whose share
@@ -110,6 +112,7 @@ impl Default for LocalNetOptions {
             staking: None,
             encrypted_mempool: None,
             parallel_validators: 0,
+            local_fee_markets_block: None,
         }
     }
 }
@@ -396,6 +399,7 @@ impl LocalNet {
         if let Some(st) = &opts.staking {
             add_staking(&mut genesis, st)?;
         }
+        genesis.config.local_fee_markets_block = opts.local_fee_markets_block;
         let mut mempool_shares = Vec::new();
         if let Some(em) = &opts.encrypted_mempool {
             let n = u32::try_from(opts.validators).context("validator count")?;

@@ -587,10 +587,20 @@ impl TxPool for Pool {
     }
 
     fn best_txs(&self, base_fee: u64, gas_limit: u64) -> Vec<RecoveredTx> {
+        self.best_txs_with_local_fees(base_fee, gas_limit, &|_| 0)
+    }
+
+    fn best_txs_with_local_fees(
+        &self,
+        base_fee: u64,
+        gas_limit: u64,
+        local_fee: &dyn Fn(&RecoveredTx) -> u64,
+    ) -> Vec<RecoveredTx> {
         let inner = self.inner.read();
-        let fee_ok = |t: &PooledTx| t.max_fee() >= u128::from(base_fee);
+        let tx_base_fee = |t: &PooledTx| base_fee.saturating_add(local_fee(&t.tx));
+        let fee_ok = |t: &PooledTx| t.max_fee() >= u128::from(tx_base_fee(t));
         let candidate = |addr: Address, t: &PooledTx| {
-            t.tx.effective_tip(base_fee).map(|tip| Candidate {
+            t.tx.effective_tip(tx_base_fee(t)).map(|tip| Candidate {
                 tip,
                 seq: t.seq,
                 sender: addr,

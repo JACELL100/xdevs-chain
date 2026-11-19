@@ -385,6 +385,7 @@ fn same_but_fork_schedule(a: &ChainConfig, b: &ChainConfig) -> bool {
         encrypted_mempool_block: None,
         encrypted_mempool: None,
         ed25519_verify_block: None,
+        local_fee_markets_block: None,
         ..c.clone()
     };
     same_but_staking_schedule(&strip(a), &strip(b))

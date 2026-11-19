@@ -854,6 +854,41 @@ fn best_txs_effective_tip_depends_on_base_fee() {
 }
 
 #[test]
+fn best_txs_with_local_fees_prices_only_the_hot_target() {
+    let f = Fixture::new();
+    f.fund(addr(1), 0, RICH);
+    f.fund(addr(2), 0, RICH);
+    let g = GWEI as u128;
+    let a = transfer(addr(1), 0, 6 * g, 5 * g);
+    let b = transfer(addr(2), 0, 10 * g, 3 * g);
+    f.add(a.clone()).unwrap();
+    f.add(b.clone()).unwrap();
+    // Only a's target is congested.
+    let local = |extra: u64| move |t: &RecoveredTx| if t.sender == addr(1) { extra } else { 0 };
+    // No local fee: a tip 5 > b tip 3.
+    assert_eq!(
+        hashes(&f.pool.best_txs_with_local_fees(GWEI, 30_000_000, &local(0))),
+        hashes(&[a.clone(), b.clone()])
+    );
+    // Local 3 gwei: a tip = min(5, 6 - 1 - 3) = 2 < 3 -> b first; b unaffected.
+    assert_eq!(
+        hashes(
+            &f.pool
+                .best_txs_with_local_fees(GWEI, 30_000_000, &local(3 * GWEI))
+        ),
+        hashes(&[b.clone(), a.clone()])
+    );
+    // Local 6 gwei: a cannot pay 1 + 6 gwei -> left out, b still included.
+    assert_eq!(
+        hashes(
+            &f.pool
+                .best_txs_with_local_fees(GWEI, 30_000_000, &local(6 * GWEI))
+        ),
+        hashes(&[b])
+    );
+}
+
+#[test]
 fn best_txs_stops_sender_below_base_fee() {
     let f = Fixture::new();
     f.fund(addr(1), 0, RICH);

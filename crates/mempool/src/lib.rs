@@ -202,6 +202,20 @@ pub trait TxPool: Send + Sync {
     /// Does not remove them.
     fn best_txs(&self, base_fee: u64, gas_limit: u64) -> Vec<RecoveredTx>;
 
+    /// [`TxPool::best_txs`] under local fee markets (Phase 5, plan §15.2): a transaction
+    /// must cover `base_fee + local_fee(tx)` and is ranked by its tip above that, so a
+    /// congested contract's transactions compete among themselves for the local price
+    /// while everyone else keeps the global one. The default ignores `local_fee`.
+    fn best_txs_with_local_fees(
+        &self,
+        base_fee: u64,
+        gas_limit: u64,
+        local_fee: &dyn Fn(&RecoveredTx) -> u64,
+    ) -> Vec<RecoveredTx> {
+        let _ = local_fee;
+        self.best_txs(base_fee, gas_limit)
+    }
+
     /// A block was committed: drop included txs, promote queued txs whose nonce gap
     /// closed, re-check balances / nonces against the new state.
     fn on_block_committed(&self, block: &Block, receipts: &[ReceiptEnvelope]);

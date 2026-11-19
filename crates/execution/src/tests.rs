@@ -12,6 +12,7 @@ use xdevs_primitives::{
 };
 use xdevs_state::InMemoryState;
 
+mod local_fee;
 mod staking;
 mod xip0001;
 

@@ -45,7 +45,7 @@ use crate::{
     db::StateOverlay,
     env::{block_env, cfg_env, BLOB_TX_TYPE},
     executor::{make_receipt, new_evm, AppliedTx, FeeCredits, TxFailure},
-    EvmExecutor, ExecutionError, ExecutionOutcome, StakingInputs,
+    local_fee, EvmExecutor, ExecutionError, ExecutionOutcome, StakingInputs,
 };
 use mv::{lock, Base, Loc, MvMemory, Val, View};
 use scheduler::{Scheduler, Task, Version};
@@ -95,6 +95,8 @@ struct Prepared {
     tx: Result<RecoveredTx, String>,
     /// XIP-0001: `Some(sender already in the block)` when active.
     xip: Option<bool>,
+    /// Local base fee on top of the global one (Phase 5 local fee markets).
+    local_fee: u64,
 }
 
 impl Prepared {
@@ -113,7 +115,7 @@ struct Payload {
 
 enum Incarnation {
     Blocked(usize),
-    Done(Payload, Vec<(Loc, Val)>),
+    Done(Box<Payload>, Vec<(Loc, Val)>),
 }
 
 /// State shared by the workers of one block.
@@ -145,10 +147,12 @@ impl Shared<'_, '_> {
                 block_env(self.header),
                 cfg,
             );
+            let tx_base_fee = self.base_fee.saturating_add(self.txs[idx].local_fee);
+            evm.ctx.block.basefee = tx_base_fee;
             self.exec.apply_tx(
                 &mut evm,
                 tx,
-                self.base_fee,
+                tx_base_fee,
                 self.txs[idx].xip,
                 Some(&mut credits),
             )
@@ -158,11 +162,11 @@ impl Shared<'_, '_> {
             return Incarnation::Blocked(on);
         }
         Incarnation::Done(
-            Payload {
+            Box::new(Payload {
                 diff,
                 credits,
                 result,
-            },
+            }),
             view.into_reads(),
         )
     }
@@ -186,7 +190,7 @@ impl Shared<'_, '_> {
                         self.exec.chain_config().treasury,
                     );
                     let wrote_new = self.mv.record(idx, writes, reads, &payload.diff.codes);
-                    *lock(&self.outputs[idx]) = Some(payload);
+                    *lock(&self.outputs[idx]) = Some(*payload);
                     return self.sched.finish_execution(idx, incarnation, wrote_new);
                 }
             }
@@ -260,7 +264,11 @@ fn prepare(block: &Block, threads: usize, xip0001_active: bool) -> Vec<Prepared>
                 Ok(t) if xip0001_active => Some(!seen.insert(t.sender)),
                 _ => None,
             };
-            Prepared { tx, xip }
+            Prepared {
+                tx,
+                xip,
+                local_fee: 0,
+            }
         })
         .collect()
 }
@@ -321,7 +329,14 @@ impl EvmExecutor {
         }
 
         // 2. Senders, 3. Block-STM.
-        let txs = prepare(block, threads, cfg.xip0001_active(header.number));
+        let mut txs = prepare(block, threads, cfg.xip0001_active(header.number));
+        // Local fees come from the parent state (the table changes only after the txs).
+        for p in &mut txs {
+            if let Ok(tx) = &p.tx {
+                p.local_fee =
+                    local_fee::of_tx(&mut db, cfg, header.number, tx).map_err(state_err)?;
+            }
+        }
         let shared = Shared {
             exec: self,
             header,
@@ -357,6 +372,7 @@ impl EvmExecutor {
         // 4. Fold in block order with the sequential per-transaction checks.
         let mut receipts = Vec::with_capacity(n);
         let mut cumulative = 0u64;
+        let mut gas_by_target = local_fee::GasByTarget::new(cfg, header.number);
         for (i, tx) in block.body.iter().enumerate() {
             let hash = *tx.tx_hash();
             let rtx = match &txs[i].tx {
@@ -410,9 +426,11 @@ impl EvmExecutor {
                 .map_err(state_err)?;
             db.credit(cfg.treasury, credits.treasury)
                 .map_err(state_err)?;
+            gas_by_target.record(rtx, applied.gas_used);
             cumulative += applied.gas_used;
             receipts.push(make_receipt(rtx, applied, cumulative));
         }
+        gas_by_target.apply(&mut db, header).map_err(state_err)?;
         PARALLEL_BLOCKS.fetch_add(1, SeqCst);
         Self::finish(state, db.into_diff(), receipts, cumulative, next_validators)
             .map(|o| (o, stats))

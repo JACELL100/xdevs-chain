@@ -157,6 +157,15 @@ pub struct ChainConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub encrypted_mempool_block: Option<u64>,
+    /// First block with local fee markets (Phase 5, plan §15.2, [`crate::local_fee`]):
+    /// transactions to a congested target pay its local base fee on top of the global
+    /// one. JSON `localFeeMarketsBlock`; absent = never (a fork parameter).
+    #[serde(
+        default,
+        with = "opt_u64_flex",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub local_fee_markets_block: Option<u64>,
     /// Committee key of the encrypted mempool (JSON `encryptedMempool`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encrypted_mempool: Option<EncryptedMempoolParams>,
@@ -201,6 +210,7 @@ impl ChainConfig {
             staking_validators_block: None,
             block_reward: U256::ZERO,
             encrypted_mempool_block: None,
+            local_fee_markets_block: None,
             encrypted_mempool: None,
             ed25519_verify_block: None,
         }
@@ -276,6 +286,13 @@ impl ChainConfig {
             && self
                 .encrypted_mempool_block
                 .is_some_and(|start| number >= start)
+    }
+
+    /// `true` if block `number` applies local fee markets (`number >=
+    /// localFeeMarketsBlock`).
+    pub fn local_fee_markets_active(&self, number: u64) -> bool {
+        self.local_fee_markets_block
+            .is_some_and(|start| number >= start)
     }
 
     /// Inner gas the envelopes of one block may commit to in total (half the block gas

@@ -79,6 +79,29 @@ pub mod types {
         pub delegated_to: Option<xdevs_primitives::Address>,
     }
 
+    /// Result of `xdevs_getLocalFee(address, blockTag)` (Phase 5 local fee markets, plan
+    /// §15.2): the base fee a transaction to `address` pays in the block after the
+    /// requested one.
+    ///
+    /// `{ "active": true, "address": "0x…", "baseFee": "0x3b9aca00",
+    ///    "localBaseFee": "0x5f5e100", "totalBaseFee": "0x4190ab00" }`.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct LocalFeeInfo {
+        /// Local fee markets apply in that block (`localFeeMarketsBlock`).
+        pub active: bool,
+        /// The target (top-level `to`).
+        pub address: xdevs_primitives::Address,
+        /// Global EIP-1559 base fee of that block (wei).
+        pub base_fee: xdevs_primitives::U256,
+        /// Local base fee of `address` in that block (wei; 0 if not congested or not
+        /// active).
+        pub local_base_fee: xdevs_primitives::U256,
+        /// `baseFee + localBaseFee`: the minimum `maxFeePerGas` of a transaction to
+        /// `address` (before any tip).
+        pub total_base_fee: xdevs_primitives::U256,
+    }
+
     /// Result of `xdevs_getCommitCertificate(block)` (Phase 2, research doc §6.5): the
     /// precommit signatures that finalized the block, plus the canonical RLP (`raw`) a
     /// client can verify against the validator set.
@@ -237,6 +260,12 @@ pub trait RpcBackend: Send + Sync + 'static {
     /// The default reports the method as unsupported.
     async fn eoa_lock(&self, _address: Address, _block: BlockId) -> BackendResult<EoaLockInfo> {
         Err(RpcBackendError::Unsupported("xdevs_getEoaLock".into()))
+    }
+
+    /// `xdevs_getLocalFee(address, blockTag)`: local fee market price of `address` for
+    /// the block after `block` (Phase 5). The default reports the method as unsupported.
+    async fn local_fee(&self, _address: Address, _block: BlockId) -> BackendResult<LocalFeeInfo> {
+        Err(RpcBackendError::Unsupported("xdevs_getLocalFee".into()))
     }
 
     /// `net_peerCount`: connected p2p peers (Phase 2). The default reports 0.

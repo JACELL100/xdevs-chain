@@ -33,6 +33,7 @@ use xdevs_network::NetworkHandle;
 use xdevs_primitives::reexports::alloy_primitives::U64;
 use xdevs_primitives::{
     constants::ENCRYPTED_INBOX_ADDRESS,
+    local_fee::{self, LOCAL_FEE_MARKET_ADDRESS},
     xip0001::{Xip0001Error, LOCK_SLOT},
     Address, Block, Bytes, ChainConfig, Header, ReceiptEnvelope, RecoveredTx, Transaction,
     TxEnvelope, TxKind, B256, U256,
@@ -962,6 +963,31 @@ impl RpcBackend for NodeBackend {
                 status,
                 word: B256::from(word),
                 delegated_to,
+            })
+        })
+        .await
+    }
+
+    async fn local_fee(&self, address: Address, block: BlockId) -> BackendResult<LocalFeeInfo> {
+        self.read(move |s, ctx| {
+            let (header, state) = state_at(s, block)?;
+            let next = header.number + 1;
+            let active = ctx.cfg.local_fee_markets_active(next);
+            let local = if active {
+                let word = state
+                    .storage(LOCAL_FEE_MARKET_ADDRESS, local_fee::slot(address))
+                    .map_err(state_err)?;
+                local_fee::fee_at(word, next)
+            } else {
+                0
+            };
+            let base = next_base_fee(&header, &ctx.cfg);
+            Ok(LocalFeeInfo {
+                active,
+                address,
+                base_fee: U256::from(base),
+                local_base_fee: U256::from(local),
+                total_base_fee: U256::from(base) + U256::from(local),
             })
         })
         .await

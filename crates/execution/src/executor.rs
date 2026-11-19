@@ -3,7 +3,7 @@
 use crate::{
     db::{StateDbError, StateOverlay},
     env::{block_env, call_tx_env, cfg_env, tx_env, BLOB_TX_TYPE},
-    next_base_fee, precompiles,
+    local_fee, next_base_fee, precompiles,
     staking::{self, calls, StakingInputs, StakingValidator},
     xip0001, BlockAttributes, BlockExecutor, BuiltBlock, CallLimits, CallResult, EvmExecutor,
     ExecutionError, ExecutionOutcome,
@@ -444,6 +444,7 @@ impl EvmExecutor {
         let mut db = StateOverlay::new(state);
         let mut receipts = Vec::with_capacity(block.body.len());
         let mut cumulative = 0u64;
+        let mut gas_by_target = local_fee::GasByTarget::new(self.chain_config(), header.number);
         let xip0001_active = self.chain_config().xip0001_active(header.number);
         let mut senders: BTreeSet<Address> = BTreeSet::new();
         let mut next_validators = None;
@@ -476,7 +477,13 @@ impl EvmExecutor {
                     });
                 }
                 let xip = xip0001_active.then(|| senders.contains(&rtx.sender));
-                let applied = match self.apply_tx(&mut evm, &rtx, base_fee, xip, None) {
+                // Local fee markets: the tx's base fee is global + local (plan §15.2).
+                let tx_base_fee = base_fee.saturating_add(
+                    local_fee::of_tx(evm.ctx.db_mut(), self.chain_config(), header.number, &rtx)
+                        .map_err(|e| ExecutionError::State(e.0))?,
+                );
+                evm.ctx.block.basefee = tx_base_fee;
+                let applied = match self.apply_tx(&mut evm, &rtx, tx_base_fee, xip, None) {
                     Ok(a) => a,
                     Err(TxFailure::Invalid(e)) => {
                         return Err(ExecutionError::InvalidTransaction {
@@ -493,10 +500,14 @@ impl EvmExecutor {
                     Err(TxFailure::Fatal(e)) => return Err(e),
                 };
                 senders.insert(rtx.sender);
+                gas_by_target.record(&rtx, applied.gas_used);
                 cumulative += applied.gas_used;
                 receipts.push(make_receipt(&rtx, applied, cumulative));
             }
         }
+        gas_by_target
+            .apply(&mut db, header)
+            .map_err(|e| ExecutionError::State(e.0))?;
         Self::finish(state, db.into_diff(), receipts, cumulative, next_validators)
     }
 
@@ -1000,6 +1011,7 @@ impl EvmExecutor {
         let mut included: BTreeSet<Address> = BTreeSet::new();
         let xip0001_active = self.chain_config().xip0001_active(header.number);
         let mut cumulative = 0u64;
+        let mut gas_by_target = local_fee::GasByTarget::new(self.chain_config(), header.number);
         let mut next_validators = None;
         {
             let mut evm = new_evm(
@@ -1030,9 +1042,15 @@ impl EvmExecutor {
                     continue;
                 }
                 let xip = xip0001_active.then(|| included.contains(&tx.sender));
-                match self.apply_tx(&mut evm, &tx, base_fee, xip, None) {
+                let tx_base_fee = base_fee.saturating_add(
+                    local_fee::of_tx(evm.ctx.db_mut(), self.chain_config(), header.number, &tx)
+                        .map_err(|e| ExecutionError::State(e.0))?,
+                );
+                evm.ctx.block.basefee = tx_base_fee;
+                match self.apply_tx(&mut evm, &tx, tx_base_fee, xip, None) {
                     Ok(applied) => {
                         included.insert(tx.sender);
+                        gas_by_target.record(&tx, applied.gas_used);
                         cumulative += applied.gas_used;
                         receipts.push(make_receipt(&tx, applied, cumulative));
                         senders.push(tx.sender);
@@ -1070,6 +1088,9 @@ impl EvmExecutor {
             }
         }
 
+        gas_by_target
+            .apply(&mut db, &header)
+            .map_err(|e| ExecutionError::State(e.0))?;
         let outcome = Self::finish(state, db.into_diff(), receipts, cumulative, next_validators)?;
         header.state_root = outcome.state_root;
         header.transactions_root = compute_transactions_root(&body);

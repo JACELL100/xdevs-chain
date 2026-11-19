@@ -13,11 +13,12 @@ use xdevs_crypto::encrypted_tx::{is_envelope_target, EncryptedPayload};
 use xdevs_execution::{next_base_fee, BlockAttributes, BuiltBlock, EvmExecutor, StakingInputs};
 use xdevs_mempool::{Pool, TxPool};
 use xdevs_primitives::{
+    local_fee::{self, LOCAL_FEE_MARKET_ADDRESS},
     Address, Block, Bytes, ChainConfig, Header, ReceiptEnvelope, RecoveredTx, Transaction, TxHash,
-    B256,
+    TxKind, B256,
 };
 use xdevs_rpc::ChainEvents;
-use xdevs_state::{history::DEFAULT_STATE_HISTORY_BLOCKS, DbStateProvider};
+use xdevs_state::{history::DEFAULT_STATE_HISTORY_BLOCKS, DbStateProvider, StateProvider};
 use xdevs_storage::DbRead;
 
 /// Summary of a produced block.
@@ -163,6 +164,37 @@ pub(crate) struct NextBlock {
     pub prefix: Vec<RecoveredTx>,
 }
 
+/// The pool's best transactions for the child of `parent`. From `localFeeMarketsBlock` on
+/// (Phase 5, plan §15.2) a transaction to a congested target must also pay its local fee
+/// (read from the head state) and is ranked by its tip above global + local.
+fn best_candidates(
+    snapshot: &dyn DbRead,
+    pool: &Pool,
+    cfg: &ChainConfig,
+    parent: &Header,
+    base_fee: u64,
+) -> Vec<RecoveredTx> {
+    let number = parent.number + 1;
+    if !cfg.local_fee_markets_active(number) {
+        return pool.best_txs(base_fee, cfg.block_gas_limit);
+    }
+    let state = DbStateProvider::new(snapshot);
+    let cache = std::cell::RefCell::new(std::collections::BTreeMap::new());
+    let local = |tx: &RecoveredTx| -> u64 {
+        let TxKind::Call(to) = tx.kind() else {
+            return 0;
+        };
+        *cache.borrow_mut().entry(to).or_insert_with(|| {
+            state
+                .storage(LOCAL_FEE_MARKET_ADDRESS, local_fee::slot(to))
+                .map(|word| local_fee::fee_at(word, number))
+                // A read failure only affects ordering; the executor re-checks.
+                .unwrap_or(0)
+        })
+    };
+    pool.best_txs_with_local_fees(base_fee, cfg.block_gas_limit, &local)
+}
+
 /// Build AND execute the next block on the latest committed state of `snapshot`
 /// without committing it (dev producer and consensus proposer). Returns the parent
 /// header and the built block: base fee `next_base_fee(parent)`, `prev_randao` = parent
@@ -183,7 +215,7 @@ pub(crate) fn build_next_block(
         candidates.extend(within_envelope_budget(
             cfg,
             parent.number + 1,
-            pool.best_txs(base_fee, cfg.block_gas_limit),
+            best_candidates(snapshot, pool, cfg, &parent, base_fee),
         ));
     }
     let mut bytes = 0usize;
