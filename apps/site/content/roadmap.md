@@ -57,6 +57,8 @@ Long-lived `xdevs-testnet-1` with no resets, 20+ independent validators, snapsho
 
 Light-client bridges only (no multisig bridges), canonical bridged tokens, independent security audits, legal and entity setup, mainnet tokenomics and a genesis ceremony.
 
+- Light-client bridges with Ethereum Sepolia: prototype <span class="status ok">Built</span>, not deployed. An Ethereum sync-committee light client in Solidity on xDEVS Chain (BLS through the EIP-2537 precompiles), an xDEVS commit-certificate light client in Solidity on Sepolia (Ed25519 in Solidity, validator sets proven from Staking storage), lock/mint and burn/release endpoints with canonical tokens, a permissionless relayer, and the `ED25519VERIFY` precompile behind `ed25519VerifyBlock`. Tested on real Sepolia and Enclave data. Next: an external audit, then a Sepolia/Enclave testnet deployment ([how bridges work](/concepts/bridges)).
+
 :::info[No mainnet date]
 There is no mainnet and no token sale. Testnet tokens (tXDS) have no value and will not convert to mainnet XDS.
 :::

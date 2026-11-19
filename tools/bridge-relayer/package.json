@@ -1,0 +1,29 @@
+{
+  "name": "@xdevs/bridge-relayer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Permissionless relayer for the xDEVS Chain <-> Ethereum Sepolia light-client bridges (Phase 7 prototype). Anyone can run it; it holds no trust.",
+  "license": "Apache-2.0",
+  "author": "THE xDEVS",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/cli.ts",
+    "fixtures": "node --disable-warning=ExperimentalWarning scripts/fixtures.ts",
+    "e2e": "node --disable-warning=ExperimentalWarning e2e/e2e.ts",
+    "test": "node --test --disable-warning=ExperimentalWarning \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@noble/curves": "1.9.1",
+    "@xdevs/sdk": "file:../../sdk/ts",
+    "viem": "2.57.17"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}

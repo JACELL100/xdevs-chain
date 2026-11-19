@@ -162,12 +162,39 @@ jobs:
       - run: forge build --sizes
       - run: forge test
 
+  # Phase 7 light-client bridges: both directions end to end on two anvils with the real contracts and relayer
+  # (dev consensus keys; the real-data checks are the Foundry fixtures tests).
+  bridge-e2e:
+    name: bridge e2e (anvil)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.9.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            tools/bridge-relayer/package-lock.json
+            package-lock.json
+      - run: npm ci --no-audit --no-fund && npm run build:sdk
+      - run: npm ci --no-audit --no-fund
+        working-directory: tools/bridge-relayer
+      - run: forge build
+        working-directory: contracts
+      - run: npm run e2e
+        working-directory: tools/bridge-relayer
+
   js:
     name: js (${{ matrix.package }})
     strategy:
       fail-fast: false
       matrix:
-        package: [apps/faucet, apps/indexer]
+        package: [apps/faucet, apps/indexer, tools/bridge-relayer]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -184,7 +211,7 @@ jobs:
       # The indexer depends on the local SDK ("file:../../sdk/ts"); its dist/ is not committed. The SDK is a
       # member of the root npm workspace, so install the workspace and build it first.
       - name: Build @xdevs/sdk
-        if: matrix.package == 'apps/indexer'
+        if: matrix.package == 'apps/indexer' || matrix.package == 'tools/bridge-relayer'
         working-directory: .
         run: npm ci --no-audit --no-fund && npm run build:sdk
       - run: npm ci
