@@ -59,6 +59,10 @@ evm_timeout_ms = 5000
 max_in_flight_per_connection = 32
 rate_limit_per_ip = 0              # 0 = off
 
+[execution]
+parallel = false                   # Block-STM parallel block execution
+threads = 0                        # 0 = one per CPU core
+
 [mempool]
 max_txs = 10_000
 max_bytes = 67_108_864
@@ -151,6 +155,20 @@ Block time and Tendermint round timeouts. Each `*_delta_ms` is added per extra r
 | `max_bytes` | `67108864` (64 MiB) | Max pooled bytes |
 | `max_per_sender` | `64` | Max transactions per sender |
 
+### `[execution]`
+
+How this node executes blocks it receives (Phase 5). A local choice, not a consensus rule:
+parallel and sequential execution produce identical receipts and state roots, so each
+operator decides independently and no activation height is involved.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `parallel` | `false` | Execute blocks with Block-STM (optimistic parallel execution, re-executing conflicting transactions). Worth it from about 4 cores; on a 1-core VM it only adds overhead |
+| `threads` | `0` | Worker threads; `0` = one per available core |
+
+Block building stays sequential. Design, equivalence tests and benchmark numbers:
+[parallel execution research doc](https://github.com/JACELL100/xdevs-chain/blob/main/docs/research/parallel-execution.md).
+
 ### `[log]`
 
 | Key | Default | Meaning |
@@ -164,4 +182,4 @@ Block time and Tendermint round timeouts. Each `*_delta_ms` is added per extra r
 
 ## Genesis file
 
-`genesis.json` follows the shape in [§21 of the implementation plan](https://github.com/JACELL100/xdevs-chain/blob/main/xDEVS_Chain_Implementation_Plan.md): a `config` object (`chainId`, `blockTimeMs`, `baseFee` parameters including `burnBps`, `treasury`, `xip0001Block`, ...), `gasLimit`, `alloc` (balances, code, storage, nonces) and, for consensus networks, `validators`. `xdevs init --dev` writes the dev genesis; [`deploy/configs/dev-genesis.json`](https://github.com/JACELL100/xdevs-chain/blob/main/deploy/configs/dev-genesis.json) is a copy.
+`genesis.json` follows the shape in [§21 of the implementation plan](https://github.com/JACELL100/xdevs-chain/blob/main/xDEVS_Chain_Implementation_Plan.md): a `config` object (`chainId`, `blockTimeMs`, `baseFee` parameters including `burnBps`, `treasury`, `xip0001Block`, ...), `gasLimit`, `alloc` (balances, code, storage, nonces) and, for consensus networks, `validators`. Fork activations are optional `config` keys (absent = never), e.g. `localFeeMarketsBlock` for [local fee markets](https://github.com/JACELL100/xdevs-chain/blob/main/docs/research/local-fee-markets.md). `xdevs init --dev` writes the dev genesis; [`deploy/configs/dev-genesis.json`](https://github.com/JACELL100/xdevs-chain/blob/main/deploy/configs/dev-genesis.json) is a copy.

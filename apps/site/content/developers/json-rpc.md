@@ -107,7 +107,7 @@ Requests are limited to 5 MiB and responses to 32 MiB.
 | `eth_subscribe("vaultEvents", {account?})` | Real-time vault alerts (WebSocket) | <span class="status ok">Implemented</span> |
 | `xdevs_getMempoolEncryptionKey()` | Committee key of the encrypted mempool (prototype, off unless the genesis sets `encryptedMempoolBlock`) | <span class="status ok">Prototype</span> |
 | `xdevs_sendEncryptedTransaction(raw)` | Submit an envelope whose payload is encrypted to the committee | <span class="status ok">Prototype</span> |
-| `xdevs_localFee(contract, block?)` | Local fee-market price for a contract | <span class="status planned">Phase 5</span> |
+| `xdevs_localFee(contract, block?)` (alias `xdevs_getLocalFee`) | Global + local base fee for transactions to `contract` (local fee markets, off unless the genesis sets `localFeeMarketsBlock`) | <span class="status ok">Implemented</span> |
 
 The plan originally named this method `xdevs_getCommit`; the node and the SDK's `getCommit` use `xdevs_getCommitCertificate`.
 
@@ -417,6 +417,29 @@ it like `eth_sendRawTransaction` and returns the envelope's hash. Malformed enve
 refused with `-32000`. (Sending one through `eth_sendRawTransaction` works too: it is
 included, pays gas and is never decrypted.) The inner transaction's receipt appears under
 its own hash in block N+1.
+
+### Local fee markets (Phase 5)
+
+`xdevs_localFee(contract, block?)` (also served as `xdevs_getLocalFee`) returns the base
+fee a transaction whose top-level `to` is `contract` pays in the block after `block`
+(default `latest`):
+
+```json
+{
+  "jsonrpc": "2.0", "id": 1, "method": "xdevs_localFee",
+  "params": ["0x5FbDB2315678afecb367f032d93F642f64180aa3"]
+}
+→ { "active": true, "contract": "0x5fbd…0aa3", "globalBaseFee": "0x3b9aca00",
+    "localBaseFee": "0x5f5e100", "totalBaseFee": "0x4190ab00" }
+```
+
+A contract that used more than 25% of a block's gas gets a local base fee that rises like
+EIP-1559 while it stays congested and decays when it does not; everyone else pays only
+`globalBaseFee`. Set `maxFeePerGas ≥ totalBaseFee` (plus headroom) for transactions to
+it; the tip is what is paid above `totalBaseFee`. `active` is `false` (and the local fee 0)
+before `localFeeMarketsBlock`. Receipts' `effectiveGasPrice` and `eth_feeHistory` report
+the global price only. Design:
+[local fee markets research doc](https://github.com/JACELL100/xdevs-chain/blob/main/docs/research/local-fee-markets.md).
 
 ## Not implemented yet
 

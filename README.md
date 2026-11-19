@@ -47,7 +47,8 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | Staking-driven validator set (epochs, rewards, downtime and double-sign slashing) | ✅ Built and tested on local networks; Enclave activation pending (Phase 3) |
 | Transaction simulation and safety RPCs (`xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, `vaultEvents`) | ✅ Built and tested (Phase 4); reference wallet uses them when the node serves them |
 | Encrypted mempool (threshold encryption, commit-then-reveal; `xdevs_sendEncryptedTransaction`) | 🧪 Prototype behind `encryptedMempoolBlock`, off on every network; a test shows it prevents a sandwich attack; needs a DKG and external review ([research doc](docs/research/encrypted-mempool.md)) |
-| Parallel execution, local fee markets | 📋 Planned (Phase 5) |
+| Block-STM parallel execution | ✅ Built and tested behind `[execution] parallel` (off by default, node-local; identical results to sequential execution, checked by differential tests and a mixed parallel/sequential local network) ([research doc](docs/research/parallel-execution.md)) |
+| Local fee markets (per-contract congestion pricing, `xdevs_localFee`) | 🧪 Built behind `localFeeMarketsBlock`, off on every network ([research doc](docs/research/local-fee-markets.md)) |
 | Light-client bridges (Ethereum Sepolia) | 🧪 Prototype, not deployed: sync-committee light client on xDEVS, commit-certificate light client on Sepolia, lock/mint + burn/release, permissionless relayer, `ED25519VERIFY` precompile behind `ed25519VerifyBlock`; needs an external audit ([research doc](docs/research/light-client-bridges.md)) |
 
 ### Node status (what the Rust node does today)

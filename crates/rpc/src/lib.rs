@@ -79,25 +79,26 @@ pub mod types {
         pub delegated_to: Option<xdevs_primitives::Address>,
     }
 
-    /// Result of `xdevs_getLocalFee(address, blockTag)` (Phase 5 local fee markets, plan
-    /// §15.2): the base fee a transaction to `address` pays in the block after the
-    /// requested one.
+    /// Result of `xdevs_localFee(contract, blockTag)` (alias `xdevs_getLocalFee`; Phase 5
+    /// local fee markets, plan §15.2): the base fee a transaction to `contract` pays in
+    /// the block after the requested one. Field names match the TypeScript SDK's
+    /// `getLocalFee`.
     ///
-    /// `{ "active": true, "address": "0x…", "baseFee": "0x3b9aca00",
+    /// `{ "active": true, "contract": "0x…", "globalBaseFee": "0x3b9aca00",
     ///    "localBaseFee": "0x5f5e100", "totalBaseFee": "0x4190ab00" }`.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub struct LocalFeeInfo {
         /// Local fee markets apply in that block (`localFeeMarketsBlock`).
         pub active: bool,
-        /// The target (top-level `to`).
-        pub address: xdevs_primitives::Address,
+        /// The target (top-level `to`; any account, not only contracts).
+        pub contract: xdevs_primitives::Address,
         /// Global EIP-1559 base fee of that block (wei).
-        pub base_fee: xdevs_primitives::U256,
+        pub global_base_fee: xdevs_primitives::U256,
         /// Local base fee of `address` in that block (wei; 0 if not congested or not
         /// active).
         pub local_base_fee: xdevs_primitives::U256,
-        /// `baseFee + localBaseFee`: the minimum `maxFeePerGas` of a transaction to
+        /// `globalBaseFee + localBaseFee`: the minimum `maxFeePerGas` of a transaction to
         /// `address` (before any tip).
         pub total_base_fee: xdevs_primitives::U256,
     }
@@ -262,10 +263,10 @@ pub trait RpcBackend: Send + Sync + 'static {
         Err(RpcBackendError::Unsupported("xdevs_getEoaLock".into()))
     }
 
-    /// `xdevs_getLocalFee(address, blockTag)`: local fee market price of `address` for
+    /// `xdevs_localFee(contract, blockTag)`: local fee market price of `contract` for
     /// the block after `block` (Phase 5). The default reports the method as unsupported.
     async fn local_fee(&self, _address: Address, _block: BlockId) -> BackendResult<LocalFeeInfo> {
-        Err(RpcBackendError::Unsupported("xdevs_getLocalFee".into()))
+        Err(RpcBackendError::Unsupported("xdevs_localFee".into()))
     }
 
     /// `net_peerCount`: connected p2p peers (Phase 2). The default reports 0.

@@ -118,7 +118,7 @@ async fn hot_contract_fee_rises_unrelated_transfers_pay_global_fee() -> anyhow::
         )
         .await?;
     net.wait_receipt(0, deploy, secs(60)).await?;
-    let fee0 = net.call(0, "xdevs_getLocalFee", vec![json!(hot)]).await?;
+    let fee0 = net.call(0, "xdevs_localFee", vec![json!(hot)]).await?;
     assert_eq!(fee0["active"], json!(true));
     assert_eq!(quantity(&fee0["localBaseFee"])?, U256::ZERO);
 
@@ -169,7 +169,7 @@ async fn hot_contract_fee_rises_unrelated_transfers_pay_global_fee() -> anyhow::
                 vec![json!(hot), json!(format!("{:#x}", block - 1))],
             )
             .await?;
-        assert_eq!(quantity(&info["baseFee"])?, base, "block {block}");
+        assert_eq!(quantity(&info["globalBaseFee"])?, base, "block {block}");
         let local = quantity(&info["localBaseFee"])?;
         let paid = balance_at(&net, HOT_SENDER, block - 1).await?
             - balance_at(&net, HOT_SENDER, block).await?;
@@ -201,10 +201,10 @@ async fn hot_contract_fee_rises_unrelated_transfers_pay_global_fee() -> anyhow::
         positive.iter().max() > positive.first(),
         "local fee did not rise while congested: {locals:?}"
     );
-    let now = net.call(0, "xdevs_getLocalFee", vec![json!(hot)]).await?;
+    let now = net.call(0, "xdevs_localFee", vec![json!(hot)]).await?;
     assert_eq!(
         quantity(&now["totalBaseFee"])?,
-        quantity(&now["baseFee"])? + quantity(&now["localBaseFee"])?
+        quantity(&now["globalBaseFee"])? + quantity(&now["localBaseFee"])?
     );
 
     let head = net.max_head().await;

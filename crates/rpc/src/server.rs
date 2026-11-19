@@ -92,6 +92,7 @@ pub fn build_module(
     method!("eth_getBlockReceipts", eth_get_block_receipts);
     method!("eth_getLogs", eth_get_logs);
     method!("xdevs_getEoaLock", xdevs_get_eoa_lock);
+    method!("xdevs_localFee", xdevs_get_local_fee);
     method!("xdevs_getLocalFee", xdevs_get_local_fee);
     method!("xdevs_getCommitCertificate", xdevs_get_commit_certificate);
     method!("xdevs_submitEvidence", xdevs_submit_evidence);

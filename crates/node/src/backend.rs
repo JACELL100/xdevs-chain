@@ -984,8 +984,8 @@ impl RpcBackend for NodeBackend {
             let base = next_base_fee(&header, &ctx.cfg);
             Ok(LocalFeeInfo {
                 active,
-                address,
-                base_fee: U256::from(base),
+                contract: address,
+                global_base_fee: U256::from(base),
                 local_base_fee: U256::from(local),
                 total_base_fee: U256::from(base) + U256::from(local),
             })
