@@ -7,7 +7,9 @@
 //! * **validator** (Phase 2): [`ChainApp`] driven by the Malachite BFT engine with the
 //!   node's Ed25519 consensus key; tx gossip over `xdevs-network`. From the genesis
 //!   config's `stakingValidatorsBlock` on (Phase 3) the validator set follows the Staking
-//!   contract epoch by epoch ([`staking`]).
+//!   contract epoch by epoch ([`staking`]). From `encryptedMempoolBlock` on (Phase 5
+//!   prototype) envelopes are ordered blind and decrypted by the committee one block
+//!   later ([`encrypted`]).
 //! * **full node** (Phase 2): the same engine without a key: follows the chain through
 //!   consensus messages and block sync, never signs.
 //! * **RPC only**: serves the stored chain.
@@ -30,6 +32,7 @@ mod backend;
 pub mod chain;
 mod config;
 pub mod consensus;
+pub mod encrypted;
 mod events;
 mod metrics;
 mod producer;
@@ -377,6 +380,34 @@ impl Node {
             .map(|k| xdevs_consensus::ValidatorKey(k.public_key()).address());
         let node_key = consensus::load_node_key(self.config.p2p.node_key_file.as_deref())?;
 
+        // Phase 5: the encrypted mempool's share pool (every consensus node verifies and
+        // relays shares; validators with a key share also release their own).
+        let encryption = match xdevs_crypto::encrypted_tx::MempoolKey::from_config(&self.cfg)
+            .map_err(|e| anyhow!("genesis encryptedMempool: {e}"))?
+        {
+            None => None,
+            Some(key) => {
+                let share = if self.mode == NodeMode::Validator {
+                    consensus::load_mempool_share(&self.config.validator, &key)?
+                } else {
+                    None
+                };
+                tracing::info!(
+                    target: "xdevs::node",
+                    activation = ?self.cfg.encrypted_mempool_block,
+                    threshold = key.threshold,
+                    committee = key.committee_size(),
+                    key_id = %key.key_id,
+                    share_index = ?share.as_ref().map(|s| s.index()),
+                    "encrypted mempool configured (prototype)"
+                );
+                Some(Arc::new(encrypted::Encryption::new(
+                    Arc::new(encrypted::SharePool::new(key)),
+                    share,
+                )))
+            }
+        };
+
         if self.config.gossip.enabled {
             let mut seed = zeroize::Zeroizing::new(*node_key.as_bytes());
             let keypair =
@@ -386,7 +417,13 @@ impl Node {
                 self.cfg.chain_id,
                 keypair,
                 events::publishing_gossip_validator(
-                    consensus::gossip_validator(self.pool.clone(), self.cfg.chain_id),
+                    match &encryption {
+                        Some(enc) => encrypted::share_gossip_validator(
+                            consensus::gossip_validator(self.pool.clone(), self.cfg.chain_id),
+                            enc.pool.clone(),
+                        ),
+                        None => consensus::gossip_validator(self.pool.clone(), self.cfg.chain_id),
+                    },
                     self.pool.clone(),
                     events.clone(),
                 ),
@@ -399,7 +436,11 @@ impl Node {
                 listen = %self.config.gossip.network.listen,
                 "tx gossip started"
             );
-            handle.gossip = Some(Arc::new(gossip));
+            let gossip = Arc::new(gossip);
+            if let Some(enc) = &encryption {
+                let _ = enc.gossip.set(gossip.clone());
+            }
+            handle.gossip = Some(gossip);
         }
 
         let (engine_config, keys) = consensus::engine_setup(
@@ -408,7 +449,7 @@ impl Node {
             consensus_key.as_ref(),
             &node_key,
         );
-        let app = ChainApp::new(
+        let mut app = ChainApp::new(
             self.db.clone(),
             self.pool.clone(),
             self.executor.clone(),
@@ -423,6 +464,9 @@ impl Node {
             },
         )
         .with_events(events);
+        if let Some(enc) = encryption {
+            app = app.with_encryption(enc);
+        }
         if let Some(start) = self.cfg.staking_validators_block {
             tracing::info!(
                 target: "xdevs::node",

@@ -9,9 +9,13 @@
 use crate::chain::{self, Db};
 use parking_lot::Mutex;
 use std::sync::Arc;
+use xdevs_crypto::encrypted_tx::{is_envelope_target, EncryptedPayload};
 use xdevs_execution::{next_base_fee, BlockAttributes, BuiltBlock, EvmExecutor, StakingInputs};
 use xdevs_mempool::{Pool, TxPool};
-use xdevs_primitives::{Address, Block, Bytes, ChainConfig, Header, ReceiptEnvelope, TxHash, B256};
+use xdevs_primitives::{
+    Address, Block, Bytes, ChainConfig, Header, ReceiptEnvelope, RecoveredTx, Transaction, TxHash,
+    B256,
+};
 use xdevs_rpc::ChainEvents;
 use xdevs_state::{history::DEFAULT_STATE_HISTORY_BLOCKS, DbStateProvider};
 use xdevs_storage::DbRead;
@@ -111,6 +115,7 @@ impl BlockProducer {
                 beneficiary: self.fee_recipient,
                 extra_data: self.extra_data.clone(),
                 with_txs: true,
+                prefix: Vec::new(),
             },
             &StakingInputs::default(),
         )?;
@@ -153,6 +158,9 @@ pub(crate) struct NextBlock {
     pub extra_data: Bytes,
     /// `false` = an empty block (fallback when a full build would miss a deadline).
     pub with_txs: bool,
+    /// Candidates that go before the pool's (Phase 5: the parent's decrypted
+    /// envelopes, in committed order). Included even when `with_txs` is `false`.
+    pub prefix: Vec<RecoveredTx>,
 }
 
 /// Build AND execute the next block on the latest committed state of `snapshot`
@@ -170,11 +178,14 @@ pub(crate) fn build_next_block(
 ) -> anyhow::Result<(Header, BuiltBlock)> {
     let (_, parent) = chain::latest_header(snapshot)?;
     let base_fee = next_base_fee(&parent, cfg);
-    let mut candidates = if next.with_txs {
-        pool.best_txs(base_fee, cfg.block_gas_limit)
-    } else {
-        Vec::new()
-    };
+    let mut candidates = next.prefix.clone();
+    if next.with_txs {
+        candidates.extend(within_envelope_budget(
+            cfg,
+            parent.number + 1,
+            pool.best_txs(base_fee, cfg.block_gas_limit),
+        ));
+    }
     let mut bytes = 0usize;
     if let Some(cut) = candidates.iter().position(|tx| {
         bytes += tx.encoded_len();
@@ -192,6 +203,42 @@ pub(crate) fn build_next_block(
     let state = DbStateProvider::new(snapshot);
     let built = executor.build_with(&parent, attrs, candidates, &state, staking)?;
     Ok((parent, built))
+}
+
+/// Keep the encrypted-mempool envelopes among `txs` within the block's inner-gas
+/// budget ([`ChainConfig::encrypted_gas_budget`]), in order; envelopes that do not fit
+/// stay in the pool for a later block. Undecodable payloads and commitments above the
+/// whole budget are kept: they pay gas and are never decrypted.
+fn within_envelope_budget(
+    cfg: &ChainConfig,
+    height: u64,
+    txs: Vec<RecoveredTx>,
+) -> Vec<RecoveredTx> {
+    if !cfg.encrypted_mempool_active(height) {
+        return txs;
+    }
+    let budget = cfg.encrypted_gas_budget();
+    let mut used = 0u64;
+    txs.into_iter()
+        .filter(|tx| {
+            if !is_envelope_target(tx.to()) {
+                return true;
+            }
+            // Undecodable payloads and commitments above the whole budget are never
+            // decrypted: they pay their gas like any transaction and take no budget.
+            let Some(gas) = EncryptedPayload::peek_inner_gas(tx.input()).filter(|g| *g <= budget)
+            else {
+                return true;
+            };
+            match used.checked_add(gas) {
+                Some(total) if total <= budget => {
+                    used = total;
+                    true
+                }
+                _ => false,
+            }
+        })
+        .collect()
 }
 
 /// Drop the candidates the builder found invalid from the pool; returns how many.

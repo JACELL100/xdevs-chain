@@ -4,7 +4,7 @@ use crate::{
     constants::*,
     serde_helpers::{opt_u64_flex, u256_flex, u64_flex},
 };
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
 /// EIP-1559 base-fee parameters plus the xDEVS burn/treasury split.
@@ -146,6 +146,35 @@ pub struct ChainConfig {
     /// parameter.
     #[serde(default, with = "u256_flex", skip_serializing_if = "is_zero_u256")]
     pub block_reward: U256,
+    /// First block of the encrypted mempool (Phase 5 prototype,
+    /// `docs/research/encrypted-mempool.md`): from this block on, transactions to
+    /// [`ENCRYPTED_INBOX_ADDRESS`] carrying a threshold-encrypted payload are ordered
+    /// blind and decrypted and executed at the start of the next block. JSON
+    /// `encryptedMempoolBlock`; absent = never. Needs [`ChainConfig::encrypted_mempool`].
+    #[serde(
+        default,
+        with = "opt_u64_flex",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub encrypted_mempool_block: Option<u64>,
+    /// Committee key of the encrypted mempool (JSON `encryptedMempool`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encrypted_mempool: Option<EncryptedMempoolParams>,
+}
+
+/// Committee key of the encrypted mempool prototype (genesis `config.encryptedMempool`):
+/// `{ "threshold": 3, "publicKey": "0x02…", "verificationKeys": ["0x03…", …] }`. Points are
+/// 33-byte compressed secp256k1 points; verification key `i - 1` belongs to the holder
+/// of share `i`. Produced by a trusted dealer in the prototype (no DKG yet).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedMempoolParams {
+    /// Decryption shares needed to open a payload (`t`).
+    pub threshold: u32,
+    /// Committee public key `Y` (encrypt to this).
+    pub public_key: Bytes,
+    /// `Y_i` of every share holder, share index `i` at position `i - 1` (`n` entries).
+    pub verification_keys: Vec<Bytes>,
 }
 
 impl ChainConfig {
@@ -162,6 +191,8 @@ impl ChainConfig {
             epoch_length: DEFAULT_EPOCH_LENGTH,
             staking_validators_block: None,
             block_reward: U256::ZERO,
+            encrypted_mempool_block: None,
+            encrypted_mempool: None,
         }
     }
 
@@ -218,6 +249,22 @@ impl ChainConfig {
         let from = number.max(start).max(1);
         from.div_ceil(self.epoch_length)
             .checked_mul(self.epoch_length)
+    }
+
+    /// `true` if block `number` is in the encrypted-mempool era (`number >=
+    /// encryptedMempoolBlock` and a committee key is configured): its envelopes are
+    /// decrypted by the next block, and it carries the decryption of its parent's.
+    pub fn encrypted_mempool_active(&self, number: u64) -> bool {
+        self.encrypted_mempool.is_some()
+            && self
+                .encrypted_mempool_block
+                .is_some_and(|start| number >= start)
+    }
+
+    /// Inner gas the envelopes of one block may commit to in total (half the block gas
+    /// limit): their decrypted transactions always fit at the start of the next block.
+    pub const fn encrypted_gas_budget(&self) -> u64 {
+        self.block_gas_limit / 2
     }
 
     /// Split a base-fee amount (wei) into `(burned, to_treasury)` using `burn_bps`.
@@ -340,6 +387,30 @@ mod tests {
         assert_eq!(cfg.validator_set_boundary(5), None);
         assert_eq!(cfg.validator_set_boundary(6), Some(5));
         assert_eq!(cfg.next_epoch_boundary(0), Some(5));
+    }
+
+    #[test]
+    fn encrypted_mempool_activation() {
+        let mut cfg = ChainConfig::new(1);
+        assert!(!cfg.encrypted_mempool_active(u64::MAX));
+        cfg.encrypted_mempool_block = Some(10);
+        // A block without a committee key never activates.
+        assert!(!cfg.encrypted_mempool_active(10));
+        cfg.encrypted_mempool = Some(EncryptedMempoolParams {
+            threshold: 1,
+            public_key: Bytes::from(vec![2u8; 33]),
+            verification_keys: vec![Bytes::from(vec![3u8; 33])],
+        });
+        assert!(!cfg.encrypted_mempool_active(9) && cfg.encrypted_mempool_active(10));
+        assert_eq!(cfg.encrypted_gas_budget(), cfg.block_gas_limit / 2);
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(json.contains("encryptedMempoolBlock"));
+        assert!(json.contains("verificationKeys"));
+        let back: ChainConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cfg);
+        // Absent by default, and not serialized.
+        let plain = serde_json::to_string(&ChainConfig::new(1)).unwrap();
+        assert!(!plain.contains("encryptedMempool"));
     }
 
     #[test]

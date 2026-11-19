@@ -35,6 +35,7 @@ fn ether(n: u64) -> U256 {
 
 fn opts(validators: usize, staking: StakingNet) -> LocalNetOptions {
     LocalNetOptions {
+        encrypted_mempool: None,
         validators,
         full_nodes: 0,
         block_time_ms: BLOCK_MS,
