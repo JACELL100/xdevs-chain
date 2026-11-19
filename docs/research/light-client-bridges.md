@@ -91,7 +91,7 @@ account and storage proof against a verified state root.
    per block, no waiting.
 2. **Ed25519 in Solidity** (`lib/Ed25519.sol`, `lib/Sha512.sol`). RFC 8032 verification with extended
    twisted-Edwards coordinates, Shamir's trick, and MODEXP for the inversion and the square root. Measured cost:
-   **~432k gas per signature** with a 66-byte vote message (SHA-512 is roughly 90k of it). A certificate costs
+   **~432k gas per signature** with a 66-byte vote message (SHA-512 over two 128-byte blocks is roughly 40% of it). A certificate costs
    about n × 450k gas: **1.37M gas for the Enclave testnet's 3-of-4 quorum**, and about 30M for 100 equal
    validators, which is impractical. The relayer submits only as many signatures as a quorum needs.
 3. **Verification rule.** Keys are decoded the permissive ZIP-215 way (as consensus does), and the signature check
