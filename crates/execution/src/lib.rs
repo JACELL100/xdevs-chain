@@ -34,6 +34,7 @@ mod db;
 mod env;
 mod error;
 mod executor;
+mod local_fee;
 pub mod parallel;
 pub mod precompiles;
 pub mod staking;
