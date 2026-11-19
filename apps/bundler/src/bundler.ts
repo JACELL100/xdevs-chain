@@ -803,6 +803,7 @@ export class Bundler {
 
   private onIncluded(b: Inflight, r: TransactionReceipt): void {
     let collected = 0n
+    let count = 0
     for (const e of b.entries) {
       const receipt = this.buildReceipt(e.hash, r)
       this.mempool.remove(e.hash)
@@ -816,12 +817,13 @@ export class Bundler {
       if (e.paymaster) this.reputation.included(e.paymaster as Address)
       if (e.sponsored) this.sponsorCounts.set(lc(e.op.sender), (this.sponsorCounts.get(lc(e.op.sender)) ?? 0) + 1)
       collected += BigInt(receipt.actualGasCost)
+      count++
     }
     const spent = r.gasUsed * r.effectiveGasPrice
     const net = collected - spent
     this.consecutiveFailures = 0
     this.metrics.inc('bundler_bundles_included_total', 'Bundles mined successfully')
-    this.metrics.inc('bundler_ops_included_total', 'UserOperations included on chain', {}, b.entries.length)
+    this.metrics.inc('bundler_ops_included_total', 'UserOperations included on chain', {}, count)
     this.metrics.inc('bundler_fees_collected_wei_total', 'Fees paid to the beneficiary by included ops (wei)', {}, collected)
     this.metrics.inc('bundler_gas_spent_wei_total', 'Gas paid by the operator for bundles (wei)', {}, spent)
     const level = net < 0n ? 'warn' : 'info'
