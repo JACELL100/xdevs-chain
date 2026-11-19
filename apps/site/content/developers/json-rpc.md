@@ -105,6 +105,8 @@ Requests are limited to 5 MiB and responses to 32 MiB.
 | `xdevs_getVaultQueue(account, block?)` | Pending Guardian Vault actions | <span class="status ok">Implemented</span> |
 | `xdevs_resolveName(name, block?)` / `xdevs_reverseName(address, block?)` | XNS lookups | <span class="status ok">Implemented</span> |
 | `eth_subscribe("vaultEvents", {account?})` | Real-time vault alerts (WebSocket) | <span class="status ok">Implemented</span> |
+| `xdevs_getMempoolEncryptionKey()` | Committee key of the encrypted mempool (prototype, off unless the genesis sets `encryptedMempoolBlock`) | <span class="status ok">Prototype</span> |
+| `xdevs_sendEncryptedTransaction(raw)` | Submit an envelope whose payload is encrypted to the committee | <span class="status ok">Prototype</span> |
 | `xdevs_localFee(contract, block?)` | Local fee-market price for a contract | <span class="status planned">Phase 5</span> |
 
 The plan originally named this method `xdevs_getCommit`; the node and the SDK's `getCommit` use `xdevs_getCommitCertificate`.
@@ -367,6 +369,54 @@ The node scans the owner's approval events for candidate pairs: `Approval`, XDRC
 | `unfrozen` | none |
 
 Always pass `account`. Without it, matching events from any contract are delivered, and only the emitter address proves which smart account an event belongs to. The same subscription limits as `logs` apply.
+
+### Encrypted mempool (Phase 5 prototype)
+
+Research-grade and **not enabled on any network**: a chain uses it only if its genesis
+sets `encryptedMempoolBlock` and an `encryptedMempool` committee key. Design, threat
+model and limitations: [`docs/research/encrypted-mempool.md`](https://github.com/JACELL100/xdevs-chain/blob/main/docs/research/encrypted-mempool.md).
+
+An **envelope** is an ordinary signed transaction to `0x0000000000000000000000000000000000001100`
+whose calldata is `0x01 ‖ keyId ‖ innerGasLimit (8 bytes) ‖ U ‖ c ‖ z ‖ body`: the
+threshold encryption (secp256k1 hashed ElGamal + ChaCha20-Poly1305, with a proof of
+knowledge bound to the envelope's sender) of a complete signed inner transaction. The
+envelope pays its own gas in block N; the committee releases decryption shares once N is
+final, and the inner transaction executes at the start of block N+1, in N's order. If the
+envelope and the inner transaction come from the same account, the inner nonce is the
+envelope's nonce + 1. Encrypt in the client (`xdevs_crypto::encrypted_tx::MempoolKey::seal`
+in Rust); the RPC node never sees the plaintext.
+
+#### `xdevs_getMempoolEncryptionKey`
+
+No parameters. Returns `null` when the chain has no encrypted mempool, else:
+
+```json
+{
+  "active": true,
+  "activationBlock": "0x1",
+  "keyId": "0x5c1f…",
+  "publicKey": "0x02a1…",
+  "threshold": "0x3",
+  "committeeSize": "0x4",
+  "inbox": "0x0000000000000000000000000000000000001100",
+  "maxInnerGas": "0xe4e1c0",
+  "payloadVersion": "0x1"
+}
+```
+
+`active` says whether an envelope sent now lands in an encrypted-mempool block.
+`maxInnerGas` bounds the inner gas commitment of one envelope (half the block gas limit,
+shared by all envelopes of a block).
+
+#### `xdevs_sendEncryptedTransaction`
+
+Takes the raw signed envelope (`0x…` EIP-2718 bytes). The node checks that it is a call to
+the inbox with a well-formed payload for the current key, an inner gas commitment within
+`maxInnerGas` and a proof that verifies for the envelope's sender, then pools and gossips
+it like `eth_sendRawTransaction` and returns the envelope's hash. Malformed envelopes are
+refused with `-32000`. (Sending one through `eth_sendRawTransaction` works too: it is
+included, pays gas and is never decrypted.) The inner transaction's receipt appears under
+its own hash in block N+1.
 
 ## Not implemented yet
 

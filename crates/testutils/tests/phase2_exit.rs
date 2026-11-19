@@ -28,6 +28,7 @@ const BLOCK_MS: u64 = 400;
 
 fn opts(validators: usize, full_nodes: usize) -> LocalNetOptions {
     LocalNetOptions {
+        encrypted_mempool: None,
         validators,
         full_nodes,
         block_time_ms: BLOCK_MS,

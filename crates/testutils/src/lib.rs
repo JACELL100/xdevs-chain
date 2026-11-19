@@ -18,8 +18,8 @@ mod localnet;
 
 pub use alerts::{init_tracing, safety_alerts, SafetyAlerts};
 pub use localnet::{
-    free_ports, staking_runtime_code, tcp_addr, LocalNet, LocalNetOptions, NetNode, Role,
-    StakingNet,
+    free_ports, staking_runtime_code, tcp_addr, EncryptedMempoolNet, LocalNet, LocalNetOptions,
+    NetNode, Role, StakingNet,
 };
 
 use std::{
