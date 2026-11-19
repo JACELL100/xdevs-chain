@@ -293,12 +293,33 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
             let stored: ChainConfig =
                 serde_json::from_slice(&stored).context("decode stored chain config")?;
             let configured = genesis.chain_config();
-            if stored != configured && same_but_staking_schedule(&stored, &configured) {
+            if stored != configured && same_but_fork_schedule(&stored, &configured) {
                 // A coordinated upgrade schedules (or reschedules) the staking-driven
-                // validator set: allowed only while the chain is below both the stored
-                // and the new activation height, so no executed block changes meaning.
+                // validator set or the encrypted mempool: allowed only while the chain is
+                // below both the stored and the new activation height, so no executed
+                // block changes meaning.
                 let head = latest_number(db)?.unwrap_or_default();
-                if stored.staking_active(head) || configured.staking_active(head) {
+                let encrypted_changed = stored.encrypted_mempool_block
+                    != configured.encrypted_mempool_block
+                    || stored.encrypted_mempool != configured.encrypted_mempool;
+                let started =
+                    |c: &ChainConfig| c.encrypted_mempool_block.is_some_and(|b| head >= b);
+                if encrypted_changed && (started(&stored) || started(&configured)) {
+                    bail!(
+                        "the encrypted mempool schedule (encryptedMempoolBlock, \
+                         encryptedMempool) cannot change once it is active: head {head}, \
+                         stored activation {:?}, configured {:?}",
+                        stored.encrypted_mempool_block,
+                        configured.encrypted_mempool_block
+                    );
+                }
+                let staking_changed = stored.staking_validators_block
+                    != configured.staking_validators_block
+                    || stored.epoch_length != configured.epoch_length
+                    || stored.block_reward != configured.block_reward;
+                if staking_changed
+                    && (stored.staking_active(head) || configured.staking_active(head))
+                {
                     bail!(
                         "the staking fork schedule (stakingValidatorsBlock, epochLength, \
                          blockReward) cannot change once it is active: head {head}, stored \
@@ -317,7 +338,8 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
                     activation = ?configured.staking_validators_block,
                     epoch_length = configured.epoch_length,
                     block_reward = %configured.block_reward,
-                    "staking fork schedule updated from the genesis config"
+                    encrypted_mempool = ?configured.encrypted_mempool_block,
+                    "fork schedule updated from the genesis config"
                 );
                 return Ok(hash);
             }
@@ -342,6 +364,18 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
     batch.put::<tables::Meta>(&meta_key(meta_keys::CHAIN_CONFIG), &cfg);
     db.write(batch)?;
     Ok(hash)
+}
+
+/// `true` if `a` and `b` differ at most in the fork schedules: staking
+/// ([`same_but_staking_schedule`]) and the encrypted mempool (`encryptedMempoolBlock`,
+/// `encryptedMempool`).
+fn same_but_fork_schedule(a: &ChainConfig, b: &ChainConfig) -> bool {
+    let strip = |c: &ChainConfig| ChainConfig {
+        encrypted_mempool_block: None,
+        encrypted_mempool: None,
+        ..c.clone()
+    };
+    same_but_staking_schedule(&strip(a), &strip(b))
 }
 
 /// `true` if `a` and `b` differ at most in the staking fork schedule
@@ -439,6 +473,36 @@ mod tests {
         moved.config.staking_validators_block = Some(50);
         let err = init_genesis(&db, &moved).unwrap_err().to_string();
         assert!(err.contains("cannot change once it is active"), "{err}");
+    }
+
+    #[test]
+    fn encrypted_mempool_schedule_can_be_added_before_activation_only() {
+        let db = MemDb::new();
+        let g = Genesis::dev(DEV_CHAIN_ID);
+        init_genesis(&db, &g).unwrap();
+        let mut scheduled = g.clone();
+        scheduled.config.encrypted_mempool_block = Some(10);
+        scheduled.config.encrypted_mempool = Some(xdevs_primitives::EncryptedMempoolParams {
+            threshold: 1,
+            public_key: xdevs_primitives::Bytes::from(vec![2u8; 33]),
+            verification_keys: vec![xdevs_primitives::Bytes::from(vec![2u8; 33])],
+        });
+        init_genesis(&db, &scheduled).unwrap();
+        init_genesis(&db, &scheduled).unwrap();
+        let mut batch = WriteBatch::new();
+        batch.put::<tables::Meta>(
+            &meta_key(meta_keys::LATEST_BLOCK),
+            &10u64.to_be_bytes().to_vec(),
+        );
+        db.write(batch).unwrap();
+        let mut moved = scheduled.clone();
+        moved.config.encrypted_mempool_block = Some(50);
+        let err = init_genesis(&db, &moved).unwrap_err().to_string();
+        assert!(err.contains("encrypted mempool schedule"), "{err}");
+        // The staking schedule can still be added (head 10 is before its activation).
+        let mut staking = scheduled.clone();
+        staking.config.staking_validators_block = Some(100);
+        init_genesis(&db, &staking).unwrap();
     }
 
     #[test]
