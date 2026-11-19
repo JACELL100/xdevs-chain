@@ -55,6 +55,10 @@
 //! rate_limit_per_ip = 0              # calls/s per client IP; 0 = off (use the proxy's)
 //! rate_limit_burst = 0               # bucket size; 0 = 2 x rate_limit_per_ip
 //!
+//! [execution]                  # Phase 5: local execution strategy (not a consensus rule)
+//! parallel = false             # Block-STM parallel block execution; same roots either way
+//! threads = 0                  # worker threads; 0 = one per CPU core
+//!
 //! [mempool]
 //! max_txs = 10_000
 //! max_bytes = 67_108_864
@@ -93,6 +97,8 @@ pub struct NodeConfig {
     pub rpc: RpcSection,
     /// `[mempool]`.
     pub mempool: MempoolSection,
+    /// `[execution]`: parallel block execution (Phase 5).
+    pub execution: ExecutionSection,
     /// `[log]`.
     pub log: LogSection,
     /// `[metrics]`: Prometheus `/metrics` endpoint (plan §24.7).
@@ -349,6 +355,19 @@ impl Default for RpcSection {
             rate_limit_burst: 0,
         }
     }
+}
+
+/// `[execution]` section (Phase 5): how this node executes blocks. A local choice that
+/// never changes results: parallel (Block-STM) and sequential execution produce
+/// identical receipts and state roots, so validators can enable it independently.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExecutionSection {
+    /// Execute blocks with Block-STM (default `false`). Useful from ~4 cores on; on a
+    /// 1-core VM it only adds overhead.
+    pub parallel: bool,
+    /// Worker threads for parallel execution; `0` = one per available core.
+    pub threads: usize,
 }
 
 /// `[mempool]` section.

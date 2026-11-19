@@ -77,6 +77,11 @@ pub struct LocalNetOptions {
     pub staking: Option<StakingNet>,
     /// Phase 5: the encrypted mempool prototype (`None` = off).
     pub encrypted_mempool: Option<EncryptedMempoolNet>,
+    /// Phase 5: the first `parallel_validators` genesis validators execute blocks with
+    /// Block-STM (`[execution] parallel = true`, 4 threads); the others sequentially.
+    pub parallel_validators: usize,
+    /// Phase 5: `localFeeMarketsBlock` of the genesis (`None` = never).
+    pub local_fee_markets_block: Option<u64>,
 }
 
 /// Phase 5 options of a [`LocalNet`]: a fresh committee key (trusted dealer) whose share
@@ -106,6 +111,8 @@ impl Default for LocalNetOptions {
             block_time_ms: 400,
             staking: None,
             encrypted_mempool: None,
+            parallel_validators: 0,
+            local_fee_markets_block: None,
         }
     }
 }
@@ -298,6 +305,8 @@ pub struct LocalNet {
     block_time_ms: u64,
     /// Encrypted-mempool key share (text form) of genesis validator `i`.
     mempool_shares: Vec<String>,
+    /// Genesis validators `0..parallel_validators` execute in parallel.
+    parallel_validators: usize,
     alerts_at_start: SafetyAlerts,
     // Dropped last: the directory outlives the nodes, the lock outlives everything.
     root: TempDir,
@@ -390,6 +399,7 @@ impl LocalNet {
         if let Some(st) = &opts.staking {
             add_staking(&mut genesis, st)?;
         }
+        genesis.config.local_fee_markets_block = opts.local_fee_markets_block;
         let mut mempool_shares = Vec::new();
         if let Some(em) = &opts.encrypted_mempool {
             let n = u32::try_from(opts.validators).context("validator count")?;
@@ -424,6 +434,7 @@ impl LocalNet {
             set,
             block_time_ms: opts.block_time_ms,
             mempool_shares,
+            parallel_validators: opts.parallel_validators,
             alerts_at_start: safety_alerts(),
             root,
             _lock: lock,
@@ -492,6 +503,10 @@ impl LocalNet {
             config.validator.fee_recipient =
                 Address::repeat_byte(0xf0u8.wrapping_add(self.nodes.len() as u8));
             address = Some(ValidatorKey(seed.public_key()).address());
+            if self.nodes.len() < self.parallel_validators {
+                config.execution.parallel = true;
+                config.execution.threads = 4;
+            }
             if let Some(share) = self.mempool_shares.get(self.nodes.len()) {
                 let share_file = home.join("mempool.share");
                 std::fs::write(&share_file, share)?;

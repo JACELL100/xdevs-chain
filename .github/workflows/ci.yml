@@ -80,6 +80,11 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      # Phase 5: sequential vs Block-STM on generated blocks (outcomes are asserted equal);
+      # results quoted in docs/research/parallel-execution.md.
+      - name: Block-STM benchmark
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo run --release --locked -p xdevs-execution --example parallel_bench -- 2000
 
   # The maintainers develop on Windows with the GNU toolchain: keep the whole workspace
   # (Malachite, libp2p, redb, ...) compiling for x86_64-pc-windows-gnu.

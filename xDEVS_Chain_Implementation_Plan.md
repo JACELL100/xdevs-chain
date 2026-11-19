@@ -1519,8 +1519,8 @@ Alerts:
 **Tasks**
 - [ ] Profile and optimize: incremental trie, caching, batch writes; benchmark redb vs MDBX.
 - [ ] Block time 2 s → 1 s (if metrics allow).
-- [ ] Block‑STM parallel execution behind a flag + differential tests.
-- [ ] Local fee markets.
+- [x] Block‑STM parallel execution behind a flag + differential tests (`docs/research/parallel-execution.md`).
+- [x] Local fee markets (behind `localFeeMarketsBlock`, `docs/research/local-fee-markets.md`).
 - [ ] BLS aggregate signatures for commits.
 - [ ] Encrypted mempool: research doc → prototype on devnet → external review.
 

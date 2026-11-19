@@ -62,6 +62,27 @@ impl<'a> StateOverlay<'a> {
         self.diff
     }
 
+    /// The changes accumulated so far, by reference.
+    pub(crate) fn diff(&self) -> &StateDiff {
+        &self.diff
+    }
+
+    /// Write one storage slot (protocol writes, e.g. the local fee table).
+    pub(crate) fn set_slot(&mut self, address: Address, slot: B256, value: U256) {
+        self.diff.set_storage(address, slot, value);
+    }
+
+    /// Create or replace an account (protocol writes).
+    pub(crate) fn set_account(&mut self, address: Address, info: AccountInfo) {
+        self.diff.set_account(address, info);
+    }
+
+    /// Fold the changes of one more transaction (computed on top of this overlay's
+    /// current state) into the write buffer, as if it had been committed here.
+    pub(crate) fn merge_diff(&mut self, later: StateDiff) {
+        self.diff.merge(later);
+    }
+
     /// Current (overlay-aware) account.
     pub(crate) fn account(
         &mut self,

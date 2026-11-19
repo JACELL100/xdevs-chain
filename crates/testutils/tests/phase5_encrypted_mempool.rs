@@ -227,6 +227,8 @@ async fn encrypted_mempool_prevents_a_sandwich() -> anyhow::Result<()> {
             activation: 1,
             threshold: 3,
         }),
+        parallel_validators: 0,
+        local_fee_markets_block: None,
     })
     .await?;
     net.wait_for_height(2, secs(60)).await?;
