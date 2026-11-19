@@ -120,6 +120,8 @@ jobs:
         env:
           # Public Turnstile site key of the faucet widget (repository variable; empty for other apps).
           NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+          # Sponsor that pays for passkey-account activation through the XdevsPaymaster (wallet only).
+          NEXT_PUBLIC_PAYMASTER_SPONSOR: ${{ vars.PAYMASTER_SPONSOR }}
         run: npm run build
       # npx (not cloudflare/wrangler-action) so wrangler is not npm-installed into the workspace root.
       - name: Deploy to Cloudflare Pages (${{ matrix.project }})

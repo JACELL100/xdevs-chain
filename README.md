@@ -118,10 +118,10 @@ deploy/            dev genesis, systemd unit, local Docker setup
 | WebSocket | `wss://ws.xdevschain.tech` | ✅ Live (subscriptions: `newHeads`, `logs`, `newPendingTransactions`) |
 | Network status | [status.xdevschain.tech](https://status.xdevschain.tech) | ✅ Live |
 | Block explorer | [explorer.xdevschain.tech](https://explorer.xdevschain.tech) | ✅ Live |
-| Wallet | [wallet.xdevschain.tech](https://wallet.xdevschain.tech) | ✅ Live (preview; creating passkey accounts needs the bundler) |
+| Wallet | [wallet.xdevschain.tech](https://wallet.xdevschain.tech) | ✅ Live (passkey accounts with sponsored activation) |
 | Faucet | [faucet.xdevschain.tech](https://faucet.xdevschain.tech) | ✅ Live (100 tXDS per claim, once every 24 h) |
 | Explorer API | `https://explorer-api.xdevschain.tech` · [`/api/v1/stats`](https://explorer-api.xdevschain.tech/api/v1/stats) · [`/health`](https://explorer-api.xdevschain.tech/health) | ✅ Live (indexer on Postgres; [API spec](docs/specs/explorer-api.md)) |
-| ERC-4337 bundler | `https://bundler.xdevschain.tech` (not deployed yet) | 📋 Ready to deploy |
+| ERC-4337 bundler | [`https://bundler.xdevschain.tech`](https://bundler.xdevschain.tech/health) | ✅ Live (sponsored passkey-account activation) |
 | Website and docs | [xdevschain.tech](https://xdevschain.tech) · [network endpoints](https://xdevschain.tech/network/endpoints) | ✅ Live |
 
 ```bash

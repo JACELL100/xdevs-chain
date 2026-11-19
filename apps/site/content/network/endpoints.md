@@ -14,10 +14,10 @@ Enclave is a test network. It may be reset (with notice on the [status page](htt
 | WebSocket | `wss://ws.xdevschain.tech` | <span class="status ok">Live</span>: `newHeads`, `logs`, `newPendingTransactions` |
 | Network status | [`https://status.xdevschain.tech`](https://status.xdevschain.tech) | <span class="status ok">Live</span>: blocks, finality, validators, every endpoint |
 | Block explorer | [`https://explorer.xdevschain.tech`](https://explorer.xdevschain.tech) | <span class="status ok">Live</span> |
-| Wallet | [`https://wallet.xdevschain.tech`](https://wallet.xdevschain.tech) | <span class="status ok">Live</span> (preview); passkey accounts need the bundler |
+| Wallet | [`https://wallet.xdevschain.tech`](https://wallet.xdevschain.tech) | <span class="status ok">Live</span>: passkey accounts with sponsored activation |
 | Faucet | [`https://faucet.xdevschain.tech`](https://faucet.xdevschain.tech) | <span class="status ok">Live</span>: 100 tXDS per claim, every 24 h |
 | Explorer API | `https://explorer-api.xdevschain.tech` · [`/api/v1/stats`](https://explorer-api.xdevschain.tech/api/v1/stats) · [`/health`](https://explorer-api.xdevschain.tech/health) | <span class="status ok">Live</span>: indexer for history, tokens, approvals and vault queues ([spec](https://github.com/JACELL100/xdevs-chain/blob/main/docs/specs/explorer-api.md)) |
-| ERC-4337 bundler | `https://bundler.xdevschain.tech` (not deployed yet) | <span class="status next">Ready to deploy</span>: EntryPoint v0.9, validated mempool with ERC-7562 limits and reputation, sponsored account activation |
+| ERC-4337 bundler | `https://bundler.xdevschain.tech` ([health](https://bundler.xdevschain.tech/health)) | <span class="status ok">Live</span>: EntryPoint v0.9, sponsored activation of passkey accounts |
 | Website and docs | [`https://xdevschain.tech`](https://xdevschain.tech) | This site |
 
 Opening `https://rpc.xdevschain.tech` in a browser takes you to its [info page](https://status.xdevschain.tech/rpc).
