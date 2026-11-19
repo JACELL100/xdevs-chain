@@ -63,7 +63,9 @@ const [u0, u1] = await cached(`updates-${period - 2}.json`, async () =>
   (await beacon<{ data: LcUpdateJson }[]>(`/eth/v1/beacon/light_client/updates?start_period=${period - 2}&count=2`)).map((x) => x.data),
 );
 const genesis = await cached("genesis.json", async () => (await beacon<{ data: { genesis_time: string; genesis_validators_root: Hex } }>("/eth/v1/beacon/genesis")).data);
-const forks = await cached("forks.json", async () => (await beacon<{ data: { epoch: string; current_version: Hex }[] }>("/eth/v1/config/fork_schedule")).data);
+const forks = (
+  await cached("forks.json", async () => (await beacon<{ data: { epoch: string; current_version: Hex }[] }>("/eth/v1/config/fork_schedule")).data)
+).filter((f) => BigInt(f.epoch) < 2n ** 64n - 1n); // drop FAR_FUTURE_EPOCH placeholders
 
 // Trusted checkpoint: the committee of period P-1 (= next committee of update P-2).
 const c1 = committeeFromPubkeys(u0!.next_sync_committee!.pubkeys, u0!.next_sync_committee!.aggregate_pubkey);

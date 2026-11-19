@@ -14,8 +14,7 @@
   132608,
   222464,
   272640,
-  353024,
-  18446744073709552000
+  353024
  ],
  "forkVersions": [
   "0x90000069",
@@ -25,10 +24,9 @@
   "0x90000073",
   "0x90000074",
   "0x90000075",
-  "0x90000076",
-  "0x08000000"
+  "0x90000076"
  ],
- "gloasForkEpoch": 18446744073709552000,
+ "gloasForkEpoch": 353024,
  "checkpointPeriod": 1415,
  "checkpointCommitteeRoot": "0xe26c41aa24b47475fc7681845515d4bd73d19680c180bebc5de5007c23f6eb16",
  "nextCommitteeRoot": "0x7d1c54aebc16ca0ec7bb7fec8f08f48eedbd26d01104b2daa1ee41a4a11c02b8",
