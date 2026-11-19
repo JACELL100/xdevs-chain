@@ -27,6 +27,10 @@ It executes transactions with [`revm`](https://github.com/bluealloy/revm) using 
 The public testnet **Enclave** (chain id 717171) has run since 17 November 2026 on four validators: RPC `https://rpc.xdevschain.tech`, [explorer](https://explorer.xdevschain.tech), [wallet](https://wallet.xdevschain.tech), [status](https://status.xdevschain.tech). See [Network endpoints](/network/endpoints).
 :::
 
+:::info[Built, switching on next]
+The Phase 3 staking-driven validator set, the Phase 4 safety RPCs (`xdevs_simulateTransaction`, `xdevs_checkRecipient`, …), Phase 5 (encrypted mempool, parallel execution, local fee markets) and a Phase 7 light-client bridge prototype are built and tested. They switch on for Enclave with the next node upgrade; see the [roadmap](/roadmap).
+:::
+
 :::tip[Phases 1 and 2 work on your own machines]
 - A **single-node dev chain** (`xdevs run --dev`) produces blocks, serves Ethereum JSON-RPC, and works with MetaMask and Foundry.
 - A **multi-validator BFT network** (`xdevs-cli testnet init --validators 4`) reaches consensus with Malachite, syncs late-joining nodes from genesis, gossips transactions between nodes, and keeps going with one of four validators down. A Docker localnet with chaos scripts (kill, pause, partition, packet loss) runs in CI. See [Local multi-validator network](/operators/local-network).
