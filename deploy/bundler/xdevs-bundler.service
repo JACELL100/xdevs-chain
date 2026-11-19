@@ -1,0 +1,67 @@
+# xDEVS ERC-4337 bundler (bundler.xdevschain.tech): /etc/systemd/system/xdevs-bundler.service
+# Runbook: docs/runbooks/bundler.md. Setup (as root):
+#   useradd --system --home /var/lib/xdevs-bundler --shell /usr/sbin/nologin xdevs-bundler
+#   git clone https://github.com/JACELL100/xdevs-chain /opt/xdevs-bundler && cd /opt/xdevs-bundler/apps/bundler && npm ci --omit=dev
+#   install -d -m 0750 /etc/xdevs-bundler
+#   install -m 0640 -g xdevs-bundler deploy/bundler/bundler.env.example /etc/xdevs-bundler/bundler.env   (then edit)
+#   install -m 0600 /dev/null /etc/xdevs-bundler/operator-key   (then write the 0x… key into it; root-only)
+[Unit]
+Description=xDEVS ERC-4337 bundler (EntryPoint v0.9)
+Documentation=https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/bundler.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=xdevs-bundler
+Group=xdevs-bundler
+WorkingDirectory=/opt/xdevs-bundler/apps/bundler
+EnvironmentFile=/etc/xdevs-bundler/bundler.env
+# The operator key stays root-owned (0600); systemd hands a private copy to the service as
+# $CREDENTIALS_DIRECTORY/operator-key, which the bundler reads automatically. It never appears in the environment.
+LoadCredential=operator-key:/etc/xdevs-bundler/operator-key
+# Node 24 runs the TypeScript sources directly (type stripping); the heap cap keeps it well under MemoryMax.
+ExecStart=/usr/bin/node --max-old-space-size=96 --disable-warning=ExperimentalWarning src/index.ts
+# Mempool + reputation state file (DATA_DIR=/var/lib/xdevs-bundler).
+StateDirectory=xdevs-bundler
+StateDirectoryMode=0700
+# Graceful stop: stops accepting ops, waits for the bundle being submitted, writes the state file.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=5
+
+# Resource limits: a small, low-priority neighbour of the node (same budget as the indexer).
+MemoryMax=150M
+MemoryHigh=128M
+CPUWeight=20
+IOWeight=20
+Nice=10
+TasksMax=64
+LimitNOFILE=4096
+
+# Sandbox. (No MemoryDenyWriteExecute: V8's JIT needs W+X pages.)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

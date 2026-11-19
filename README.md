@@ -121,7 +121,7 @@ deploy/            dev genesis, systemd unit, local Docker setup
 | Wallet | [wallet.xdevschain.tech](https://wallet.xdevschain.tech) | ✅ Live (preview; creating passkey accounts needs the bundler) |
 | Faucet | [faucet.xdevschain.tech](https://faucet.xdevschain.tech) | ✅ Live (100 tXDS per claim, once every 24 h) |
 | Explorer API | `https://explorer-api.xdevschain.tech` · [`/api/v1/stats`](https://explorer-api.xdevschain.tech/api/v1/stats) · [`/health`](https://explorer-api.xdevschain.tech/health) | ✅ Live (indexer on Postgres; [API spec](docs/specs/explorer-api.md)) |
-| ERC-4337 bundler | `https://bundler.xdevschain.tech` (not deployed yet) | 🚧 In progress |
+| ERC-4337 bundler | `https://bundler.xdevschain.tech` (not deployed yet) | 📋 Ready to deploy |
 | Website and docs | [xdevschain.tech](https://xdevschain.tech) · [network endpoints](https://xdevschain.tech/network/endpoints) | ✅ Live |
 
 ```bash

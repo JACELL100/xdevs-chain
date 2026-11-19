@@ -54,12 +54,14 @@ before(async () => {
   ;({ chain, devnet } = await devChain({ token: false }))
   bundler = new Bundler({ rpcUrl: chain.rpcUrl, privateKey: DEV_KEYS[ROLES.bundler], log: () => {} })
   await bundler.init()
+  bundler.start()
   server = createBundlerServer(bundler)
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
 })
 
 after(async () => {
+  await bundler?.stop()
   await bundler?.idle()
   server?.close()
   await chain?.stop()

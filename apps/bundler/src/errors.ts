@@ -16,8 +16,20 @@ export const RpcCodes = {
   outOfTimeRange: -32503,
   /** Signature check failed (AA24, AA34). */
   invalidSignature: -32507,
+  /** Banned opcode / non-self-contained validation (validation passed alone but failed in a bundle). */
+  opcodeOrStorageViolation: -32502,
+  /** Entity (paymaster / factory / sender) banned or throttled by reputation, or over its mempool limit. */
+  bannedOrThrottled: -32504,
+  /** Entity stake or unstake delay below the bundler's minimum. */
+  stakeTooLow: -32505,
+  /** Signature aggregators are not supported. */
+  unsupportedAggregator: -32506,
   /** Execution (callData) reverted during estimation. */
   executionReverted: -32521,
+  /** Bundler temporarily unavailable (operator balance below the floor, shutting down, RPC down). */
+  unavailable: -32000,
+  /** Rate limit / mempool capacity exceeded. */
+  limitExceeded: -32005,
 } as const
 
 export class RpcError extends Error {

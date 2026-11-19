@@ -1,11 +1,11 @@
-# xDEVS reference wallet and dev bundler — Specification
+# xDEVS reference wallet and bundler — Specification
 
 Status: testnet reference implementation (Phase 4). Plan refs: §16 (user-safety layer), §23 (tooling), §27 Phase 4 exit
 criteria. Companion specs: [`smart-accounts.md`](smart-accounts.md), [`xip-0001-eoa-lock.md`](xip-0001-eoa-lock.md),
 [`xns-and-approvals.md`](xns-and-approvals.md), [`sdk.md`](sdk.md), [`explorer-api.md`](explorer-api.md).
 
-Sources: `apps/wallet/` (Next.js static export on `@xdevs/ui`, logic in `src/lib/`, data layer in `src/data/`, UI in `src/views/` + `src/components/`), `apps/bundler/` (DEV-ONLY ERC-4337
-v0.9 bundler). Tests: `apps/wallet/test/`, `apps/bundler/test/`.
+Sources: `apps/wallet/` (Next.js static export on `@xdevs/ui`, logic in `src/lib/`, data layer in `src/data/`, UI in `src/views/` + `src/components/`), `apps/bundler/` (single-operator ERC-4337
+v0.9 bundler, public on Enclave as `bundler.xdevschain.tech`). Tests: `apps/wallet/test/`, `apps/bundler/test/`.
 
 ---
 
@@ -15,7 +15,7 @@ v0.9 bundler). Tests: `apps/wallet/test/`, `apps/bundler/test/`.
 |---|---|---|
 | `apps/wallet` | Static SPA: passkey sign-up, send, Guardian Vault, approvals, guardian tools, EIP-7702 / EOA lock | Reference / testnet. Planned host: Cloudflare Pages (`wallet.xdevschain.tech`), with a real bundler |
 | `apps/wallet/src/lib` | Framework-free logic (also used by the Node tests): UserOp encoding, WebAuthn encoding, account state, vault outcome, preview, recipient checks, approvals, 7702 | — |
-| `apps/bundler` | Single-operator ERC-4337 v0.9 bundler for dev chains | **No** (dev only, see §8) |
+| `apps/bundler` | Single-operator ERC-4337 v0.9 bundler: Enclave (`bundler.xdevschain.tech`) and dev chains | Testnet: validated mempool, ERC-7562 limits and reputation without opcode tracing (see §9) |
 | `@xdevs/sdk` (`sdk/ts`, linked with `file:`) | `xdevs_*` RPC actions, XNS normalization / namehash, look-alike helpers | — |
 
 Chain-side pieces used: `XdevsSmartAccount` (`0x…1005`), `SmartAccountFactory` (`0x…1006`, also the extension host),
@@ -150,15 +150,26 @@ unlimited approval and the vault reject it before anything is signed.
   `maxFee = 2 × baseFee`, tip ≤ baseFee and gas ≤ 1,000,000 so they stay valid while LOCKED. The upgraded account can be
   used in the wallet (UserOps signed by the EOA key through the bundler — they never come from the EOA itself).
 
-## 9. Dev bundler (`apps/bundler`, DEV ONLY)
+## 9. Bundler (`apps/bundler`)
 
 `eth_sendUserOperation`, `eth_estimateUserOperationGas`, `eth_getUserOperationReceipt`, `eth_getUserOperationByHash`,
-`eth_supportedEntryPoints`, `eth_chainId`. One op per bundle, bundles strictly sequential, a single operator key
-(`BUNDLER_PRIVATE_KEY`), validation by `eth_call` of `handleOps([op])` (EntryPoint `FailedOp` mapped to ERC-7769
-codes), no ERC-7562 rules, no mempool, no reputation. Gas estimation without state overrides (the xDEVS node rejects
-them): a helper (`XdevsBundlerGasMeter`) executed inside the EntryPoint via `delegateAndRevert` measures deployment,
-validation, paymaster validation / postOp and execution, and reverts with the numbers. Details in
-`apps/bundler/README.md`.
+`eth_supportedEntryPoints`, `eth_chainId`, plus `GET /health` and `/metrics`. A single operator key; ops are validated
+on admission (size and gas caps, fee floor, a `preVerificationGas` that covers the bundle overhead, nonce sanity,
+paymaster stake and deposit, ERC-7562 mempool limits and reputation, `handleOps` simulation on current state with
+pending same-sender predecessors, validity window via the gas meter) and kept in a persisted mempool. Bundles hold
+several senders (and consecutive nonces of one sender), are re-simulated right before submission, and pay the operator
+at least their gas. Without `debug_traceCall` on the node, the ERC-7562 opcode / storage rules are not traced: an entity
+whose op passes simulation but makes a bundle revert on chain is banned. Gas estimation without state overrides (the
+xDEVS node rejects them): a helper (`XdevsBundlerGasMeter`) executed inside the EntryPoint via `delegateAndRevert`
+measures deployment, validation, paymaster validation / postOp and execution, and reverts with the numbers.
+
+What the wallet relies on: the standard ERC-7769 error codes (plus `-32504` throttled / banned, `-32505` paymaster not
+staked, `-32005` rate limited, `-32000` bundler paused); `eth_getUserOperationReceipt` returns `null` until inclusion and
+its `logs` are the op's own execution logs (`queuedIdsOf` reads them). **Sponsored activation**: the bundler accepts an
+XdevsPaymaster open-mode sponsor only for an account's activation op (the one that deploys it; `SPONSOR_POLICY`,
+`SPONSOR_MAX_OPS_PER_SENDER`, per-IP hourly cap), and only if the paymaster is staked in the EntryPoint. Later ops must
+be paid by the account. Details, configuration and remaining limits in `apps/bundler/README.md`; deployment in
+`docs/runbooks/bundler.md`.
 
 `npm run devnet` starts the real node with `deploy/configs/dev-genesis-with-predeploys.json` (or anvil
 `--hardfork osaka` with the same alloc), configures a paymaster sponsor, stakes the paymaster and deploys an XDRC-20
@@ -203,13 +214,16 @@ test token.
   origin cannot use it.
 - The wallet never signs blind: every send shows recipient checks, the vault outcome and the preview, labelled advice.
 - Dev-only features are gated by `VITE_DEV_TOOLS`; the virtual passkey and pasted keys are hot keys in browser storage.
-- The dev bundler must not be exposed publicly.
+- The public bundler pays gas from a hot operator key with a small float; its admission rules, reputation and rate limits
+  bound what a misbehaving client or entity can make it spend (see `apps/bundler/README.md`, "Safety model").
 
 ## 12. Tests
 
 | Suite | What it proves |
 |---|---|
 | `apps/bundler/test/bundler.test.ts` | local userOpHash = `EntryPoint.getUserOpHash` (incl. v0.9 paymaster signature); counterfactual deploy + first op; paymaster-sponsored deploy of an account holding 0 tXDS; AA24 → `-32507`; wrong EntryPoint; execution revert in estimation (`-32521`); receipt / by-hash lookup from logs |
+| `apps/bundler/test/unit.test.ts`, `server.test.ts` | admission rules, reputation, bundle selection, preVerificationGas / fee coverage, rate limits and client IPs, config, keystore, HTTP limits |
+| `apps/bundler/test/e2e.test.ts` | several senders in one bundle without operator loss; chained same-sender ops; paymaster throttled after invalidated ops and banned after an on-chain bundle revert; sponsorship policy; restart with the persisted mempool |
 | `apps/wallet/test/unit.test.ts` | packing round-trip, paymasterDataKeccak, dummy signature shapes, vault explanation, revoke builders, wallet / bundler `userop.ts` in sync |
 | `apps/wallet/test/webauthn.test.ts` | RFC 6979 P-256 vector and software-passkey WebAuthn assertions verified by the chain's `P256VERIFY` (`0x100`); field byte offsets; `XdevsSmartAccount.isValidSignature` accepts the encoding and rejects a wrong challenge |
 | `apps/wallet/test/e2e.test.ts` | Phase 4 exit criteria: (a) passkey-only account → sponsored deployment → faucet funds → instant small payment; (b) stolen key: large transfer queued, visible in the queue, one guardian vote not enough, 2-of-3 cancels, cancelled action cannot execute; vault-off attempt queued and cancelled too; (c) unlimited approval flagged (high, "advice, not fact") and rejected by the vault policy; look-alike recipients; approvals list + revoke-all; EIP-7702 upgrade + EOA lock (on the xDEVS node a raw transfer from the locked key is refused) |
