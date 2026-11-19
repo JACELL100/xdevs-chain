@@ -55,7 +55,8 @@ const stakingAbi = parseAbi(["function consensusValidatorSet() view returns (add
 /** ZIP-215 point check, as the node's `ValidatorKey::from_bytes`. */
 export function isEd25519Point(key: Hex): boolean {
   try {
-    ed25519.ExtendedPoint.fromHex(key.slice(2), true);
+    // zip215 = true: permissive decoding, as consensus (ed25519-consensus) does.
+    (ed25519.ExtendedPoint.fromHex as (hex: string, zip215?: boolean) => unknown)(key.slice(2), true);
     return true;
   } catch {
     return false;

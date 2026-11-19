@@ -108,7 +108,7 @@ const word = (v: bigint | Hex) => pad(typeof v === "bigint" ? toHex(v) : v, { si
 const LOCKED = keccak256(toHex("Locked(uint256,address,address,address,uint256)"));
 const BURNED = keccak256(toHex("BurnedForRelease(uint256,address,address,address,uint256)"));
 const data = (to: Hex, amount: bigint) => encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [to, amount]);
-const rc = (status: string, logs: { address: Hex; topics: Hex[]; data: Hex }[]): RpcReceipt => ({
+const rc = (status: Hex, logs: { address: Hex; topics: Hex[]; data: Hex }[]): RpcReceipt => ({
   type: "0x2", status, cumulativeGasUsed: "0x5208", logsBloom: pad("0x", { size: 256 }), logs,
   transactionIndex: "0x0", transactionHash: ZERO32, blockNumber: "0x1", blockHash: ZERO32,
 });

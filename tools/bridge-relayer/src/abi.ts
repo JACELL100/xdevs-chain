@@ -1,7 +1,7 @@
 // ABI fragments of the bridge contracts (contracts/src/bridge), shared by the relayer, the fixture generator and
 // the end-to-end test.
 
-import { parseAbi, parseAbiParameters } from "viem";
+import { parseAbi, parseAbiParameters, type Abi } from "viem";
 
 const BEACON_HEADER = "(uint64 slot, uint64 proposerIndex, bytes32 parentRoot, bytes32 stateRoot, bytes32 bodyRoot)";
 const G1 = "(uint256 xHi, uint256 xLo, uint256 yHi, uint256 yLo)";
@@ -34,7 +34,8 @@ const HEADER_STORE = [
 
 export const headerStoreAbi = parseAbi(HEADER_STORE);
 
-export const ethereumLightClientAbi = parseAbi([
+// Long tuple signatures exceed viem's type-level parser: typed as a plain Abi (parsed at runtime).
+export const ethereumLightClientAbi: Abi = parseAbi([
   ...HEADER_STORE,
   `function submitUpdate(${UPDATE} u, ${NON_SIGNER}[] nonSigners)`,
   `function loadCommittee(uint256 period, ${G1}[] keys)`,
@@ -42,16 +43,16 @@ export const ethereumLightClientAbi = parseAbi([
   "function committeeLoaded(uint256 period) view returns (bool)",
   "function finalizedSlot() view returns (uint64)",
   "event FinalizedHeader(uint64 indexed slot, bytes32 indexed beaconRoot, bytes32 executionBlockHash)",
-]);
+] as string[]);
 
-export const xdevsLightClientAbi = parseAbi([
+export const xdevsLightClientAbi: Abi = parseAbi([
   ...HEADER_STORE,
   `function submitCommit(uint64 height, uint32 round, bytes32 blockHash, ${VALIDATOR}[] set, ${SIGNATURE}[] sigs)`,
   `function submitValidatorSet(uint64 boundary, ${STAKING_PROOF} p)`,
   "function validatorSetBoundary(uint64 height) view returns (uint64)",
   "function validatorSets(uint64 boundary) view returns (bytes32 hash, uint64 totalPower)",
   "function certifiedBlock(uint64 height) view returns (bytes32)",
-]);
+] as string[]);
 
 export const vaultAbi = parseAbi([
   "function lock(address token, uint256 amount, address recipient)",
