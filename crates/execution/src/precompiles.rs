@@ -134,7 +134,7 @@ mod tests {
         let sk = SigningKey::from([7u8; 32]);
         let good = input(&sk, b"vote");
         // tampered message, signature, key; short input
-        for i in [0usize, 40, 100] {
+        for i in [0usize, 40, 99] {
             let mut bad = good.clone();
             bad[i] ^= 1;
             let out = ed25519_verify(&bad, 1_000_000).unwrap();
