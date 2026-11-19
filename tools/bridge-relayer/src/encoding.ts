@@ -113,9 +113,14 @@ export function receiptRlp(r: RpcReceipt): Hex {
   return ty === 0 ? body : concat([quantity(ty), body]);
 }
 
+/** The receipts trie of a block. */
+export function receiptsTrie(receipts: RpcReceipt[]) {
+  return buildTrie(receipts.map((r, i) => ({ key: indexKey(i), value: receiptRlp(r) })));
+}
+
 /** Receipt-trie proof for `txIndex` from all receipts of a block; checks the root against `receiptsRoot`. */
 export function receiptProof(receipts: RpcReceipt[], txIndex: number, receiptsRoot: Hex): Hex[] {
-  const trie = buildTrie(receipts.map((r, i) => ({ key: indexKey(i), value: receiptRlp(r) })));
+  const trie = receiptsTrie(receipts);
   if (trie.root !== receiptsRoot.toLowerCase()) {
     throw new Error(`rebuilt receipts root ${trie.root} != header ${receiptsRoot}`);
   }

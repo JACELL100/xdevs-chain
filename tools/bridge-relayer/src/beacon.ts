@@ -172,7 +172,10 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 export class BeaconClient {
-  constructor(readonly baseUrl: string) {}
+  readonly baseUrl: string;
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl;
+  }
 
   async updates(startPeriod: number, count: number): Promise<LcUpdateJson[]> {
     const r = await getJson<{ data: LcUpdateJson }[]>(
