@@ -18,6 +18,7 @@
 //!
 //! Ends with the no-fork check (same block hashes and state roots on every node).
 
+use anyhow::Context;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 use xdevs_crypto::{
@@ -213,6 +214,10 @@ async fn bot(net: &LocalNet, amm: Address, victim_tx: B256) -> anyhow::Result<Bo
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn encrypted_mempool_prevents_a_sandwich() -> anyhow::Result<()> {
+    // Node logs of the encrypted-mempool path are printed if the test fails.
+    if std::env::var_os("RUST_LOG").is_none() {
+        std::env::set_var("RUST_LOG", "warn,xdevs::encrypted=debug,xdevs::app=info");
+    }
     let net = LocalNet::start(LocalNetOptions {
         validators: 4,
         full_nodes: 0,
@@ -225,6 +230,8 @@ async fn encrypted_mempool_prevents_a_sandwich() -> anyhow::Result<()> {
     })
     .await?;
     net.wait_for_height(2, secs(60)).await?;
+    // Every node gossips with at least two others (txs and decryption shares).
+    net.wait_gossip_mesh(2, secs(30)).await?;
     let chain = net.chain_id();
 
     // --- The committee key, as a client gets it ------------------------------------
@@ -399,8 +406,11 @@ async fn encrypted_mempool_prevents_a_sandwich() -> anyhow::Result<()> {
         BotAction::Sandwich { .. } => panic!("the bot read an encrypted swap"),
     }
     // Ordered blind in block N, executed first in block N + 1.
-    let (env_block, _, env_ok) = position(&net, envelope).await?;
-    let (inner_block, inner_index, inner_ok) = position(&net, inner).await?;
+    let (env_block, _, env_ok) = position(&net, envelope).await.context("envelope receipt")?;
+    eprintln!("envelope included in block {env_block}");
+    let (inner_block, inner_index, inner_ok) = position(&net, inner)
+        .await
+        .context("decrypted swap receipt")?;
     assert!(env_ok && inner_ok);
     assert_eq!(
         inner_block,
