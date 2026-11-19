@@ -116,7 +116,7 @@ async fn parallel_and_sequential_validators_agree() -> anyhow::Result<()> {
             );
             nonces[s] += 1;
             net.send_raw(s % 4, &raw).await?;
-            let raw = if (s + round as usize) % 3 != 0 {
+            let raw = if !(s + round as usize).is_multiple_of(3) {
                 counter_calls += 1;
                 sign(chain, s, nonces[s], TxKind::Call(counter), 0, 100_000)
             } else {
