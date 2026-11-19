@@ -52,7 +52,7 @@ export function enclaveAddChainParameters(): AddEthereumChainParameter {
     nativeCurrency: { ...ENCLAVE.nativeCurrency },
     rpcUrls: [ENCLAVE.rpcUrl],
     blockExplorerUrls: [ENCLAVE.explorerUrl],
-    iconUrls: [ENCLAVE.iconUrl],
+    iconUrls: ['https://xdevschain.tech/brand/xdevs-chain-icon-256.png', ENCLAVE.iconUrl],
   }
 }
 
