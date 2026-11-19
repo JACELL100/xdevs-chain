@@ -2,7 +2,9 @@
 
 Stale unlimited token approvals are one of the main ways wallets get drained: you approve a contract "forever" once, forget about it, and years later the contract (or its upgraded version) is exploited. On xDEVS Chain, **approvals expire**.
 
-<span class="status ok">Contracts built and tested</span> · Not yet deployed · Not audited
+<span class="status ok">Live on Enclave</span> · Permit2Expiring in genesis at `0x…1008` · `xdevs_getApprovals` served by the public RPC · Not audited
+
+See and revoke your approvals in the [wallet](https://wallet.xdevschain.tech).
 
 ## Three layers
 
@@ -43,10 +45,10 @@ For tokens that are not XDRC-20: approve `0x…1008` on the token once, then kee
 
 ## Canonical bridged tokens
 
-A `CanonicalTokenFactory` (owned by governance) deploys at most **one** canonical XDRC-20 per origin asset, so wallets and explorers can tell the real bridged token from a copy with the same name or symbol (`isCanonical(token)`). Bridges themselves are Phase 7.
+A `CanonicalTokenFactory` (owned by governance) deploys at most **one** canonical XDRC-20 per origin asset, so wallets and explorers can tell the real bridged token from a copy with the same name or symbol (`isCanonical(token)`). Bridges themselves are a [prototype](/concepts/bridges), not deployed.
 
 ## Listing approvals
 
-The planned `xdevs_getApprovals(owner)` RPC (Phase 4) will list all live approvals so wallets can show a one-click revoke screen. Until then, indexers can follow the `ApprovalWithExpiry` and `AllApprovalsRevoked` events described in the spec.
+The `xdevs_getApprovals(owner)` RPC, live on Enclave, lists the live approvals it finds in recent blocks so wallets can show a one-click revoke screen ([reference](/developers/json-rpc#xdevs-getapprovals)); the [wallet](https://wallet.xdevschain.tech) uses it. For full history, the [explorer API](/network/endpoints) indexes the `ApprovalWithExpiry` and `AllApprovalsRevoked` events described in the spec.
 
 Full specification: [XNS and expiring approvals](https://github.com/JACELL100/xdevs-chain/blob/main/docs/specs/xns-and-approvals.md).

@@ -4,7 +4,9 @@
 
 The Guardian Vault is a policy inside the [xDEVS Smart Account](/concepts/smart-accounts). Small everyday actions stay instant. Risky actions are **queued** for a delay, during which the owner or the guardians can cancel them.
 
-<span class="status ok">Contracts built and tested</span> · Not yet in the dev genesis · Not audited
+<span class="status ok">Live on Enclave</span> · Part of the smart account in genesis (`0x…1005`) · Not audited
+
+Add guardians and turn the vault on in the [wallet](https://wallet.xdevschain.tech). Nodes serve the queue with `xdevs_getVaultQueue` and live alerts with the `vaultEvents` subscription ([reference](/developers/json-rpc#xdevs-getvaultqueue)).
 
 ## The policy
 

@@ -1,6 +1,6 @@
 # Local multi-validator network
 
-You can run a real BFT network of several validators on your own machine, either as plain processes or in Docker with chaos tooling. This is how Phase 2 consensus is developed and tested.
+You can run a real BFT network of several validators on your own machine, either as plain processes or in Docker with chaos tooling. This is how consensus is developed and tested before it reaches the live [Enclave testnet](/network/endpoints); to just use a network, Enclave needs no setup ([Quickstart](/guide/quickstart)).
 
 <span class="status ok">Built (Phase 2)</span> · Static validator set from the genesis file · Dev and test use only
 
@@ -99,6 +99,6 @@ Full instructions: [localnet runbook](https://github.com/JACELL100/xdevs-chain/b
 
 ## Limits today
 
-- The validator set is fixed in `genesis.json`. Staking-driven validator changes, rewards and slashing are Phase 3.
+- `testnet init` writes a genesis without the system contracts, so the validator set stays fixed in `genesis.json`. To try the staking-driven set locally, add the predeploys with the [genesis builder](https://github.com/JACELL100/xdevs-chain/tree/main/tools/genesis-builder) (`build --validators-from`) and set `stakingValidatorsBlock`.
 - Peers are static (`persistent_peers`, `bootnodes`); Kademlia discovery is off.
 - P2P runs over TCP; QUIC is planned after a Linux soak.

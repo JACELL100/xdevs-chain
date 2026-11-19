@@ -17,16 +17,16 @@ export default function Closing() {
           <span className="xh-metal">that has your back.</span>
         </h2>
         <p className="xh-lede" {...rv(120)}>
-          The Enclave testnet is live: add it to your wallet, or run a 4-validator network on your laptop.
+          The Enclave testnet is live: add it to MetaMask, claim tXDS from the faucet and deploy with Foundry in minutes, or open a passkey account in the wallet.
         </p>
         <div className="xh-ctas" {...rv(180)}>
           <Link className="xh-btn xh-btn-primary" href="/guide/quickstart">
-            Run a local chain
+            Start on Enclave
             <Arrow />
           </Link>
-          <Link className="xh-btn xh-btn-ghost" href="/guide/introduction">
-            Read the docs
-          </Link>
+          <a className="xh-btn xh-btn-ghost" href="https://wallet.xdevschain.tech" target="_blank" rel="noopener">
+            Try the wallet
+          </a>
         </div>
       </div>
     </section>

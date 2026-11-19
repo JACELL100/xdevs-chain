@@ -42,7 +42,7 @@ export default function PasskeyPhone() {
       <div className="screen">
         <div className="sc-head">
           <span className="xh-mono">alice.xdevs</span>
-          <span className="xh-mono sc-net">chain 7117</span>
+          <span className="xh-mono sc-net">enclave</span>
         </div>
 
         <div className="scan" aria-hidden="true">

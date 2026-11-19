@@ -1,10 +1,14 @@
 # Validators
 
-<span class="status next">Phase 3 — staking-driven set built, activation on Enclave pending</span>
+<span class="status next">Staking-driven set activates at block 97,200 on Enclave</span>
 
-xDEVS Chain validators run Tendermint-style BFT consensus (Malachite). The Enclave testnet (chain id 717171) started with 4 validators fixed in `genesis.json`. Phase 3 adds a **validator set chosen by stake** in the Staking system contract (`0x0000000000000000000000000000000000001000`): anyone with enough tXDS can register, the top validators by stake sign blocks, they earn block rewards, and misbehaviour is slashed.
+xDEVS Chain validators run Tendermint-style BFT consensus (Malachite). The Enclave testnet (chain id 717171) runs **4 validators** on Oracle Cloud (two in Hyderabad, two in Mumbai), fixed in `genesis.json`. Phase 3 adds a **validator set chosen by stake** in the Staking system contract (`0x0000000000000000000000000000000000001000`): registered validators with enough self-stake are ranked by stake, the top ones sign blocks, they earn block rewards, and misbehaviour is slashed.
 
-The node implements it behind an activation height (`stakingValidatorsBlock` in the genesis config). Until the network is upgraded at that height, the genesis validator set stays in force; the upgrade is announced with its block number.
+The node implements it behind an activation height (`stakingValidatorsBlock` in the genesis config). On Enclave it activates at block **97,200** (about 19 November 2026, 21:37 UTC), with release [`v0.3.0-enclave.1`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.3.0-enclave.1). Until then the four genesis validators stay in force. Block 97,200 is an epoch boundary (27 × 3,600), so validators registered before it can join at block 97,201.
+
+:::warning[Not open to the public yet]
+Becoming a validator on Enclave is **not open to the public yet**. The four validators accept P2P connections only from each other, so a new node can't follow the chain until the maintainers allow-list it, and 10,000 tXDS of self-stake is far more than the faucet gives out. The steps below describe how registration works once the staking set is active; if you want to run a validator, ask on [GitHub](https://github.com/JACELL100/xdevs-chain/issues) first. Phase 6 opens the network to independent validators.
+:::
 
 ## How the set is chosen
 
@@ -20,7 +24,7 @@ The node implements it behind an activation height (`stakingValidatorsBlock` in 
    ```bash
    xdevs-cli keygen --consensus --out consensus_key.json   # prints the Ed25519 public key
    ```
-   In `config.toml`: `[validator] enabled = true`, `key_file = "consensus_key.json"`, and `[p2p] persistent_peers` pointing at the existing validators. A key that is not in the set yet is fine: the node follows the chain and starts signing when it is selected. Ask the validator operators to allow your IP on the consensus port (30333), if their firewall uses an allow-list.
+   In `config.toml`: `[validator] enabled = true`, `key_file = "consensus_key.json"`, and `[p2p] persistent_peers` pointing at the existing validators. A key that is not in the set yet is fine: the node follows the chain and starts signing when it is selected. On Enclave, the validators' firewalls use an allow-list: the maintainers must allow your IP on the consensus port (30333) first.
 2. **Register** from the account that will operate the validator, sending at least the minimum self-stake (10,000 tXDS) as value:
    ```bash
    cast send 0x0000000000000000000000000000000000001000 \
@@ -70,7 +74,7 @@ Never run the same consensus key on two machines: that is how validators double-
 
 - BFT consensus with stored commit certificates, Ed25519 consensus keys in encrypted keystores, a libp2p node identity and a persistent double-sign guard.
 - Validator and full-node modes, block sync for late joiners, transaction gossip.
-- The staking-driven validator set described above, tested on in-process networks (a 5th validator joining, an offline validator jailed, a double-signing validator slashed); live on Enclave after the activation upgrade ([runbook](https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/activate-staking-validators.md)).
+- The staking-driven validator set described above, tested on in-process networks (a 5th validator joining, an offline validator jailed, a double-signing validator slashed); it activates at block 97,200 on Enclave ([runbook](https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/activate-staking-validators.md)).
 
 Try it locally: [Local multi-validator network](/operators/local-network).
 

@@ -157,7 +157,7 @@ Block time and Tendermint round timeouts. Each `*_delta_ms` is added per extra r
 
 ### `[execution]`
 
-How this node executes blocks it receives (Phase 5). A local choice, not a consensus rule:
+How this node executes blocks it receives (Phase 5). The Enclave validators run with `parallel = true`. A local choice, not a consensus rule:
 parallel and sequential execution produce identical receipts and state roots, so each
 operator decides independently and no activation height is involved.
 

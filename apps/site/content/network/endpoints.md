@@ -49,7 +49,7 @@ curl -s https://rpc.xdevschain.tech -H 'content-type: application/json' \
 | Chain id | 717171 (`xdevs-enclave-1`) |
 | Block time | 2 s |
 | Finality | Every committed block is final (BFT, 2/3+ of the validators sign it) |
-| Validators | 4, equal power, set in genesis (staking-driven changes come with Phase 3) |
+| Validators | 4, equal power, set in genesis; the staking-driven set takes over from block 97,200 ([validators](/operators/validators)) |
 | Genesis | Built with [`tools/genesis-builder`](https://github.com/JACELL100/xdevs-chain/tree/main/tools/genesis-builder) from [`configs/enclave.json`](https://github.com/JACELL100/xdevs-chain/blob/main/tools/genesis-builder/configs/enclave.json); system contracts at `0x…1000`–`0x…1009` ([predeploys](/concepts/predeploys)) |
 | Node release | [`v0.3.0-enclave.1`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.3.0-enclave.1) on all validators (rolled out 19 Nov 2026), with Block-STM parallel execution on. Safety RPCs (`xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, `vaultEvents`) and `xdevs_localFee` are served now |
 | Scheduled upgrade | At block **97,200** (≈ 19 Nov 2026, 21:37 UTC): staking-driven validator set (1 tXDS block reward), local fee markets and the `ED25519VERIFY` precompile switch on. The encrypted mempool stays off until it has a distributed key setup |

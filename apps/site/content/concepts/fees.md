@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Mainnet coin | **XDS** (no mainnet exists yet) |
-| Testnet / dev coin | **tXDS** |
+| Testnet / dev coin | **tXDS** (on Enclave its name is EnclaveXDS); free from the [faucet](https://faucet.xdevschain.tech) |
 | Decimals | 18 |
 | Smallest unit | "dev": 1 XDS = 10¹⁸ dev (the same ratio as ETH to wei) |
 
@@ -27,13 +27,13 @@ xDEVS Chain uses Ethereum's EIP-1559 fee model, so wallets estimate fees exactly
 |---|---|
 | Base fee × gas used, **80%** | **Burned** |
 | Base fee × gas used, **20%** | **Treasury** contract (`0x…1002`), spent on grants and public goods by governance |
-| Priority fee (tip) | The block producer's fee recipient (`--fee-recipient` on the dev node) |
+| Priority fee (tip) | The block producer's fee recipient (`[validator] fee_recipient`, or `--fee-recipient` on the dev node) |
 
-This split works today on the dev chain. Under heavy use the burn can exceed new issuance, making the supply deflationary.
+This split is live on Enclave and on the dev chain. Under heavy use the burn can exceed new issuance, making the supply deflationary.
 
-### Dev chain values
+### Values on Enclave and the dev chain
 
-From the built-in dev genesis:
+From the Enclave genesis and the built-in dev genesis (the same values):
 
 | Parameter | Value |
 |---|---|
@@ -49,31 +49,28 @@ On the dev node, the default `--fee-recipient` is the zero address, so tips go t
 
 ### Governance
 
-On the public networks, the `FeeConfig` contract (`0x…1003`) holds parameters such as the gas limit, minimum base fee and burn share, and only Governance (a stake-weighted vote plus a timelock) can change them. FeeConfig is built and tested but not yet wired into the dev genesis.
+On the public networks, the `FeeConfig` contract (`0x…1003`) holds parameters such as the gas limit, minimum base fee and burn share, and only Governance (a stake-weighted vote plus a timelock) can change them. FeeConfig is in the Enclave genesis; the built-in dev genesis doesn't contain it.
 
-## Planned: local fee markets (Phase 5)
+## Local fee markets (activate at block 97,200 on Enclave)
 
-On Ethereum, one popular mint makes everyone pay more. xDEVS Chain plans **local fee markets**: if a single contract uses more than 25% of block gas, transactions to it pay an extra local base fee that rises and decays like EIP-1559, while everyone else keeps paying the normal fee. The price will be exposed through `xdevs_localFee(address)`. The first version is keyed by the top-level `to` address only.
+On Ethereum, one popular mint makes everyone pay more. xDEVS Chain has **local fee markets**: if a single contract uses more than 25% of block gas, transactions to it pay an extra local base fee that rises and decays like EIP-1559, while everyone else keeps paying the normal fee. The price is exposed through `xdevs_localFee(address)`, already served by the public RPC (`active: false` until the activation). The first version is keyed by the top-level `to` address only. Details: [JSON-RPC reference](/developers/json-rpc#local-fee-markets-phase-5).
 
-## Planned: gas sponsorship
+## Gas sponsorship
 
-Apps can pay their users' gas through the [paymaster](/concepts/smart-accounts#paymasters-gas-sponsorship), and an example paymaster accepts approved stablecoins. These are built as contracts; using them on a network needs the predeploys and an ERC-4337 bundler.
+Apps can pay their users' gas through the [paymaster](/concepts/smart-accounts#paymasters-gas-sponsorship) (`0x…1007`, in the Enclave genesis), and an example paymaster accepts approved stablecoins. On Enclave, sponsored UserOperations go through the public [ERC-4337 bundler](/network/endpoints); the [wallet](https://wallet.xdevschain.tech) uses it to sponsor the activation of new passkey accounts.
 
-## Planned testnet supply
+## Enclave supply
 
-These numbers are from the [implementation plan](https://github.com/JACELL100/xdevs-chain/blob/main/xDEVS_Chain_Implementation_Plan.md) and apply to the future public testnet only. Mainnet tokenomics will be designed separately, with legal advice.
+From the Enclave genesis config ([`enclave.json`](https://github.com/JACELL100/xdevs-chain/blob/main/tools/genesis-builder/configs/enclave.json)). Mainnet tokenomics will be designed separately, with legal advice.
 
 | | |
 |---|---|
 | Genesis supply | 1,000,000,000 tXDS |
-| Issuance | 7% in year 1, −1% per year, floor 2%, paid as staking rewards |
+| Issuance | None before block 97,200; from then on a fixed 1 tXDS block reward to the Staking contract (about 1.6% of the supply per year, below the plan's 7% schedule until its inflation curve is implemented) |
 | Burn | 80% of base fees |
 
 | Genesis allocation | Share |
 |---|---|
-| Faucet & community reserve | 30% |
-| Ecosystem grants | 25% |
+| Faucet, grants, core development and reserve (held by the first validator's operator account, which funds the faucet) | 75% |
 | Treasury (governance) | 20% |
-| Core development | 15% |
-| Genesis validators' stake | 5% |
-| Reserve (incentivized testnet) | 5% |
+| Genesis validators' stake (4 × 12,500,000 tXDS) | 5% |

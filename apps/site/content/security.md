@@ -1,6 +1,6 @@
 # Security
 
-xDEVS Chain is **pre-mainnet software**. No network built from this repository holds real value yet, and nothing has had an external security audit.
+xDEVS Chain is **pre-mainnet software**. Its only public network, [Enclave](/network/endpoints), is a **testnet**: tXDS has no value, the network may be reset with notice on the [status page](https://status.xdevschain.tech), and it runs on four validators operated by the project. Nothing has had an external security audit.
 
 ## Reporting a vulnerability
 
@@ -8,9 +8,9 @@ xDEVS Chain is **pre-mainnet software**. No network built from this repository h
 
 Please include the affected version or commit, reproduction steps, and the impact (for example a consensus split, fund loss, denial of service or an RPC crash). We aim to acknowledge reports within 72 hours (best effort; small team) and coordinate a fix and a disclosure date with you.
 
-**Scope:** the node (`xdevs`), the CLI (`xdevs-cli`), all crates in the repository, and the system contracts. Out of scope: the public dev keys of the local dev chain (chain id 7117) and third-party services.
+**Scope:** the node (`xdevs`), the CLI (`xdevs-cli`), all crates in the repository, and the system contracts. Problems in the live Enclave services (RPC, explorer, wallet, faucet, bundler, status page) are welcome through the same private channel. Out of scope: the public dev keys of the local dev chain (chain id 7117) and third-party services. Test on Enclave or a local network, never against other people's accounts.
 
-**Rewards** (free version for now): credit in the release notes, tXDS on the public testnet once it exists, and a "Security Contributor" role. Paid bounties come only with a budget or a mainnet.
+**Rewards** (free version for now): credit in the release notes, Enclave tXDS (which has no value), and a "Security Contributor" role. Paid bounties come only with a budget or a mainnet.
 
 ## How the project approaches security
 
@@ -29,4 +29,5 @@ Planned, not done: static analysis (Slither, Aderyn) of all contracts, independe
 - Never share a seed phrase or private key. xDEVS team members will never ask for one.
 - The dev keys shown in these docs are **public**. Never send anything of value to them on any network.
 - tXDS has no value. Nobody legitimately sells it.
-- Official links are on this site and in the [GitHub repository](https://github.com/JACELL100/xdevs-chain).
+- Official links are on this site and in the [GitHub repository](https://github.com/JACELL100/xdevs-chain). Every official Enclave service lives under `xdevschain.tech` (see [Network endpoints](/network/endpoints)).
+- Safety warnings in the wallet and from the RPC (simulation, recipient checks) are advice, not fact: they help you notice problems but never prove that a transaction is safe.

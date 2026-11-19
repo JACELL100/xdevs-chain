@@ -2,7 +2,9 @@
 
 **XIP-0001** is an opt-in protocol rule that closes the biggest hole in EIP-7702 smart accounts: the old private key.
 
-<span class="status ok">Built and tested</span> in the node (block validity, block building, mempool, RPC) and in the account contract. Active from genesis on dev chains (`"xip0001Block": 0`).
+<span class="status ok">Live on Enclave</span> from genesis (`"xip0001Block": 0`), enforced by the node (block validity, block building, mempool, RPC) with the account implementation at `0x…1005` in genesis. Also active on dev chains. Not audited.
+
+Turn it on for a delegated MetaMask address in the [wallet](https://wallet.xdevschain.tech).
 
 ## The problem
 
@@ -58,7 +60,7 @@ XIP-0001 is a **validity rule for transactions not yet included**, of the same k
 - Without guardians, a stolen EOA key can't be revoked; the lock limits the thief to the vault policy indefinitely. Factory (passkey) accounts with no private key remain the strongest option.
 
 :::info[Dev chain note]
-The rule is enforced by the dev node, but the account implementation is not yet placed at `0x…1005` in the dev genesis, so on a default dev chain no address can be in the locked state yet. See [Predeployed contracts](/concepts/predeploys).
+The rule is enforced by the dev node too, but the built-in dev genesis has no account implementation at `0x…1005`, so on a default dev chain no address can be in the locked state. Start the dev node with `--genesis deploy/configs/dev-genesis-with-predeploys.json` to get it. See [Predeployed contracts](/concepts/predeploys).
 :::
 
 Full specification: [XIP-0001](https://github.com/JACELL100/xdevs-chain/blob/main/docs/specs/xip-0001-eoa-lock.md).

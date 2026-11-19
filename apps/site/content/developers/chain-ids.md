@@ -49,12 +49,16 @@ The [SDK](/developers/sdk) can add the network with `addXdevsChainToWallet(walle
 | Max tx size (gossip) | 128 KiB | 128 KB |
 | EVM rules | Osaka | Osaka |
 | XIP-0001 (EOA lock) | Active from genesis | Active from genesis |
-| Epoch length | n/a (static validator set) | 3,600 blocks |
-| Max validators | Set in genesis | 4 in genesis today; up to 100 with Phase 3 staking |
+| Epoch length | n/a (static validator set) | 3,600 blocks (staking set from block 97,200) |
+| Block reward | none | 1 tXDS per block from block 97,200 |
+| Local fee markets | off | Activate at block 97,200 |
+| `ED25519VERIFY` precompile (`0x0A00…0001`) | off | Activates at block 97,200 |
+| Encrypted mempool | off | Off (needs a distributed key setup first) |
+| Max validators | Set in genesis | 4 in genesis today; up to 100 once the staking set activates at block 97,200 |
 | Guardian Vault default delay | 24 h (1 h–7 d, per account) | Same |
 | Social recovery delay | 48 h (1 h–30 d, per account) | Same |
 
-Planned values come from §33.1 of the [implementation plan](https://github.com/JACELL100/xdevs-chain/blob/main/xDEVS_Chain_Implementation_Plan.md) and may change before launch.
+Enclave values come from its genesis config, [`tools/genesis-builder/configs/enclave.json`](https://github.com/JACELL100/xdevs-chain/blob/main/tools/genesis-builder/configs/enclave.json); the targets behind them are in §33.1 of the [implementation plan](https://github.com/JACELL100/xdevs-chain/blob/main/xDEVS_Chain_Implementation_Plan.md). Values may change in later network upgrades.
 
 ## Transaction types
 

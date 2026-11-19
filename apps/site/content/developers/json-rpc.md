@@ -2,12 +2,17 @@
 
 The xDEVS node speaks the standard Ethereum JSON-RPC API, so MetaMask, Foundry, Hardhat, viem and ethers work unchanged. It also has an `xdevs_` namespace for chain-specific features.
 
-This page describes the node as built today (Phases 1–2), whether it runs as a dev chain, a validator or a full node. The public endpoints are [not live yet](/network/endpoints).
+This page describes node release [`v0.3.0-enclave.1`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.3.0-enclave.1), which serves the **Enclave** public testnet at `https://rpc.xdevschain.tech` (WebSocket `wss://ws.xdevschain.tech`, chain id 717171), whether it runs as a dev chain, a validator or a full node. The public RPC serves the `eth_`, `net_`, `web3_` and `xdevs_` namespaces; its limits are in [Network endpoints](/network/endpoints#public-rpc-limits).
+
+```bash
+curl -s https://rpc.xdevschain.tech -H 'content-type: application/json' \n  -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'   # 0xaf173
+```
 
 ## Transport
 
-- **HTTP** on `127.0.0.1:8545` by default (`--http` or `[rpc] http`).
-- **WebSocket** on the same port (`ws://127.0.0.1:8545`), with [subscriptions](#subscriptions-websocket); an optional separate listener can be set with `[rpc] ws`.
+- **Enclave:** HTTPS at `https://rpc.xdevschain.tech`, WebSocket at `wss://ws.xdevschain.tech`.
+- **Your own node:** HTTP on `127.0.0.1:8545` by default (`--http` or `[rpc] http`).
+- **WebSocket** on the same port of your own node (`ws://127.0.0.1:8545`), with [subscriptions](#subscriptions-websocket); an optional separate listener can be set with `[rpc] ws`.
 - CORS: any origin by default (`[rpc] cors`).
 
 ## Supported methods
@@ -16,7 +21,7 @@ This page describes the node as built today (Phases 1–2), whether it runs as a
 
 | Method | Notes |
 |---|---|
-| `eth_chainId` | `0x1bcd` (7117) on the dev chain |
+| `eth_chainId` | `0xaf173` (717171) on Enclave, `0x1bcd` (7117) on the dev chain |
 | `eth_blockNumber` | |
 | `eth_syncing` | Sync status of the node |
 | `eth_accounts` | Empty list: the node holds no user keys |
@@ -49,7 +54,7 @@ Limits: 20 subscriptions per connection, 1,000 per server, up to 256 addresses a
 
 ```bash
 # with websocat or any WS client
-websocat ws://127.0.0.1:8545
+websocat wss://ws.xdevschain.tech   # or ws://127.0.0.1:8545 for your own node
 {"jsonrpc":"2.0","id":1,"method":"eth_subscribe","params":["newHeads"]}
 ```
 
@@ -92,22 +97,22 @@ Requests are limited to 5 MiB and responses to 32 MiB.
 
 ## The `xdevs_` namespace
 
-| Method | What it does | Status |
+| Method | What it does | On Enclave |
 |---|---|---|
-| `xdevs_getEoaLock(address, block?)` | [XIP-0001](/concepts/eoa-lock) lock state of an address | <span class="status ok">Implemented</span> |
-| `xdevs_getCommitCertificate(block)` | The validator signatures that finalized a block | <span class="status ok">Implemented</span> |
-| `xdevs_submitEvidence(raw)` | Submit double-sign evidence (two conflicting signed votes) for slashing | <span class="status ok">Implemented</span> |
-| `xdevs_validators(block?)` | Active validator set, power, uptime | <span class="status planned">Phase 3</span> |
-| `xdevs_epochInfo(block?)` | Current epoch and next transition | <span class="status planned">Phase 3</span> |
-| `xdevs_simulateTransaction(tx, block?)` | Asset changes, approvals, Guardian Vault outcome and plain-language warnings before signing | <span class="status ok">Implemented</span> |
-| `xdevs_checkRecipient(to)` / `(from, to, block?)` | Facts (contract, smart account, EOA lock, XNS name) and advice (first-time, look-alike, poisoning) about a recipient | <span class="status ok">Implemented</span> |
-| `xdevs_getApprovals(owner, options?, block?)` | Live approvals found in the recent log window, for a revoke screen | <span class="status ok">Implemented</span> |
-| `xdevs_getVaultQueue(account, block?)` | Pending Guardian Vault actions | <span class="status ok">Implemented</span> |
-| `xdevs_resolveName(name, block?)` / `xdevs_reverseName(address, block?)` | XNS lookups | <span class="status ok">Implemented</span> |
-| `eth_subscribe("vaultEvents", {account?})` | Real-time vault alerts (WebSocket) | <span class="status ok">Implemented</span> |
-| `xdevs_getMempoolEncryptionKey()` | Committee key of the encrypted mempool (prototype, off unless the genesis sets `encryptedMempoolBlock`) | <span class="status ok">Prototype</span> |
-| `xdevs_sendEncryptedTransaction(raw)` | Submit an envelope whose payload is encrypted to the committee | <span class="status ok">Prototype</span> |
-| `xdevs_localFee(contract, block?)` (alias `xdevs_getLocalFee`) | Global + local base fee for transactions to `contract` (local fee markets, off unless the genesis sets `localFeeMarketsBlock`) | <span class="status ok">Implemented</span> |
+| `xdevs_getEoaLock(address, block?)` | [XIP-0001](/concepts/eoa-lock) lock state of an address | <span class="status ok">Live</span> |
+| `xdevs_getCommitCertificate(block)` | The validator signatures that finalized a block | <span class="status ok">Live</span> |
+| `xdevs_submitEvidence(raw)` | Submit double-sign evidence (two conflicting signed votes) for slashing | <span class="status ok">Live</span> |
+| `xdevs_validators(block?)` | Active validator set, power, uptime | <span class="status planned">Planned</span> (not served yet) |
+| `xdevs_epochInfo(block?)` | Current epoch and next transition | <span class="status planned">Planned</span> (not served yet) |
+| `xdevs_simulateTransaction(tx, block?)` | Asset changes, approvals, Guardian Vault outcome and plain-language warnings before signing | <span class="status ok">Live</span> |
+| `xdevs_checkRecipient(to)` / `(from, to, block?)` | Facts (contract, smart account, EOA lock, XNS name) and advice (first-time, look-alike, poisoning) about a recipient | <span class="status ok">Live</span> |
+| `xdevs_getApprovals(owner, options?, block?)` | Live approvals found in the recent log window, for a revoke screen | <span class="status ok">Live</span> |
+| `xdevs_getVaultQueue(account, block?)` | Pending Guardian Vault actions | <span class="status ok">Live</span> |
+| `xdevs_resolveName(name, block?)` / `xdevs_reverseName(address, block?)` | XNS lookups | <span class="status ok">Live</span> |
+| `eth_subscribe("vaultEvents", {account?})` | Real-time vault alerts (WebSocket) | <span class="status ok">Live</span> |
+| `xdevs_getMempoolEncryptionKey()` | Committee key of the encrypted mempool (prototype, off unless the genesis sets `encryptedMempoolBlock`) | <span class="status next">Off</span> (returns `null`) |
+| `xdevs_sendEncryptedTransaction(raw)` | Submit an envelope whose payload is encrypted to the committee | <span class="status next">Off</span> (encrypted mempool not enabled) |
+| `xdevs_localFee(contract, block?)` (alias `xdevs_getLocalFee`) | Global + local base fee for transactions to `contract` (local fee markets, off unless the genesis sets `localFeeMarketsBlock`) | <span class="status ok">Live</span>; `active: false` until block 97,200 |
 
 The plan originally named this method `xdevs_getCommit`; the node and the SDK's `getCommit` use `xdevs_getCommitCertificate`.
 
@@ -116,7 +121,7 @@ Planned methods currently answer "method not found" (`-32601`); the [SDK](/devel
 ### `xdevs_getEoaLock`
 
 ```bash
-curl -s http://127.0.0.1:8545 -H 'content-type: application/json' -d '{
+curl -s https://rpc.xdevschain.tech -H 'content-type: application/json' -d '{
   "jsonrpc": "2.0", "id": 1, "method": "xdevs_getEoaLock",
   "params": ["0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", "latest"]
 }'
@@ -185,7 +190,7 @@ The node only looks at recent history. The indexer API behind the explorer is th
 - A transaction that would revert is not an RPC error. It returns `success: false`, the reason, and no asset changes.
 
 ```bash
-curl -s http://127.0.0.1:8545 -H 'content-type: application/json' -d '{
+curl -s https://rpc.xdevschain.tech -H 'content-type: application/json' -d '{
   "jsonrpc": "2.0", "id": 1, "method": "xdevs_simulateTransaction",
   "params": [{
     "from": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
@@ -372,7 +377,7 @@ Always pass `account`. Without it, matching events from any contract are deliver
 
 ### Encrypted mempool (Phase 5 prototype)
 
-Research-grade and **not enabled on any network**: a chain uses it only if its genesis
+Research-grade and **not enabled on any network** (Enclave included, until it has a distributed key setup): a chain uses it only if its genesis
 sets `encryptedMempoolBlock` and an `encryptedMempool` committee key. Design, threat
 model and limitations: [`docs/research/encrypted-mempool.md`](https://github.com/JACELL100/xdevs-chain/blob/main/docs/research/encrypted-mempool.md).
 
@@ -437,7 +442,7 @@ A contract that used more than 25% of a block's gas gets a local base fee that r
 EIP-1559 while it stays congested and decays when it does not; everyone else pays only
 `globalBaseFee`. Set `maxFeePerGas ≥ totalBaseFee` (plus headroom) for transactions to
 it; the tip is what is paid above `totalBaseFee`. `active` is `false` (and the local fee 0)
-before `localFeeMarketsBlock`. Receipts' `effectiveGasPrice` and `eth_feeHistory` report
+before `localFeeMarketsBlock` (block 97,200 on Enclave). Receipts' `effectiveGasPrice` and `eth_feeHistory` report
 the global price only. Design:
 [local fee markets research doc](https://github.com/JACELL100/xdevs-chain/blob/main/docs/research/local-fee-markets.md).
 

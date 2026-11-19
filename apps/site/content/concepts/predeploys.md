@@ -4,8 +4,12 @@ xDEVS Chain's system and user-safety contracts live at **fixed addresses** that 
 
 The canonical list is [`contracts/src/common/Predeploys.sol`](https://github.com/JACELL100/xdevs-chain/blob/main/contracts/src/common/Predeploys.sol). The [SDK](/developers/sdk) exports the same addresses as `predeploys`, and a unit test keeps the two in sync.
 
-:::warning[Not in the dev genesis yet]
-The contracts are built and tested in Foundry, but the **local dev chain's genesis does not contain them yet**: on chain id 7117 these addresses are empty accounts (the Treasury address only holds a balance). Placing them in genesis is a Phase 3 task (the genesis builder). The precompile at `0x100` is native to the node and does work today.
+:::tip[Live on Enclave]
+The Enclave genesis contains every contract below, built by [`tools/genesis-builder`](https://github.com/JACELL100/xdevs-chain/tree/main/tools/genesis-builder) from [`configs/enclave.json`](https://github.com/JACELL100/xdevs-chain/blob/main/tools/genesis-builder/configs/enclave.json). Look any of them up in the [explorer](https://explorer.xdevschain.tech).
+:::
+
+:::info[Local dev chain]
+The **built-in dev genesis** (`xdevs run --dev`, chain id 7117) does not contain them: there these addresses are empty accounts (the Treasury address only holds a balance). Start the dev node with `--genesis deploy/configs/dev-genesis-with-predeploys.json` to get all of them locally. None of the contracts has had an external audit.
 :::
 
 ## Address table
@@ -27,12 +31,13 @@ The contracts are built and tested in Foundry, but the **local dev chain's genes
 
 | Address | What | Status |
 |---|---|---|
-| `0x0000000000000000000000000000000000000100` | `P256VERIFY` precompile (secp256r1 / passkeys, EIP-7951) | <span class="status ok">Works today</span> (native in the node, revm Osaka) |
+| `0x0000000000000000000000000000000000000100` | `P256VERIFY` precompile (secp256r1 / passkeys, EIP-7951) | <span class="status ok">Live</span> (native in the node, revm Osaka) |
+| `0x0A00000000000000000000000000000000000001` | `ED25519VERIFY` precompile (about 3,000 gas), used by the [bridge](/concepts/bridges) light clients | Activates at block 97,200 on Enclave (`ed25519VerifyBlock`); off elsewhere by default |
 | `0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE` | `SYSTEM_ADDRESS`: caller of protocol system calls (no signature, no gas charge) | Used by the node |
 
-## Planned genesis extras
+## Genesis extras
 
-The genesis builder is also planned to include **Multicall3** at `0xcA11bde05977b3631167028862bE2a173976CA11` (the SDK chain definitions already reference it), a CREATE2 deployer, and the canonical **ERC-4337 EntryPoint v0.9** at `0x433709009B8330FDa32311DF1C2AFA402eD8D009`.
+The genesis builder also places **Multicall3** at `0xcA11bde05977b3631167028862bE2a173976CA11` (the SDK chain definitions reference it), the deterministic CREATE2 deployer at `0x4e59b44847b379578588920cA78FbF26c0B4956C`, and the canonical **ERC-4337 EntryPoint v0.9** at `0x433709009B8330FDa32311DF1C2AFA402eD8D009`, which the public [bundler](/network/endpoints) uses.
 
 ## Upgrades
 

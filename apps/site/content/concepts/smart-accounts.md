@@ -2,7 +2,9 @@
 
 The **xDEVS Smart Account** is a canonical account contract, predeployed at a fixed address, that gives every user passkey login, social recovery, session keys and the [Guardian Vault](/concepts/guardian-vault). It is compatible with ERC-4337 v0.9 (UserOperations, bundlers, paymasters), ERC-1271 (contract signatures) and EIP-7702 (delegating an existing address).
 
-<span class="status ok">Contracts built and tested</span> · Not yet in the dev genesis · Not audited
+<span class="status ok">Live on Enclave</span> · Implementation `0x…1005` and factory `0x…1006` in genesis · Not audited
+
+Create one with a passkey in the [wallet](https://wallet.xdevschain.tech): activation is sponsored through the public [ERC-4337 bundler](/network/endpoints) (`https://bundler.xdevschain.tech`, EntryPoint v0.9 `0x433709009B8330FDa32311DF1C2AFA402eD8D009`).
 
 ## Two ways to get one
 

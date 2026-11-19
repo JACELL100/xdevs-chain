@@ -2,7 +2,9 @@
 
 **XNS**, the xDEVS Name Service, gives addresses human-readable names ending in **`.xdevs`**, such as `alice.xdevs`. Unlike other name services, it refuses names that look like an existing one.
 
-<span class="status ok">Contracts built and tested</span> · Not yet deployed · Not audited
+<span class="status ok">Live on Enclave</span> · Registry in genesis at `0x…1004` · Not audited
+
+Register a name in the [wallet](https://wallet.xdevschain.tech) and look names up in the [explorer](https://explorer.xdevschain.tech).
 
 ## Look-alike protection
 
@@ -48,8 +50,8 @@ Address poisoning means scammers send tiny or fake transfers from an address who
 |---|---|
 | SDK offline helper `isLookAlikeAddress(a, b)` (same first and last 4 hex characters, different address) | <span class="status ok">Built</span> |
 | SDK name helpers: `normalizeXnsName`, `areConfusableXnsLabels`, `xnsNamehash` | <span class="status ok">Built</span> |
-| RPC `xdevs_checkRecipient(from, to)`: first-time recipient? look-alike of a past one? has an XNS name? a contract? | <span class="status planned">Planned (Phase 4)</span> |
-| RPC `xdevs_resolveName` / `xdevs_reverseName` | <span class="status planned">Planned (Phase 4)</span> |
+| RPC `xdevs_checkRecipient(from, to)`: first-time recipient? look-alike of a past one? has an XNS name? a contract? (advice, not fact) | <span class="status ok">Live on Enclave</span> |
+| RPC `xdevs_resolveName` / `xdevs_reverseName` | <span class="status ok">Live on Enclave</span> |
 | Explorer and wallet hiding zero-value and spam transfers, labelling look-alikes | <span class="status planned">Planned</span> |
 
 ```ts

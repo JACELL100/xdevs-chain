@@ -24,11 +24,12 @@ Once published, it will be `npm install @xdevs/sdk viem`.
 
 ```ts
 import { createPublicClient, http } from 'viem'
-import { xdevsActions, xdevsDevnet, formatXds } from '@xdevs/sdk'
+import { xdevsActions, xdevsEnclave, formatXds } from '@xdevs/sdk'
 
-const client = createPublicClient({ chain: xdevsDevnet, transport: http() }).extend(xdevsActions)
+// Enclave, the public testnet: https://rpc.xdevschain.tech, chain id 717171
+const client = createPublicClient({ chain: xdevsEnclave, transport: http() }).extend(xdevsActions)
 
-const balance = await client.getBalance({ address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' })
+const balance = await client.getBalance({ address: '0x...' })
 console.log(`${formatXds(balance)} tXDS`)
 ```
 
@@ -36,51 +37,41 @@ console.log(`${formatXds(balance)} tXDS`)
 
 | Export | Chain id | RPC | Notes |
 |---|---|---|---|
-| `xdevsDevnet` | 7117 | `http://127.0.0.1:8545` | Local dev chain |
-| `xdevsTestnet` | 717171 | `https://rpc.testnet.xdevs.invalid` | **Placeholder** id and URL, not a real network |
+| `xdevsEnclave` | 717171 | `https://rpc.xdevschain.tech` (WS `wss://ws.xdevschain.tech`) | **Enclave public testnet**, <span class="status ok">Live</span>. Carries the explorer URL and explorer API. `xdevsTestnet` is a deprecated alias |
+| `xdevsLocal` | 7117 | `http://127.0.0.1:8545` (WS on the same port) | Local dev chain (`xdevs run --dev`) |
+| `xdevsDevnet` | 717170 | none | Internal devnet; point it at a node with `defineXdevsDevnet({ rpcUrl })` |
 
-Both chains carry the genesis predeploys as viem `contracts` (`multicall3`, `staking`, `xnsRegistry`, `wxds`, ...), and `predeploys` exports the raw addresses. Remember that the dev genesis doesn't contain these contracts yet (see [Predeployed contracts](/concepts/predeploys)).
+`XDEVS_ENCLAVE_ENDPOINTS` exports every Enclave URL (RPC, WebSocket, explorer, explorer API, wallet, faucet, status, bundler).
 
-:::tip[WebSocket URL]
-`xdevsDevnet` uses `ws://127.0.0.1:8545`: a default dev node serves WebSocket on the same port as HTTP.
-:::
-
-Until the public testnet exists, override its URLs if you run your own network:
-
-```ts
-import { defineChain } from 'viem'
-import { xdevsTestnet } from '@xdevs/sdk'
-
-const myNet = defineChain({ ...xdevsTestnet, rpcUrls: { default: { http: ['https://rpc.example.org'] } } })
-```
+All chains carry the genesis predeploys as viem `contracts` (`multicall3`, `staking`, `xnsRegistry`, `wxds`, ...), and `predeploys` exports the raw addresses. They are in the Enclave genesis; the built-in local dev genesis doesn't contain them (see [Predeployed contracts](/concepts/predeploys)).
 
 ## Add the network to a wallet
 
 ```ts
 import { createWalletClient, custom } from 'viem'
-import { addXdevsChainToWallet, xdevsDevnet } from '@xdevs/sdk'
+import { addXdevsChainToWallet, xdevsEnclave } from '@xdevs/sdk'
 
 const wallet = createWalletClient({ transport: custom(window.ethereum!) })
-await addXdevsChainToWallet(wallet, xdevsDevnet) // sends wallet_addEthereumChain
+await addXdevsChainToWallet(wallet, xdevsEnclave) // sends wallet_addEthereumChain
 ```
 
-`addXdevsChainToWallet` refuses chains that still use a placeholder `.invalid` URL.
+`addXdevsChainToWallet` refuses chains without an RPC URL (such as the unconfigured `xdevsDevnet`).
 
 ## `xdevs_` actions
 
-| Action | RPC method | Node support |
+| Action | RPC method | On Enclave |
 |---|---|---|
-| `getCommit({ height })` | `xdevs_getCommitCertificate` | Implemented (Phase 2) |
-| `getValidators()` | `xdevs_validators` | Phase 3 |
-| `getEpochInfo()` | `xdevs_epochInfo` | Phase 3 |
-| `simulateTransaction(tx)` | `xdevs_simulateTransaction` | Implemented (Phase 4) |
-| `checkRecipient({ from?, to })` (`to`: address or XNS name) | `xdevs_checkRecipient` | Implemented (Phase 4) |
-| `getApprovals({ owner, tokens?, fromBlock? })` | `xdevs_getApprovals` | Implemented (Phase 4) |
-| `getVaultQueue({ vault })` | `xdevs_getVaultQueue` | Implemented (Phase 4) |
-| `watchVaultEvents({ account, onEvent })` (WebSocket transport) | `eth_subscribe("vaultEvents")` | Implemented (Phase 4) |
-| `resolveXnsName({ name })` | `xdevs_resolveName` | Implemented (Phase 4) |
-| `reverseXnsName({ address })` | `xdevs_reverseName` | Implemented (Phase 4) |
-| `getLocalFee({ contract })` | `xdevs_localFee` | Phase 5 |
+| `getCommit({ height })` | `xdevs_getCommitCertificate` | Live |
+| `getValidators()` | `xdevs_validators` | <span class="status planned">Planned</span> (not served yet; read the Staking contract or the [explorer](https://explorer.xdevschain.tech/validators)) |
+| `getEpochInfo()` | `xdevs_epochInfo` | <span class="status planned">Planned</span> (not served yet) |
+| `simulateTransaction(tx)` | `xdevs_simulateTransaction` | Live |
+| `checkRecipient({ from?, to })` (`to`: address or XNS name) | `xdevs_checkRecipient` | Live |
+| `getApprovals({ owner, tokens?, fromBlock? })` | `xdevs_getApprovals` | Live |
+| `getVaultQueue({ vault })` | `xdevs_getVaultQueue` | Live |
+| `watchVaultEvents({ account, onEvent })` (WebSocket transport) | `eth_subscribe("vaultEvents")` | Live |
+| `resolveXnsName({ name })` | `xdevs_resolveName` | Live |
+| `reverseXnsName({ address })` | `xdevs_reverseName` | Live |
+| `getLocalFee({ contract })` | `xdevs_localFee` | Live on Enclave; reports a local fee once local fee markets activate at block 97,200 |
 
 Against a node that does not serve a method yet, the SDK throws `XdevsMethodNotAvailableError` (the node answers "method not found"):
 

@@ -1,9 +1,11 @@
 import Link from 'next/link'
-import { GITHUB_URL } from '@/components/site/nav'
 import AnimatedMark from './AnimatedMark'
 import HeroField from './HeroField'
 import { Arrow, ArrowUpRight, Chevron } from './icons'
 import './hero.css'
+
+const FAUCET_URL = 'https://faucet.xdevschain.tech'
+const EXPLORER_URL = 'https://explorer.xdevschain.tech'
 
 const INDEX = [
   { n: '01', t: 'finality', href: '#finality' },
@@ -44,15 +46,15 @@ export default function Hero() {
         </p>
 
         <div className="xh-ctas hero-ctas">
-          <Link className="xh-btn xh-btn-primary" href="/guide/introduction">
-            Read the docs
+          <Link className="xh-btn xh-btn-primary" href="/guide/quickstart">
+            Start on Enclave
             <Arrow />
           </Link>
-          <Link className="xh-btn xh-btn-ghost" href="/guide/quickstart">
-            Run a local chain
-          </Link>
-          <a className="xh-link" href={GITHUB_URL} target="_blank" rel="noopener">
-            GitHub
+          <a className="xh-btn xh-btn-ghost" href={FAUCET_URL} target="_blank" rel="noopener">
+            Get test tXDS
+          </a>
+          <a className="xh-link" href={EXPLORER_URL} target="_blank" rel="noopener">
+            Explorer
             <ArrowUpRight />
           </a>
         </div>

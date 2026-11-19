@@ -12,19 +12,21 @@ xDEVS Chain's signature feature is a set of protections built from standard EVM 
 
 | Threat | Protection | Where it lives | Status |
 |---|---|---|---|
-| Lost seed phrase | [Smart accounts with passkeys](/concepts/smart-accounts) and social recovery | `XdevsSmartAccount` contract | <span class="status ok">Contracts built</span> |
-| Stolen key or device | [Guardian Vault](/concepts/guardian-vault): time-locked transfers with a cancel window | Account contract | <span class="status ok">Contracts built</span> |
-| Thief and owner both hold keys | [Guardian freeze](/concepts/guardian-vault#guardian-freeze) | Account contract | <span class="status ok">Contracts built</span> |
-| Stolen key of an existing MetaMask address | [EOA lock (XIP-0001)](/concepts/eoa-lock) | Account contract + node validity rule | <span class="status ok">Built (node enforces it)</span> |
-| Forgotten unlimited approvals | [Expiring approvals](/concepts/approvals): XDRC-20, Permit2Expiring, vault allowance policy | Contracts | <span class="status ok">Contracts built</span> |
-| Look-alike names, address poisoning | [XNS `.xdevs` names](/concepts/xns) with confusable-skeleton checks | `XNSRegistry` contract | <span class="status ok">Contracts built</span> |
-| Look-alike recipient addresses | `xdevs_checkRecipient` RPC; SDK offline helper | Node RPC / SDK | <span class="status ok">Built (node RPC + SDK)</span> |
-| Blind signing | `xdevs_simulateTransaction`: asset changes, approvals, vault outcome and plain-language warnings | Node RPC (`simulator` crate) | <span class="status ok">Built</span> |
-| Forgotten approvals, unnoticed vault actions | `xdevs_getApprovals`, `xdevs_getVaultQueue`, `eth_subscribe("vaultEvents")` | Node RPC | <span class="status ok">Built</span> |
-| Front-running (MEV) | Encrypted mempool | Consensus / mempool | <span class="status planned">Research (Phase 5)</span> |
-| Bridge hacks | Light-client bridges only | Policy | <span class="status planned">Planned (Phase 7)</span> |
+| Lost seed phrase | [Smart accounts with passkeys](/concepts/smart-accounts) and social recovery | `XdevsSmartAccount` contract | <span class="status ok">Live on Enclave</span> |
+| Stolen key or device | [Guardian Vault](/concepts/guardian-vault): time-locked transfers with a cancel window | Account contract | <span class="status ok">Live on Enclave</span> |
+| Thief and owner both hold keys | [Guardian freeze](/concepts/guardian-vault#guardian-freeze) | Account contract | <span class="status ok">Live on Enclave</span> |
+| Stolen key of an existing MetaMask address | [EOA lock (XIP-0001)](/concepts/eoa-lock) | Account contract + node validity rule | <span class="status ok">Live on Enclave</span> |
+| Forgotten unlimited approvals | [Expiring approvals](/concepts/approvals): XDRC-20, Permit2Expiring, vault allowance policy | Contracts | <span class="status ok">Live on Enclave</span> |
+| Look-alike names, address poisoning | [XNS `.xdevs` names](/concepts/xns) with confusable-skeleton checks | `XNSRegistry` contract | <span class="status ok">Live on Enclave</span> |
+| Look-alike recipient addresses | `xdevs_checkRecipient` RPC; SDK offline helper | Node RPC / SDK | <span class="status ok">Live on Enclave</span> |
+| Blind signing | `xdevs_simulateTransaction`: asset changes, approvals, vault outcome and plain-language warnings | Node RPC (`simulator` crate) | <span class="status ok">Live on Enclave</span> |
+| Forgotten approvals, unnoticed vault actions | `xdevs_getApprovals`, `xdevs_getVaultQueue`, `eth_subscribe("vaultEvents")` | Node RPC | <span class="status ok">Live on Enclave</span> |
+| Front-running (MEV) | Encrypted mempool | Consensus / mempool | <span class="status next">Prototype built, off on Enclave</span> (needs a distributed key setup) |
+| Bridge hacks | Light-client bridges only | Policy | <span class="status next">Prototype built, not deployed</span> |
 
-"Contracts built" means the Solidity is written and covered by unit, fuzz and invariant tests in Foundry. The contracts are **not yet deployed on any network** (they are not in the local dev genesis either) and have **not been externally audited**.
+"Live on Enclave" means the contracts are in the Enclave genesis and the public RPC serves the methods. The contracts are covered by unit, fuzz and invariant tests in Foundry but have **not been externally audited**, and Enclave is a testnet. The built-in local dev genesis does not contain the contracts.
+
+Try them in the [wallet](https://wallet.xdevschain.tech): a passkey account, guardians, the Guardian Vault, approvals, `.xdevs` names and a simulation preview before every send.
 
 ## How a protected account fits together
 

@@ -13,7 +13,7 @@ export const DOCS_NAV: DocsNavGroup[] = [
     items: [
       { text: 'Introduction', href: '/guide/introduction' },
       { text: 'Why xDEVS Chain?', href: '/guide/why' },
-      { text: 'Quickstart (local dev chain)', href: '/guide/quickstart' },
+      { text: 'Quickstart (Enclave testnet)', href: '/guide/quickstart' },
     ],
   },
   {
@@ -45,7 +45,7 @@ export const DOCS_NAV: DocsNavGroup[] = [
       { text: 'Run a node', href: '/operators/run-a-node' },
       { text: 'Local multi-validator network', href: '/operators/local-network' },
       { text: 'Configuration reference', href: '/operators/configuration' },
-      { text: 'Validators (coming)', href: '/operators/validators' },
+      { text: 'Validators', href: '/operators/validators' },
     ],
   },
   {

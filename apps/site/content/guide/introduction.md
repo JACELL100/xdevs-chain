@@ -24,36 +24,41 @@ It executes transactions with [`revm`](https://github.com/bluealloy/revm) using 
 ## Where the project is today
 
 :::tip[The Enclave testnet is live]
-The public testnet **Enclave** (chain id 717171) has run since 17 November 2026 on four validators: RPC `https://rpc.xdevschain.tech`, [explorer](https://explorer.xdevschain.tech), [wallet](https://wallet.xdevschain.tech), [status](https://status.xdevschain.tech). See [Network endpoints](/network/endpoints).
+The public testnet **Enclave** (chain id 717171) has run since 17 November 2026 on four validators in Oracle Cloud (two in Hyderabad, two in Mumbai), with 2 s blocks and BFT finality. Start with the [Quickstart](/guide/quickstart):
+
+- RPC `https://rpc.xdevschain.tech` · WebSocket `wss://ws.xdevschain.tech`
+- [Explorer](https://explorer.xdevschain.tech) · [wallet](https://wallet.xdevschain.tech) (passkey smart accounts) · [faucet](https://faucet.xdevschain.tech) · [ERC-4337 bundler](/network/endpoints) · [status](https://status.xdevschain.tech)
 :::
 
-:::info[Built, switching on next]
-The Phase 3 staking-driven validator set, the Phase 4 safety RPCs (`xdevs_simulateTransaction`, `xdevs_checkRecipient`, …), Phase 5 (encrypted mempool, parallel execution, local fee markets) and a Phase 7 light-client bridge prototype are built and tested. They switch on for Enclave with the next node upgrade; see the [roadmap](/roadmap).
+:::info[Live on Enclave now]
+The validators run node release [`v0.3.0-enclave.1`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.3.0-enclave.1):
+
+- Everything from Phases 1 and 2: Ethereum JSON-RPC and WebSocket subscriptions, Malachite BFT consensus, block sync, transaction gossip.
+- The **system and user-safety contracts** in genesis at `0x…1000`–`0x…1009` (staking, governance, smart accounts, Guardian Vault, XNS names, expiring approvals, paymaster), plus Multicall3 and the ERC-4337 EntryPoint v0.9. See [Predeployed contracts](/concepts/predeploys).
+- The [EOA lock](/concepts/eoa-lock) (XIP-0001), enforced by the node from genesis.
+- The **Phase 4 safety RPCs**: `xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, `xdevs_resolveName` / `xdevs_reverseName` and the `vaultEvents` subscription, plus `xdevs_localFee`.
+- **Block-STM parallel execution** on all validators.
 :::
 
-:::tip[Phases 1 and 2 work on your own machines]
-- A **single-node dev chain** (`xdevs run --dev`) produces blocks, serves Ethereum JSON-RPC, and works with MetaMask and Foundry.
-- A **multi-validator BFT network** (`xdevs-cli testnet init --validators 4`) reaches consensus with Malachite, syncs late-joining nodes from genesis, gossips transactions between nodes, and keeps going with one of four validators down. A Docker localnet with chaos scripts (kill, pause, partition, packet loss) runs in CI. See [Local multi-validator network](/operators/local-network).
-- **WebSocket subscriptions** (`eth_subscribe`: `newHeads`, `logs`, `newPendingTransactions`) and a load generator (`xdevs-loadgen`).
-- The **system and user-safety contracts** (staking, governance, smart accounts, Guardian Vault, XNS names, expiring approvals, paymasters) are written and tested in Foundry.
-- The node **enforces the EOA lock** ([XIP-0001](/concepts/eoa-lock)) in block validity, block building, the mempool and the RPC.
-- The **TypeScript SDK** (`@xdevs/sdk`) and the **faucet** (Cloudflare Worker) are built and tested.
+:::info[Activates at block 97,200 on Enclave]
+At block **97,200** (about 19 November 2026, 21:37 UTC) the **staking-driven validator set** (epochs of 3,600 blocks, a 1 tXDS block reward, downtime and double-sign slashing), **local fee markets** and the **`ED25519VERIFY` precompile** switch on.
 :::
 
 :::warning[Not yet]
-- There is **no public network**. The public devnet with faucet and explorer is Phase 3. The [planned endpoints](/network/endpoints) are not live.
-- The validator set is still **fixed in the genesis file**. Joining through the Staking contract, rewards and slashing are Phase 3.
-- The system contracts are **not yet in the dev genesis**: on the local dev chain the predeploy addresses are empty. A genesis builder that places them is part of Phase 3. See [Predeployed contracts](/concepts/predeploys).
-- The safety RPCs (`xdevs_simulateTransaction`, `xdevs_checkRecipient`, ...) are specified and wrapped by the SDK, but the node implements them only from Phase 4.
-- Nothing has had an external security audit.
+- The **encrypted mempool** is built but off on Enclave: it needs a distributed key setup first.
+- The **light-client bridges** to Ethereum Sepolia are a prototype and not deployed.
+- **Becoming a validator** on Enclave is not open to the public yet. See [Validators](/operators/validators).
+- Nothing has had an external security audit, and tXDS has no value.
 :::
+
+You can also run everything on your own machines: a **single-node dev chain** (`xdevs run --dev`, chain id 7117) and **multi-validator BFT networks** (`xdevs-cli testnet init`, or a Docker localnet with chaos scripts). See the [Quickstart](/guide/quickstart#develop-offline-a-local-dev-chain) and [Local multi-validator network](/operators/local-network).
 
 ## Where to go next
 
+- [Quickstart](/guide/quickstart): add Enclave to MetaMask, get tXDS from the faucet and deploy a contract with Foundry.
 - [Why xDEVS Chain?](/guide/why): the problems it solves, compared with Ethereum and Solana, and the honest trade-offs.
-- [Quickstart](/guide/quickstart): run a dev chain on your machine and connect MetaMask and Foundry.
 - [The user-safety layer](/concepts/safety-layer): how smart accounts, the Guardian Vault, expiring approvals and XNS fit together.
-- [JSON-RPC reference](/developers/json-rpc): what the node supports today.
+- [JSON-RPC reference](/developers/json-rpc): what the node serves, and what is live on Enclave.
 
 ## Source and design documents
 

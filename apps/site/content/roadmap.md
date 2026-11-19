@@ -24,31 +24,31 @@ Repository, Apache-2.0 license, contribution and security policies, and the arch
 - `xdevs-cli testnet init`, `xdevs-loadgen`, an in-process multi-node test harness, and a Docker localnet with chaos scripts run in CI.
 - Exit criteria: 4 nodes produce blocks; killing one keeps the chain going, killing two halts it and restarting resumes it, with no forks; a new node syncs from genesis. A 24-hour soak under load is part of the exit and runs on dedicated VMs.
 
-## Phase 3 — Proof of Stake and public devnet <span class="status ok">Built</span> · Enclave activation pending
+## Phase 3 — Proof of Stake and public devnet <span class="status ok">Live on Enclave</span> · staking set activates at block 97,200
 
 - **Enclave testnet live** (17 Nov 2026): chain id 717171, 4 validators (Oracle Cloud, Hyderabad + Mumbai), public RPC/WebSocket through a Cloudflare Tunnel, explorer and explorer API, wallet with passkey accounts, faucet, ERC-4337 bundler, network status page. <span class="status ok">Live</span>
 
 - System contracts in genesis (Staking, Governance, Treasury, FeeConfig, WXDS, the safety contracts, Multicall3, EntryPoint). <span class="status ok">Contracts written</span>
-- Epoch system calls, dynamic validator set from the Staking contract, block rewards, downtime and double-sign slashing (evidence from consensus or `xdevs_submitEvidence`), behind the `stakingValidatorsBlock` activation height. <span class="status ok">Built</span> Tested on in-process networks (a 5th validator joins at the next epoch, an offline validator is jailed and removed, a double-signing validator is slashed); activation on Enclave is a coordinated upgrade still to schedule.
+- Epoch system calls, dynamic validator set from the Staking contract, block rewards, downtime and double-sign slashing (evidence from consensus or `xdevs_submitEvidence`), behind the `stakingValidatorsBlock` activation height. <span class="status ok">Built</span> Tested on in-process networks (a 5th validator joins at the next epoch, an offline validator is jailed and removed, a double-signing validator is slashed); activates on Enclave at block 97,200 (about 19 Nov 2026, 21:37 UTC) with release `v0.3.0-enclave.1`.
 - Public testnet on free cloud VMs, faucet, explorer v1 and indexer, bundler <span class="status ok">Live</span>; chainlist registration, dashboards and alerts next.
 - Release pipeline (x86_64 and ARM64) <span class="status ok">Built</span>, faucet <span class="status ok">Built</span>, this docs site <span class="status ok">Built</span>.
 - Exit criteria: anyone can add the devnet to MetaMask, use the faucet, deploy contracts and see them in the explorer; a new validator joins through `register()`; slashing proven with a deliberately double-signing node.
 
-## Phase 4 — User-safety layer <span class="status ok">Built</span> · on Enclave with the next upgrade
+## Phase 4 — User-safety layer <span class="status ok">Live on Enclave</span>
 
-Most of the on-chain part is already written and tested ahead of schedule: smart accounts with passkeys, social recovery, session keys, Guardian Vault, guardian freeze, XNS, Permit2Expiring, XDRC-20, paymasters, EIP-7702 and the XIP-0001 EOA lock (enforced by the node). Still to do:
+The on-chain part is in the Enclave genesis: smart accounts with passkeys, social recovery, session keys, Guardian Vault, guardian freeze, XNS, Permit2Expiring, XDRC-20, paymasters, EIP-7702 and the XIP-0001 EOA lock (enforced by the node). Still to do:
 
-- ~~`xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, XNS RPCs and `vaultEvents` subscriptions~~: built and tested (the `simulator` crate and the safety RPCs; the SDK, wallet and explorer use them).
+- ~~`xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, XNS RPCs and `vaultEvents` subscriptions~~: built, tested and served by the Enclave RPC since release `v0.3.0-enclave.1` (the SDK, wallet and explorer use them).
 - A reference wallet: passkey sign-up, vault setup, simulation preview, approvals manager, sending to names. <span class="status ok">Live</span> at [wallet.xdevschain.tech](https://wallet.xdevschain.tech)
 - An alert bot for vault events (email / Telegram).
 - Exit criteria: a new user creates an account with only a passkey; the stolen-key demo works end to end in a wallet; simulation flags an unlimited approval in plain language.
 
-## Phase 5 — Performance and MEV protection <span class="status ok">Built</span> · off by default
+## Phase 5 — Performance and MEV protection <span class="status ok">Built</span> · parallel execution live on Enclave
 
 Profiling and optimization, 1 s blocks if metrics allow, Block-STM parallel execution behind a flag, local fee markets, BLS aggregate signatures, and an **encrypted mempool** (research, prototype, then external review). Exit criteria include published benchmarks (throughput and finality latency) measured on reference hardware.
 
-- Block-STM parallel execution <span class="status ok">Built</span> behind the node flag `[execution] parallel` (off by default; a local strategy, not a consensus rule). Differential tests compare it with sequential execution on generated workloads and a local network runs 2 parallel and 2 sequential validators with identical roots; benchmark in the [research doc](https://github.com/JACELL100/xdevs-chain/blob/main/docs/research/parallel-execution.md).
-- Local fee markets <span class="status ok">Built</span> behind the `localFeeMarketsBlock` activation (off on every network): a contract using more than 25% of a block's gas gets its own EIP-1559-style base fee while everyone else keeps the global one; `xdevs_localFee` reports it ([research doc](https://github.com/JACELL100/xdevs-chain/blob/main/docs/research/local-fee-markets.md)).
+- Block-STM parallel execution <span class="status ok">Built</span> behind the node flag `[execution] parallel` (off by default; a local strategy, not a consensus rule). <span class="status ok">Live</span> on all Enclave validators. Differential tests compare it with sequential execution on generated workloads and a local network runs 2 parallel and 2 sequential validators with identical roots; benchmark in the [research doc](https://github.com/JACELL100/xdevs-chain/blob/main/docs/research/parallel-execution.md).
+- Local fee markets <span class="status ok">Built</span> behind the `localFeeMarketsBlock` activation, which is block 97,200 on Enclave: a contract using more than 25% of a block's gas gets its own EIP-1559-style base fee while everyone else keeps the global one; `xdevs_localFee` reports it ([research doc](https://github.com/JACELL100/xdevs-chain/blob/main/docs/research/local-fee-markets.md)).
 - Encrypted mempool: research doc and prototype <span class="status ok">Built</span> behind the `encryptedMempoolBlock` activation (off on every network). Threshold encryption to a t-of-n validator committee, transactions ordered blind and decrypted one block later; a test on an in-process network shows a sandwich bot profiting from a plain swap and unable to touch the same swap sent encrypted. Next: a DKG instead of the prototype's trusted dealer, keys that follow the staking set, then external review.
 
 ## Phase 6 — Public testnet and community <span class="status next">Next</span>
@@ -59,7 +59,7 @@ Long-lived `xdevs-testnet-1` with no resets, 20+ independent validators, snapsho
 
 Light-client bridges only (no multisig bridges), canonical bridged tokens, independent security audits, legal and entity setup, mainnet tokenomics and a genesis ceremony.
 
-- Light-client bridges with Ethereum Sepolia: prototype <span class="status ok">Built</span>, not deployed. An Ethereum sync-committee light client in Solidity on xDEVS Chain (BLS through the EIP-2537 precompiles), an xDEVS commit-certificate light client in Solidity on Sepolia (Ed25519 in Solidity, validator sets proven from Staking storage), lock/mint and burn/release endpoints with canonical tokens, a permissionless relayer, and the `ED25519VERIFY` precompile behind `ed25519VerifyBlock`. Tested on real Sepolia and Enclave data. Next: an external audit, then a Sepolia/Enclave testnet deployment ([how bridges work](/concepts/bridges)).
+- Light-client bridges with Ethereum Sepolia: prototype <span class="status ok">Built</span>, not deployed. An Ethereum sync-committee light client in Solidity on xDEVS Chain (BLS through the EIP-2537 precompiles), an xDEVS commit-certificate light client in Solidity on Sepolia (Ed25519 in Solidity, validator sets proven from Staking storage), lock/mint and burn/release endpoints with canonical tokens, a permissionless relayer, and the `ED25519VERIFY` precompile behind `ed25519VerifyBlock` (block 97,200 on Enclave). Tested on real Sepolia and Enclave data. Next: an external audit, then a Sepolia/Enclave testnet deployment ([how bridges work](/concepts/bridges)).
 
 :::info[No mainnet date]
 There is no mainnet and no token sale. Testnet tokens (tXDS) have no value and will not convert to mainnet XDS.
