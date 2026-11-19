@@ -207,8 +207,8 @@ pub(crate) fn build_next_block(
 
 /// Keep the encrypted-mempool envelopes among `txs` within the block's inner-gas
 /// budget ([`ChainConfig::encrypted_gas_budget`]), in order; envelopes that do not fit
-/// stay in the pool for a later block. Undecodable payloads are kept: they pay gas and
-/// are never decrypted.
+/// stay in the pool for a later block. Undecodable payloads and commitments above the
+/// whole budget are kept: they pay gas and are never decrypted.
 fn within_envelope_budget(
     cfg: &ChainConfig,
     height: u64,
@@ -224,7 +224,10 @@ fn within_envelope_budget(
             if !is_envelope_target(tx.to()) {
                 return true;
             }
-            let Some(gas) = EncryptedPayload::peek_inner_gas(tx.input()) else {
+            // Undecodable payloads and commitments above the whole budget are never
+            // decrypted: they pay their gas like any transaction and take no budget.
+            let Some(gas) = EncryptedPayload::peek_inner_gas(tx.input()).filter(|g| *g <= budget)
+            else {
                 return true;
             };
             match used.checked_add(gas) {
