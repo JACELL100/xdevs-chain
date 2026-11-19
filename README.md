@@ -48,7 +48,7 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | Transaction simulation and safety RPCs (`xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, `vaultEvents`) | ✅ Built and tested (Phase 4); reference wallet uses them when the node serves them |
 | Encrypted mempool (threshold encryption, commit-then-reveal; `xdevs_sendEncryptedTransaction`) | 🧪 Prototype behind `encryptedMempoolBlock`, off on every network; a test shows it prevents a sandwich attack; needs a DKG and external review ([research doc](docs/research/encrypted-mempool.md)) |
 | Parallel execution, local fee markets | 📋 Planned (Phase 5) |
-| Light-client bridges | 📋 Planned (Phase 7) |
+| Light-client bridges (Ethereum Sepolia) | 🧪 Prototype, not deployed: sync-committee light client on xDEVS, commit-certificate light client on Sepolia, lock/mint + burn/release, permissionless relayer, `ED25519VERIFY` precompile behind `ed25519VerifyBlock`; needs an external audit ([research doc](docs/research/light-client-bridges.md)) |
 
 ### Node status (what the Rust node does today)
 

@@ -19,8 +19,8 @@ import {EthProofs} from "./lib/EthProofs.sol";
 ///         `lastEpochBlock` (slot 3) against the state root of the certified boundary block, and converts the
 ///         Staking set to consensus powers exactly like `xdevs_node::staking::set_from_staking`.
 ///
-///         Ethereum has no Ed25519 precompile: each signature costs ~250-300k gas in Solidity ({Ed25519}), so a
-///         certificate of n signatures costs ~n × 0.3M gas. Relayers submit only as many signatures as a quorum
+///         Ethereum has no Ed25519 precompile: each signature costs ~430k gas in Solidity ({Ed25519}), so a
+///         certificate of n signatures costs ~n × 0.45M gas. Relayers submit only as many signatures as a quorum
 ///         needs. A BLS-aggregated or ZK-compressed certificate is the planned path to a constant cost.
 contract XdevsLightClient is ExecutionHeaderStore {
     struct Validator {

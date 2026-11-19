@@ -8,7 +8,7 @@ import {Sha512} from "./Sha512.sol";
 ///         `encode([S]B - [k]A) == R` with `k = SHA-512(R ‖ A ‖ M) mod L`, rejecting `S >= L` and public keys that
 ///         do not decode to a curve point. Arithmetic: extended twisted-Edwards coordinates (HWCD 2008, a = -1),
 ///         Shamir's trick for the double-scalar multiplication, the MODEXP precompile (0x05) for the inversion
-///         and the square root. Cost ≈ 250-300k gas per signature (measured in `test/bridge/Ed25519.t.sol`).
+///         and the square root. Cost ≈ 430k gas per signature with a 66-byte message (measured in `test/bridge/Ed25519.t.sol`).
 /// @dev    Honest signatures verify identically under this rule, ed25519-dalek's `verify_strict` and the ZIP-215
 ///         rule of `ed25519-consensus` (which xDEVS Chain consensus uses). They differ only on adversarial edge
 ///         cases (small-order keys / non-canonical encodings), where this library is the stricter one: it can

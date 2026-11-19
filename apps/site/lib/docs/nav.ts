@@ -27,6 +27,7 @@ export const DOCS_NAV: DocsNavGroup[] = [
       { text: 'XNS names & address poisoning', href: '/concepts/xns' },
       { text: 'Fees & the tXDS coin', href: '/concepts/fees' },
       { text: 'Predeployed contracts', href: '/concepts/predeploys' },
+      { text: 'Bridges (light clients)', href: '/concepts/bridges' },
     ],
   },
   {

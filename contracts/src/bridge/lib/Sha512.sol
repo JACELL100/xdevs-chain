@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 /// @title Sha512 - SHA-512 (FIPS 180-4) in Yul, for Ed25519 verification on chains without an Ed25519 precompile
-/// @notice Ethereum has no SHA-512 precompile; Ed25519 needs `SHA-512(R ‖ A ‖ M)`. Cost ≈ 20k gas per 128-byte
+/// @notice Ethereum has no SHA-512 precompile; Ed25519 needs `SHA-512(R ‖ A ‖ M)`. Cost ≈ 45k gas per 128-byte
 ///         block. Tested against NIST vectors and node:crypto in `test/bridge/Ed25519.t.sol`.
 library Sha512 {
     /// @dev Round constants K[0..79], 8 bytes each, big-endian.
