@@ -14,15 +14,19 @@ use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
     context_interface::{
         result::{EVMError, ExecutionResult, HaltReason, InvalidTransaction},
-        ContextTr,
+        Block as _, ContextSetters, ContextTr, JournalTr, Transaction as _,
     },
-    handler::{MainnetContext, MainnetEvm, SystemCallEvm},
+    handler::{
+        EthFrame, EvmTr, EvmTrError, FrameResult, FrameTr, Handler, MainnetContext, MainnetEvm,
+        SystemCallEvm,
+    },
     inspector::{InspectEvm, Inspector},
-    interpreter::{interpreter::EthInterpreter, Interpreter},
+    interpreter::{interpreter::EthInterpreter, interpreter_action::FrameInit, Interpreter},
     primitives::eip7825::TX_GAS_LIMIT_CAP,
+    state::EvmState,
     Context, ExecuteEvm, MainBuilder, MainContext,
 };
-use std::collections::BTreeSet;
+use std::{cell::Cell, collections::BTreeSet, marker::PhantomData};
 use xdevs_primitives::{
     compute_logs_bloom, compute_receipts_root, compute_transactions_root,
     constants::{MAX_EXTRA_DATA_SIZE, STAKING_ADDRESS},
@@ -38,11 +42,11 @@ const MIN_TX_GAS: u64 = 21_000;
 /// `CALL` stipend, used by the optimistic first probe of `estimate_gas` (as in geth).
 const CALL_STIPEND: u64 = 2_300;
 
-type Evm<'o, 'a> = MainnetEvm<MainnetContext<&'o mut StateOverlay<'a>>>;
+pub(crate) type Evm<'o, 'a> = MainnetEvm<MainnetContext<&'o mut StateOverlay<'a>>>;
 
 /// A mainnet EVM over `db` with the xDEVS precompiles of the block (`ED25519VERIFY` from
 /// `ChainConfig::ed25519_verify_block` on).
-fn new_evm<'o, 'a>(
+pub(crate) fn new_evm<'o, 'a>(
     db: &'o mut StateOverlay<'a>,
     cfg: CfgEnv,
     block: BlockEnv,
@@ -86,8 +90,64 @@ impl<CTX> Inspector<CTX, EthInterpreter> for Interrupt<'_> {
     }
 }
 
+/// Fee payments of one transaction deferred by [`EvmExecutor::apply_tx`] (parallel
+/// execution): credited to the block beneficiary and the treasury after it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FeeCredits {
+    /// Priority fee for `header.beneficiary` (what revm would have paid it).
+    pub(crate) tip: U256,
+    /// Treasury share of the base fee.
+    pub(crate) treasury: U256,
+}
+
+/// revm's mainnet handler except that the beneficiary is not paid inside the
+/// transaction: the amount revm would credit is recorded in `tip` (same formula as
+/// `revm::handler::post_execution::reward_beneficiary`, London rules).
+struct DeferredTip<EVM, ERROR, FRAME> {
+    tip: Cell<U256>,
+    _types: PhantomData<(EVM, ERROR, FRAME)>,
+}
+
+impl<EVM, ERROR, FRAME> DeferredTip<EVM, ERROR, FRAME> {
+    fn new() -> Self {
+        Self {
+            tip: Cell::new(U256::ZERO),
+            _types: PhantomData,
+        }
+    }
+}
+
+impl<EVM, ERROR, FRAME> Handler for DeferredTip<EVM, ERROR, FRAME>
+where
+    EVM: EvmTr<Context: ContextTr<Journal: JournalTr<State = EvmState>>, Frame = FRAME>,
+    ERROR: EvmTrError<EVM>,
+    FRAME: FrameTr<FrameResult = FrameResult, FrameInit = FrameInit>,
+{
+    type Evm = EVM;
+    type Error = ERROR;
+    type HaltReason = HaltReason;
+
+    fn reward_beneficiary(
+        &self,
+        evm: &mut Self::Evm,
+        exec_result: &mut <<Self::Evm as EvmTr>::Frame as FrameTr>::FrameResult,
+    ) -> Result<(), Self::Error> {
+        let ctx = evm.ctx();
+        let basefee = ctx.block().basefee() as u128;
+        let coinbase_gas_price = ctx
+            .tx()
+            .effective_gas_price(basefee)
+            .saturating_sub(basefee);
+        let gas = exec_result.gas();
+        let effective_used = gas.used().saturating_sub(gas.reservoir());
+        self.tip
+            .set(U256::from(coinbase_gas_price * effective_used as u128));
+        Ok(())
+    }
+}
+
 /// Why a single transaction could not be applied.
-enum TxFailure {
+pub(crate) enum TxFailure {
     /// Invalid against the current state / block (revm validation).
     Invalid(InvalidTransaction),
     /// Invalid under XIP-0001 at its position in the block.
@@ -103,10 +163,10 @@ impl From<StateDbError> for TxFailure {
 }
 
 /// Result of one applied transaction.
-struct AppliedTx {
-    gas_used: u64,
-    success: bool,
-    logs: Vec<Log>,
+pub(crate) struct AppliedTx {
+    pub(crate) gas_used: u64,
+    pub(crate) success: bool,
+    pub(crate) logs: Vec<Log>,
 }
 
 /// Outcome of a message call before it is interpreted.
@@ -133,49 +193,75 @@ impl EvmExecutor {
     /// `xip0001 = Some(senders)` when XIP-0001 is active in this block, with the senders
     /// of the transactions already in the block: rules (a) / (c) are checked and the
     /// authorization list is filtered (b), all against the current overlay = `S₀(tx)`.
-    fn apply_tx(
+    ///
+    /// `deferred = Some(credits)` (parallel execution, [`crate::parallel`]): the tip is
+    /// **not** paid to the beneficiary inside revm and the treasury share is not
+    /// credited; both amounts are returned in `credits` instead, so that the caller can
+    /// apply them as commutative balance deltas (otherwise every transaction of a block
+    /// would conflict on these two accounts). The final state is the same: the caller
+    /// credits the beneficiary, then the treasury, right after the transaction.
+    pub(crate) fn apply_tx(
         &self,
         evm: &mut Evm<'_, '_>,
         tx: &RecoveredTx,
         base_fee: u64,
-        xip_senders: Option<&BTreeSet<Address>>,
+        xip_sender_seen: Option<bool>,
+        deferred: Option<&mut FeeCredits>,
     ) -> Result<AppliedTx, TxFailure> {
         let mut env = tx_env(tx).map_err(TxFailure::Fatal)?;
-        if let Some(senders_in_block) = xip_senders {
+        if let Some(sender_seen) = xip_sender_seen {
             let db = evm.ctx.db_mut();
             let status = xip0001::status(db, tx.sender)?;
-            check_tx(
-                status,
-                &TxShape::from(tx),
-                base_fee,
-                senders_in_block.contains(&tx.sender),
-            )
-            .map_err(TxFailure::Xip0001)?;
+            check_tx(status, &TxShape::from(tx), base_fee, sender_seen)
+                .map_err(TxFailure::Xip0001)?;
             xip0001::filter_authorizations(db, &mut env.authorization_list)?;
         }
-        let out = match evm.transact(env) {
-            Ok(out) => out,
-            Err(EVMError::Transaction(e)) => return Err(TxFailure::Invalid(e)),
-            Err(e) => return Err(TxFailure::Fatal(evm_error(e))),
+        let (result, state, tip) = if deferred.is_some() {
+            evm.ctx.set_tx(env);
+            let mut handler: DeferredTip<
+                Evm<'_, '_>,
+                EVMError<StateDbError, InvalidTransaction>,
+                EthFrame<EthInterpreter>,
+            > = DeferredTip::new();
+            let res = handler.run(evm);
+            // Clears the journal in every case (as `transact` does).
+            let state = evm.finalize();
+            match res {
+                Ok(result) => (result, state, handler.tip.get()),
+                Err(EVMError::Transaction(e)) => return Err(TxFailure::Invalid(e)),
+                Err(e) => return Err(TxFailure::Fatal(evm_error(e))),
+            }
+        } else {
+            match evm.transact(env) {
+                Ok(out) => (out.result, out.state, U256::ZERO),
+                Err(EVMError::Transaction(e)) => return Err(TxFailure::Invalid(e)),
+                Err(e) => return Err(TxFailure::Fatal(evm_error(e))),
+            }
         };
         let db = evm.ctx.db_mut();
-        db.try_commit(out.state)?;
+        db.try_commit(state)?;
 
-        let gas_used = out.result.tx_gas_used();
+        let gas_used = result.tx_gas_used();
         let base_fee_total = U256::from(gas_used) * U256::from(base_fee);
         let (_burned, treasury_share) = self.chain_config().split_base_fee(base_fee_total);
-        db.credit(self.chain_config().treasury, treasury_share)?;
+        match deferred {
+            Some(credits) => {
+                credits.tip = tip;
+                credits.treasury = treasury_share;
+            }
+            None => db.credit(self.chain_config().treasury, treasury_share)?,
+        }
 
-        let success = out.result.is_success();
+        let success = result.is_success();
         Ok(AppliedTx {
             gas_used,
             success,
-            logs: out.result.into_logs(),
+            logs: result.into_logs(),
         })
     }
 
     /// Roots and receipts of a finished block.
-    fn finish(
+    pub(crate) fn finish(
         state: &dyn StateProvider,
         state_diff: StateDiff,
         receipts: Vec<ReceiptEnvelope>,
@@ -238,7 +324,7 @@ impl EvmExecutor {
 
     /// The Staking system calls of block `header` (see [`crate::staking`]), before its
     /// transactions. Returns the next epoch's validator set at an epoch boundary.
-    fn run_staking(
+    pub(crate) fn run_staking(
         &self,
         evm: &mut Evm<'_, '_>,
         header: &Header,
@@ -324,7 +410,27 @@ impl EvmExecutor {
 
     /// [`BlockExecutor::execute`] with the block's Staking inputs (Phase 3). Blocks
     /// before `stakingValidatorsBlock` ignore `staking`.
+    ///
+    /// With parallel execution enabled ([`EvmExecutor::with_parallel`], Phase 5) blocks
+    /// with at least [`crate::parallel::MIN_PARALLEL_TXS`] transactions are executed with
+    /// Block-STM ([`EvmExecutor::execute_parallel`]); the outcome is identical.
     pub fn execute_with(
+        &self,
+        parent: &Header,
+        block: &Block,
+        state: &(dyn StateProvider + Sync),
+        staking: &StakingInputs,
+    ) -> Result<ExecutionOutcome, ExecutionError> {
+        match self.parallel_threads() {
+            Some(threads) if block.body.len() >= crate::parallel::MIN_PARALLEL_TXS => self
+                .execute_parallel(parent, block, state, staking, threads)
+                .map(|(outcome, _)| outcome),
+            _ => self.execute_sequential(parent, block, state, staking),
+        }
+    }
+
+    /// [`EvmExecutor::execute_with`], always sequential (the reference semantics).
+    pub fn execute_sequential(
         &self,
         parent: &Header,
         block: &Block,
@@ -369,8 +475,8 @@ impl EvmExecutor {
                         limit: header.gas_limit,
                     });
                 }
-                let xip = xip0001_active.then_some(&senders);
-                let applied = match self.apply_tx(&mut evm, &rtx, base_fee, xip) {
+                let xip = xip0001_active.then(|| senders.contains(&rtx.sender));
+                let applied = match self.apply_tx(&mut evm, &rtx, base_fee, xip, None) {
                     Ok(a) => a,
                     Err(TxFailure::Invalid(e)) => {
                         return Err(ExecutionError::InvalidTransaction {
@@ -395,7 +501,11 @@ impl EvmExecutor {
     }
 
     /// Header checks of `header` against `parent` and the chain config.
-    fn validate_child(&self, parent: &Header, header: &Header) -> Result<(), ExecutionError> {
+    pub(crate) fn validate_child(
+        &self,
+        parent: &Header,
+        header: &Header,
+    ) -> Result<(), ExecutionError> {
         let err = |m: String| Err(ExecutionError::InvalidHeader(m));
         if header.number != parent.number + 1 {
             return err(format!(
@@ -790,7 +900,11 @@ fn to_call_result(result: ExecutionResult<HaltReason>) -> CallResult {
     }
 }
 
-fn make_receipt(tx: &RecoveredTx, applied: AppliedTx, cumulative_gas_used: u64) -> ReceiptEnvelope {
+pub(crate) fn make_receipt(
+    tx: &RecoveredTx,
+    applied: AppliedTx,
+    cumulative_gas_used: u64,
+) -> ReceiptEnvelope {
     let receipt = Receipt {
         status: Eip658Value::Eip658(applied.success),
         cumulative_gas_used,
@@ -821,7 +935,7 @@ impl BlockExecutor for EvmExecutor {
         block: &Block,
         state: &dyn StateProvider,
     ) -> Result<ExecutionOutcome, ExecutionError> {
-        self.execute_with(parent, block, state, &StakingInputs::default())
+        self.execute_sequential(parent, block, state, &StakingInputs::default())
     }
 
     /// Without Staking inputs (like [`BlockExecutor::execute`]); consensus nodes use
@@ -915,8 +1029,8 @@ impl EvmExecutor {
                     skipped.insert(tx.sender);
                     continue;
                 }
-                let xip = xip0001_active.then_some(&included);
-                match self.apply_tx(&mut evm, &tx, base_fee, xip) {
+                let xip = xip0001_active.then(|| included.contains(&tx.sender));
+                match self.apply_tx(&mut evm, &tx, base_fee, xip, None) {
                     Ok(applied) => {
                         included.insert(tx.sender);
                         cumulative += applied.gas_used;

@@ -34,6 +34,7 @@ mod db;
 mod env;
 mod error;
 mod executor;
+pub mod parallel;
 pub mod precompiles;
 pub mod staking;
 #[cfg(test)]
@@ -45,6 +46,7 @@ pub use db::{StateDbError, StateOverlay};
 pub use env::{BLOB_TX_TYPE, SPEC};
 pub use error::ExecutionError;
 pub use executor::CALL_LIMIT_CHECK_INTERVAL;
+pub use parallel::ParallelStats;
 pub use staking::{SlashEvidence, StakingInputs, StakingValidator};
 use std::{
     sync::{
@@ -239,12 +241,40 @@ pub type CallContext<'o, 'a> = revm::handler::MainnetContext<&'o mut StateOverla
 #[derive(Clone, Debug)]
 pub struct EvmExecutor {
     cfg: ChainConfig,
+    /// Phase 5: Block-STM worker threads for [`EvmExecutor::execute_with`] (`0` =
+    /// sequential execution, the default).
+    parallel_threads: usize,
 }
 
 impl EvmExecutor {
-    /// Executor for the given chain.
+    /// Executor for the given chain (sequential execution).
     pub const fn new(cfg: ChainConfig) -> Self {
-        Self { cfg }
+        Self {
+            cfg,
+            parallel_threads: 0,
+        }
+    }
+
+    /// Execute blocks with Block-STM on `threads` worker threads (`0` = one per
+    /// available core). A local execution strategy, not a consensus rule: results are
+    /// identical to sequential execution ([`crate::parallel`]).
+    pub fn with_parallel(mut self, threads: usize) -> Self {
+        self.parallel_threads = if threads == 0 {
+            std::thread::available_parallelism().map_or(1, |n| n.get())
+        } else {
+            threads
+        }
+        .max(1);
+        self
+    }
+
+    /// Worker threads of parallel execution, `None` if blocks are executed sequentially.
+    pub const fn parallel_threads(&self) -> Option<usize> {
+        if self.parallel_threads == 0 {
+            None
+        } else {
+            Some(self.parallel_threads)
+        }
     }
 
     /// Chain configuration.

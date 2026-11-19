@@ -33,6 +33,7 @@ fn opts(validators: usize, full_nodes: usize) -> LocalNetOptions {
         full_nodes,
         block_time_ms: BLOCK_MS,
         staking: None,
+        parallel_validators: 0,
     }
 }
 

@@ -45,8 +45,8 @@ pub use backend::{
     DEFAULT_PRIORITY_FEE, RPC_QUEUE_TIMEOUT, SYNC_LAG_THRESHOLD,
 };
 pub use config::{
-    ChainSection, DevSection, GossipSection, LogSection, MempoolSection, NodeConfig, NodeMode,
-    RpcSection, ValidatorSection, DEFAULT_MAX_TIMESTAMP_DRIFT_SECS,
+    ChainSection, DevSection, ExecutionSection, GossipSection, LogSection, MempoolSection,
+    NodeConfig, NodeMode, RpcSection, ValidatorSection, DEFAULT_MAX_TIMESTAMP_DRIFT_SECS,
 };
 pub use producer::{unix_now, BlockProducer, ProducedBlock};
 
@@ -132,7 +132,15 @@ impl Node {
         );
 
         let cfg = genesis.chain_config();
-        let executor = Arc::new(EvmExecutor::new(cfg.clone()));
+        let mut executor = EvmExecutor::new(cfg.clone());
+        if config.execution.parallel {
+            executor = executor.with_parallel(config.execution.threads);
+            tracing::info!(
+                threads = executor.parallel_threads().unwrap_or(1),
+                "parallel block execution (Block-STM) enabled"
+            );
+        }
+        let executor = Arc::new(executor);
         let mut params = PoolParams::from_chain_config(&cfg);
         params.max_tx_gas = Some(MAX_TX_GAS);
         let pool_config = PoolConfig {
