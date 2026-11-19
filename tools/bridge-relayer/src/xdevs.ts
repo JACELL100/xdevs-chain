@@ -9,8 +9,8 @@ const WEI_PER_POWER = 10n ** 18n;
 const MAX_POWER = (1n << 48n) - 1n; // u64::MAX >> 16
 
 export interface CommitCertificateJson {
-  height: Hex;
-  round: Hex;
+  height: Hex | bigint;
+  round: Hex | number;
   blockHash: Hex;
   signatures: { validator: Hex; signature: Hex }[];
   raw: Hex;
@@ -66,7 +66,7 @@ export function toContractCommit(cert: CommitCertificateJson, set: Validator[], 
     picked.push(s);
     signed += set[s.idx]!.power;
   }
-  if (signed * 3n <= total * 2n) throw new Error(`certificate at ${cert.height} holds no quorum of this set`);
+  if (signed * 3n <= total * 2n) throw new Error(`certificate at ${String(cert.height)} holds no quorum of this set`);
   picked.sort((a, b) => a.idx - b.idx);
   for (const s of picked) {
     sigs.push({ validatorIndex: BigInt(s.idx), r: `0x${s.signature.slice(2, 66)}` as Hex, s: `0x${s.signature.slice(66)}` as Hex });

@@ -31,7 +31,7 @@ abstract contract BridgeBase {
     uint256 public nextNonce;
     mapping(uint256 nonce => bool) public processed;
 
-    event CounterpartSet(address counterpart);
+    event CounterpartSet(address indexed counterpart);
     event Paused(bool paused);
 
     error NotGuardian();
@@ -74,6 +74,7 @@ abstract contract BridgeBase {
     /// @dev Proves `p` and returns the counterpart's log with event signature `topic0`; consumes its nonce
     ///      (topics[1]).
     function _consume(EventProof calldata p, bytes32 topic0) internal returns (EthProofs.Log memory log) {
+        // slither-disable-next-line unused-return (BR-01: events are proven against the receipts root only)
         (, bytes32 receiptsRoot) = lightClient.verifiedRoots(p.blockNumber);
         bytes memory receipt = EthProofs.provenReceipt(receiptsRoot, p.txIndex, p.receiptProof);
         log = EthProofs.receiptLog(receipt, p.logIndex);

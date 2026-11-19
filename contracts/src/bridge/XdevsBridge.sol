@@ -49,8 +49,8 @@ contract XdevsBridge is BridgeBase {
         address token = factory.canonicalToken(remoteChainId, originToken);
         if (token == address(0)) revert NoCanonicalToken(originToken);
         if (XDRC20Bridged(token).bridge() != address(this)) revert NotBridgedHere(token);
-        XDRC20Bridged(token).mint(recipient, amount);
         emit Minted(nonce, token, recipient, amount);
+        XDRC20Bridged(token).mint(recipient, amount);
     }
 
     /// @notice Burn `amount` of the canonical bridged `token` and release the origin token to `recipient` on
@@ -65,8 +65,8 @@ contract XdevsBridge is BridgeBase {
         ) {
             revert NotBridgedHere(token);
         }
-        XDRC20Bridged(token).burn(msg.sender, amount);
         uint256 nonce = nextNonce++;
         emit BurnedForRelease(nonce, originToken, msg.sender, recipient, amount);
+        XDRC20Bridged(token).burn(msg.sender, amount); // reverts the whole call on insufficient balance
     }
 }

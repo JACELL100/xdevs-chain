@@ -6,7 +6,7 @@ import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto
 import { bls12_381 } from "@noble/curves/bls12-381";
 import { bytesToHex, type Hex } from "viem";
 import { consensusAddress, precommitSignBytes, sortSet, type Validator } from "./xdevs.ts";
-import { g1FromAffine, g2Words, keyLeaf, sha, SYNC_COMMITTEE_SIZE, type G1 } from "./beacon.ts";
+import { g1FromAffine, g2Words, keyLeaf, keyProof as keyProofOf, sha, syncCommitteeRoot, SYNC_COMMITTEE_SIZE, type G1 } from "./beacon.ts";
 
 export interface DevValidator {
   key: Hex;
@@ -95,3 +95,94 @@ export function devSign(c: DevCommittee, participants: boolean[], signingRoot: H
 }
 
 export { sha };
+
+// ------------------------------------------------------------------------------------------------------------
+// Dev beacon chain: synthetic beacon headers whose state / body commit (by real SSZ Merkle branches) to a given
+// execution block hash, signed by a dev sync committee. Lets the local e2e drive the real EthereumLightClient.
+// ------------------------------------------------------------------------------------------------------------
+
+export const FINALIZED_ROOT_GINDEX = 735;
+export const EXECUTION_BLOCK_HASH_GINDEX = 2856;
+
+const ZERO = `0x${"00".repeat(32)}` as Hex;
+
+/** A root and a branch placing `leaf` at `gindex` (siblings: distinct filler nodes). */
+export function branchFor(leaf: Hex, gindex: number, salt: string): { root: Hex; branch: Hex[] } {
+  const branch: Hex[] = [];
+  let node = leaf;
+  for (let i = 0; gindex >> (i + 1) > 0; i++) {
+    const sib = sha(bytesToHex(new TextEncoder().encode(`${salt}:${i}`)));
+    branch.push(sib);
+    node = ((gindex >> i) & 1) === 1 ? sha(sib, node) : sha(node, sib);
+  }
+  return { root: node, branch };
+}
+
+function u64Chunk(v: bigint): Hex {
+  const b = Buffer.alloc(32);
+  b.writeBigUInt64LE(v);
+  return bytesToHex(b);
+}
+
+export interface DevBeaconHeader {
+  slot: bigint;
+  proposerIndex: bigint;
+  parentRoot: Hex;
+  stateRoot: Hex;
+  bodyRoot: Hex;
+}
+
+export function beaconHeaderRoot(h: DevBeaconHeader): Hex {
+  return sha(
+    sha(sha(u64Chunk(h.slot), u64Chunk(h.proposerIndex)), sha(h.parentRoot, h.stateRoot)),
+    sha(sha(h.bodyRoot, ZERO), sha(ZERO, ZERO)),
+  );
+}
+
+export function syncDomain(forkVersion: Hex, genesisValidatorsRoot: Hex): Hex {
+  const forkDataRoot = sha(`${forkVersion}${"00".repeat(28)}` as Hex, genesisValidatorsRoot);
+  return `0x07000000${forkDataRoot.slice(2, 58)}` as Hex;
+}
+
+/** A finality update (contract form) proving `executionBlockHash` final at `finalizedSlot`. */
+export function devFinalityUpdate(
+  c: DevCommittee,
+  executionBlockHash: Hex,
+  finalizedSlot: bigint,
+  forkVersion: Hex,
+  genesisValidatorsRoot: Hex,
+  absent: number[] = [1, 7, 300],
+) {
+  const body = branchFor(executionBlockHash, EXECUTION_BLOCK_HASH_GINDEX, `body-${finalizedSlot}`);
+  const finalized: DevBeaconHeader = { slot: finalizedSlot, proposerIndex: 1n, parentRoot: ZERO, stateRoot: sha(executionBlockHash), bodyRoot: body.root };
+  const state = branchFor(beaconHeaderRoot(finalized), FINALIZED_ROOT_GINDEX, `state-${finalizedSlot}`);
+  const attested: DevBeaconHeader = { slot: finalizedSlot + 1n, proposerIndex: 2n, parentRoot: ZERO, stateRoot: state.root, bodyRoot: ZERO };
+  const signatureSlot = finalizedSlot + 2n;
+  const participants = c.keys.map((_, i) => !absent.includes(i));
+  const signingRoot = sha(beaconHeaderRoot(attested), syncDomain(forkVersion, genesisValidatorsRoot));
+  const bits = new Uint8Array(64);
+  participants.forEach((p, i) => {
+    if (p) bits[i >> 3]! |= 1 << (i & 7);
+  });
+  const bitsHex = bytesToHex(bits);
+  const nonSigners = absent.map((i) => ({ index: BigInt(i), pubkey: c.keys[i]!, proof: keyProofOf(c.leaves, i) }));
+  return {
+    update: {
+      attested,
+      finalized,
+      finalityBranch: state.branch,
+      finalizedExecutionBlockHash: executionBlockHash,
+      executionBranch: body.branch,
+      nextSyncCommitteeRoot: ZERO,
+      nextSyncCommitteeBranch: [] as Hex[],
+      syncCommitteeBits: [bitsHex.slice(0, 66) as Hex, `0x${bitsHex.slice(66)}` as Hex] as const,
+      signature: devSign(c, participants, signingRoot) as unknown as readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint],
+      signatureSlot,
+    },
+    nonSigners,
+  };
+}
+
+export function devCommitteeRoot(c: DevCommittee): Hex {
+  return syncCommitteeRoot(c.compressed, c.aggregate);
+}

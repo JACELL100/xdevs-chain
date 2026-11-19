@@ -89,6 +89,7 @@ contract XdevsLightClient is ExecutionHeaderStore {
         uint64 initialBoundary,
         Validator[] memory initialSet
     ) {
+        if (staking_ == address(0)) revert BadStakingProof();
         chainId = chainId_;
         epochLength = epochLength_;
         stakingStart = stakingStart_;
@@ -101,7 +102,7 @@ contract XdevsLightClient is ExecutionHeaderStore {
     /// @notice `ChainConfig::validator_set_boundary`: the boundary whose set governs `height` (0 = genesis set).
     function validatorSetBoundary(uint64 height) public view returns (uint64) {
         if (stakingStart == type(uint64).max || epochLength == 0 || height < 2) return 0;
-        uint64 last = (height - 1) / epochLength * epochLength;
+        uint64 last = (height - 1) - ((height - 1) % epochLength); // highest multiple of epochLength < height
         return (last > 0 && last >= stakingStart) ? last : 0;
     }
 
@@ -195,6 +196,7 @@ contract XdevsLightClient is ExecutionHeaderStore {
         set = new Validator[](keys.length);
         uint256 n;
         for (uint256 i; i < keys.length; ++i) {
+            // slither-disable-next-line unused-return (BR-01: only the validity flag is needed)
             (bool ok,,) = Ed25519.decompress(keys[i]);
             if (!ok) continue;
             uint256 p = powersWei[i] / WEI_PER_POWER;

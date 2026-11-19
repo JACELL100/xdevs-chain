@@ -41,6 +41,7 @@ contract SepoliaTokenVault is BridgeBase, ReentrancyGuard {
         uint256 before = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         uint256 received = IERC20(token).balanceOf(address(this)) - before; // fee-on-transfer safe
+        // slither-disable-next-line incorrect-equality (BR-02: zero received = nothing locked; not a balance check)
         if (received == 0) revert ZeroAmount();
         escrowed[token] += received;
         uint256 nonce = nextNonce++;
