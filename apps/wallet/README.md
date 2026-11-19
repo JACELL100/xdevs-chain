@@ -42,7 +42,7 @@ npm test -w @xdevs/wallet              # chain tests start anvil (or the xDEVS n
 npm run build -w @xdevs/wallet         # out/ ; postbuild writes out/_headers (per-page CSP with script hashes)
 ```
 
-Local chain: `cd apps/bundler && npm run devnet` and the dev bundler (see its README), then `.env.local` with the
+Local chain: `cd apps/bundler && npm run devnet` and the bundler (see its README; on Enclave: `https://bundler.xdevschain.tech`), then `.env.local` with the
 local values from `.env.example`.
 
 Code layout: `src/lib` (framework-free logic shared with the tests: WebAuthn encoding, UserOperations, vault,

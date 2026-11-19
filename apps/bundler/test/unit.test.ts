@@ -401,7 +401,7 @@ describe('configuration and operator key', () => {
     const c = loadConfig(env)
     assert.equal(c.expectedChainId, 717171)
     assert.equal(c.trustProxy, 'cloudflare')
-    assert.deepEqual(c.corsOrigins, ['https://wallet.xdevschain.tech'])
+    assert.deepEqual(c.corsOrigins, ['https://wallet.xdevschain.tech', 'https://status.xdevschain.tech'])
     assert.equal(c.metricsAccess, 'local')
     assert.equal(c.dataDir, '/var/lib/xdevs-bundler')
     assert.ok(!/PRIVATE_KEY=0x/.test(text), 'no key in the env file')

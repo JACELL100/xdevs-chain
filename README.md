@@ -120,7 +120,7 @@ deploy/            dev genesis, systemd unit, local Docker setup
 | Wallet | https://wallet.xdevschain.tech | ✅ Live (preview; passkey accounts need the bundler) |
 | Faucet | https://faucet.xdevschain.tech | ✅ Live (100 tXDS per claim, every 24 h) |
 | Explorer API | `https://explorer-api.xdevschain.tech/api/v1/…` | ✅ Live (indexer on Postgres) |
-| Bundler | `https://bundler.xdevschain.tech` | 📋 Next |
+| Bundler | `https://bundler.xdevschain.tech` | 📋 Ready to deploy |
 | Website and docs | https://xdevschain.tech | ✅ Live |
 
 ```bash
