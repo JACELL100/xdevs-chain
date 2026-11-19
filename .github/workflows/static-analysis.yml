@@ -46,20 +46,19 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ADERYN_VERSION: "0.6.8"
-      ADERYN_SHA256: "ffd6ca658962e211a3ac821c646f69c8e14bf1b1001cbfe091bcd4535a691e46"
     steps:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
-      - name: Install Aderyn (pinned release, checksum-verified)
-        run: |
-          set -euo pipefail
-          f=aderyn-x86_64-unknown-linux-gnu.tar.xz
-          curl -fsSL -o "$RUNNER_TEMP/$f" \
-            "https://github.com/Cyfrin/aderyn/releases/download/aderyn-v${ADERYN_VERSION}/$f"
-          echo "${ADERYN_SHA256}  $RUNNER_TEMP/$f" | sha256sum -c -
-          tar -xJf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/aderyn-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
+      # The prebuilt binaries were removed from the upstream v0.6.8 release (only checksums remain),
+      # so build the same pinned version from crates.io with its lockfile; cached between runs.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/aderyn
+          key: aderyn-${{ env.ADERYN_VERSION }}-${{ runner.os }}
+      - name: Install Aderyn (pinned version, built from source)
+        run: command -v aderyn >/dev/null || cargo install --locked aderyn --version "${ADERYN_VERSION}"
       # Config: contracts/aderyn.toml. Reviewed false positives carry `// aderyn-fp-next-line(<detector>)`.
       - name: Run Aderyn
         working-directory: contracts
