@@ -124,18 +124,39 @@ sequential vs. Block-STM execution (median of 5, outcomes asserted equal). CI ru
 every PR touching Rust (`cargo run --release -p xdevs-execution --example parallel_bench
 -- 2000`) on a GitHub-hosted `ubuntu-latest` runner (4 vCPUs):
 
-BENCHMARK_RESULTS
+CI run of 20 Nov 2026 (PR #20, 2,000 transactions per block, median of 5, ms):
+
+| Workload | sequential | 1 thread | 2 threads | 4 threads | 8 threads |
+|---|---|---|---|---|---|
+| Independent transfers | 289.4 | 297.1 (0.97×) | 156.7 (1.85×) | 138.2 (**2.09×**) | 143.6 (2.02×) |
+| ERC-20, half to one hot receiver | 288.7 | 300.4 (0.96×) | 161.3 (1.79×) | 151.7 (1.90×) | 180.3 (1.60×) |
+| One hot counter slot | 287.8 | 297.4 (0.97×) | 165.1 (1.74×) | 157.9 (1.82×) | 201.6 (1.43×) |
+| Mixed (differential workload) | 288.6 | 297.8 (0.97×) | 157.3 (1.83×) | 139.7 (2.07×) | 162.3 (1.78×) |
+
+Incarnations / validation aborts at 4 threads: independent 2,000 / 0, ERC-20 7,589 /
+1,018, hot counter 10,513 / 1,749, mixed 3,062 / 537 (at 8 threads on 4 vCPUs the hot
+workloads re-execute 10–13× more, which is why 8 threads is slower than 4).
 
 Reading the numbers:
 
-* **Independent transfers** are the best case (no conflicts) and show the scaling of the
-  machine; on a 4-vCPU runner the shared caches and the per-incarnation EVM setup cap the
-  gain well below 4×.
-* **ERC-20 with a hot receiver** and **one hot counter** are the worst cases: every
-  transaction depends on the previous one, so Block-STM degrades to roughly sequential
-  speed plus scheduling overhead (dependencies suspend readers instead of burning CPU on
-  doomed executions).
-* **Mixed** is the differential-test workload.
+* The time includes sender recovery (ECDSA, ~half of the per-transaction cost of these
+  small transactions), the EVM work and the state root. Recovery is split across the
+  threads in the parallel path, which is why even the fully serial **hot counter**
+  workload gets ~1.8×: there the EVM part is effectively sequential (every transaction
+  waits for the previous one) and the gain comes from recovery and from overlapping
+  re-executions. The same split could be applied to the sequential path; the speed-up
+  attributable to Block-STM itself is therefore the gap between the hot-spot and the
+  independent rows.
+* **Independent transfers** are the best case (no conflicts): ~2.1× on 4 vCPUs. The state
+  root (sequential, after execution) and the shared-memory traffic of a 4-vCPU runner
+  cap it well below 4×.
+* **Mixed** (the differential-test workload) behaves like the independent case: most of
+  its conflicts (hot counter, token, map keys) resolve with few re-executions.
+* With 1 thread Block-STM costs ~3% over sequential execution; on a 1-core VM it should
+  stay off.
+* These are small, cheap transactions; heavier contract calls make the EVM share (and
+  the potential gain) larger. Measurements on reference hardware with ≥ 8 cores are still
+  to be published (Phase 5 exit criterion).
 
 On a 1-core VM parallel execution can only add overhead; leave it off there (plan §10.5:
 "only enable when validators have ≥ 4 cores").
