@@ -25,12 +25,13 @@ The four Enclave validators accept P2P connections **only from each other** (an 
 :::
 
 1. **Binary.** Use node release [`v0.3.0-enclave.1`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.3.0-enclave.1) or newer (Linux `x86_64` / `aarch64`, with SHA-256 checksums). Older binaries can't decode blocks from **97,200** on, when the staking-driven validator set activates, and stop following the chain there.
-2. **Genesis.** No ready-made Enclave `genesis.json` is attached to the releases yet. It is built by the deterministic [genesis builder](https://github.com/JACELL100/xdevs-chain/tree/main/tools/genesis-builder) from [`tools/genesis-builder/configs/enclave.json`](https://github.com/JACELL100/xdevs-chain/blob/main/tools/genesis-builder/configs/enclave.json) (Node.js 22.18+ and Foundry, from a checkout of the repository):
+2. **Genesis.** Use the exact file the validators run: [`deploy/configs/enclave-genesis.json`](https://github.com/JACELL100/xdevs-chain/blob/main/deploy/configs/enclave-genesis.json) (also attached to the [`v0.3.0-enclave.1`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.3.0-enclave.1) release), with its checksum in `enclave-genesis.json.sha256`. It includes the fork schedule (activation at block 97,200).
    ```bash
-   node tools/genesis-builder/genesis-builder.ts build \
-     --config tools/genesis-builder/configs/enclave.json --out genesis.json
+   curl -fsSLO https://raw.githubusercontent.com/JACELL100/xdevs-chain/main/deploy/configs/enclave-genesis.json
+   curl -fsSLO https://raw.githubusercontent.com/JACELL100/xdevs-chain/main/deploy/configs/enclave-genesis.json.sha256
+   sha256sum -c enclave-genesis.json.sha256 && mv enclave-genesis.json genesis.json
    ```
-   After the node starts, compare block 0 with the network: `cast block 0 -f hash` against your node and against `https://rpc.xdevschain.tech` must print the same hash. If they differ (for example because contract sources changed since launch), get the exact `genesis.json` from the maintainers instead of guessing.
+   After the node starts, `cast block 0 -f hash` against your node and against `https://rpc.xdevschain.tech` must print the same hash.
 3. **Config.** A full node is a node without `[validator]`. The validators' consensus addresses are the `p2p` multiaddrs in `enclave.json`:
    ```toml
    [chain]
