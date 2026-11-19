@@ -47,6 +47,8 @@ Most of the on-chain part is already written and tested ahead of schedule: smart
 
 Profiling and optimization, 1 s blocks if metrics allow, Block-STM parallel execution behind a flag, local fee markets, BLS aggregate signatures, and an **encrypted mempool** (research, prototype, then external review). Exit criteria include published benchmarks (throughput and finality latency) measured on reference hardware.
 
+- Encrypted mempool: research doc and prototype <span class="status ok">Built</span> behind the `encryptedMempoolBlock` activation (off on every network). Threshold encryption to a t-of-n validator committee, transactions ordered blind and decrypted one block later; a test on an in-process network shows a sandwich bot profiting from a plain swap and unable to touch the same swap sent encrypted. Next: a DKG instead of the prototype's trusted dealer, keys that follow the staking set, then external review.
+
 ## Phase 6 — Public testnet and community <span class="status planned">Planned</span>
 
 Long-lived `xdevs-testnet-1` with no resets, 20+ independent validators, snapshot sync, remote signers, an incentivized testnet (points, not tokens), a bug bounty, hackathons, and real governance on testnet.
@@ -54,6 +56,8 @@ Long-lived `xdevs-testnet-1` with no resets, 20+ independent validators, snapsho
 ## Phase 7 — Interop and mainnet preparation <span class="status planned">Later</span>
 
 Light-client bridges only (no multisig bridges), canonical bridged tokens, independent security audits, legal and entity setup, mainnet tokenomics and a genesis ceremony.
+
+- Light-client bridges with Ethereum Sepolia: prototype <span class="status ok">Built</span>, not deployed. An Ethereum sync-committee light client in Solidity on xDEVS Chain (BLS through the EIP-2537 precompiles), an xDEVS commit-certificate light client in Solidity on Sepolia (Ed25519 in Solidity, validator sets proven from Staking storage), lock/mint and burn/release endpoints with canonical tokens, a permissionless relayer, and the `ED25519VERIFY` precompile behind `ed25519VerifyBlock`. Tested on real Sepolia and Enclave data. Next: an external audit, then a Sepolia/Enclave testnet deployment ([how bridges work](/concepts/bridges)).
 
 :::info[No mainnet date]
 There is no mainnet and no token sale. Testnet tokens (tXDS) have no value and will not convert to mainnet XDS.

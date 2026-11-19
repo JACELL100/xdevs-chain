@@ -46,8 +46,9 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | Public testnet (Enclave, 4 validators) | ✅ Live since 17 Nov 2026 |
 | Staking-driven validator set (epochs, rewards, downtime and double-sign slashing) | ✅ Built and tested on local networks; Enclave activation pending (Phase 3) |
 | Transaction simulation and safety RPCs (`xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, `vaultEvents`) | ✅ Built and tested (Phase 4); reference wallet uses them when the node serves them |
-| Encrypted mempool, parallel execution, local fee markets | 📋 Planned (Phase 5) |
-| Light-client bridges | 📋 Planned (Phase 7) |
+| Encrypted mempool (threshold encryption, commit-then-reveal; `xdevs_sendEncryptedTransaction`) | 🧪 Prototype behind `encryptedMempoolBlock`, off on every network; a test shows it prevents a sandwich attack; needs a DKG and external review ([research doc](docs/research/encrypted-mempool.md)) |
+| Parallel execution, local fee markets | 📋 Planned (Phase 5) |
+| Light-client bridges (Ethereum Sepolia) | 🧪 Prototype, not deployed: sync-committee light client on xDEVS, commit-certificate light client on Sepolia, lock/mint + burn/release, permissionless relayer, `ED25519VERIFY` precompile behind `ed25519VerifyBlock`; needs an external audit ([research doc](docs/research/light-client-bridges.md)) |
 
 ### Node status (what the Rust node does today)
 
@@ -113,15 +114,15 @@ deploy/            dev genesis, systemd unit, local Docker setup
 
 | Service | URL | Status |
 |---|---|---|
-| JSON-RPC | `https://rpc.xdevschain.tech` | ✅ Live |
-| WebSocket | `wss://ws.xdevschain.tech` | ✅ Live |
-| Network status | https://status.xdevschain.tech | ✅ Live |
-| Block explorer | https://explorer.xdevschain.tech | ✅ Live |
-| Wallet | https://wallet.xdevschain.tech | ✅ Live (preview; passkey accounts need the bundler) |
-| Faucet | https://faucet.xdevschain.tech | ✅ Live (100 tXDS per claim, every 24 h) |
-| Explorer API | `https://explorer-api.xdevschain.tech/api/v1/…` | ✅ Live (indexer on Postgres) |
-| Bundler | `https://bundler.xdevschain.tech` | 📋 Ready to deploy |
-| Website and docs | https://xdevschain.tech | ✅ Live |
+| JSON-RPC (HTTPS) | [`https://rpc.xdevschain.tech`](https://rpc.xdevschain.tech) | ✅ Live. Use it as the RPC URL in wallets and tools; opened in a browser it shows the [RPC info page](https://status.xdevschain.tech/rpc) |
+| WebSocket | `wss://ws.xdevschain.tech` | ✅ Live (subscriptions: `newHeads`, `logs`, `newPendingTransactions`) |
+| Network status | [status.xdevschain.tech](https://status.xdevschain.tech) | ✅ Live |
+| Block explorer | [explorer.xdevschain.tech](https://explorer.xdevschain.tech) | ✅ Live |
+| Wallet | [wallet.xdevschain.tech](https://wallet.xdevschain.tech) | ✅ Live (preview; creating passkey accounts needs the bundler) |
+| Faucet | [faucet.xdevschain.tech](https://faucet.xdevschain.tech) | ✅ Live (100 tXDS per claim, once every 24 h) |
+| Explorer API | `https://explorer-api.xdevschain.tech` · [`/api/v1/stats`](https://explorer-api.xdevschain.tech/api/v1/stats) · [`/health`](https://explorer-api.xdevschain.tech/health) | ✅ Live (indexer on Postgres; [API spec](docs/specs/explorer-api.md)) |
+| ERC-4337 bundler | `https://bundler.xdevschain.tech` (not deployed yet) | 📋 Ready to deploy |
+| Website and docs | [xdevschain.tech](https://xdevschain.tech) · [network endpoints](https://xdevschain.tech/network/endpoints) | ✅ Live |
 
 ```bash
 cast block-number --rpc-url https://rpc.xdevschain.tech

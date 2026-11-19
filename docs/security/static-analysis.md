@@ -141,6 +141,16 @@ Severity = Slither's impact. "FP" = false positive, suppressed as stated. Lines 
 | SA-I07 | unused-state | 3 | `VOTE_*` constants are used by the core, not by `SmartAccountFactory` (shared base). Inline. |
 | SA-I08 | unindexed-event-address | 4 | `XNS Initialized / TreasuryChanged / GovernanceChanged`, `CanonicalTokenFactory.GovernanceChanged`: rare admin events; indexing would change the log layout that indexers / the SDK already decode. Inline. |
 
+### Phase 7 bridge prototype (`contracts/src/bridge`)
+
+Triaged when the light-client bridge prototype was added (PR "Phase 7: light-client bridges"). The bridge is a prototype and needs an external audit before it holds value (`docs/research/light-client-bridges.md` §10).
+
+| Id | Detector | Where | Verdict |
+|---|---|---|---|
+| BR-01 | unused-return (2) | `BridgeBase._consume` (`verifiedRoots` state root), `XdevsLightClient._toConsensusSet` (`Ed25519.decompress` coordinates) | By design: only the receipts root / the validity flag is needed. Inline. |
+| BR-02 | incorrect-equality | `SepoliaTokenVault.lock` (`received == 0`) | FP: rejects a lock that moved no tokens (fee-on-transfer edge); not a balance invariant. Inline. |
+| BR-03 | divide-before-multiply, missing-zero-check, reentrancy-benign/events, unindexed-event-address | `XdevsLightClient`, `XdevsBridge`, `BridgeBase` | Fixed in code: modulo form of the epoch boundary, zero check on `staking`, events and nonce before the call to the factory-made token, indexed `CounterpartSet`. |
+
 ## 5. Aderyn — every finding
 
 ### High (6 detectors, 10 instances) — all false positives, marked `aderyn-fp-next-line`

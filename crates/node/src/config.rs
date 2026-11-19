@@ -258,6 +258,10 @@ pub struct ValidatorSection {
     /// Max seconds a live proposal's timestamp may run ahead of the local clock
     /// (research doc §6.3 rule 3; not applied to synced blocks).
     pub max_timestamp_drift_secs: u64,
+    /// Encrypted mempool (Phase 5 prototype): this validator's committee key share, a
+    /// text file `<index>:<64 hex digits>` from the dealer. Unset = the node verifies and
+    /// relays shares but releases none.
+    pub mempool_share_file: Option<PathBuf>,
 }
 
 /// Default of [`ValidatorSection::max_timestamp_drift_secs`].
@@ -271,6 +275,7 @@ impl Default for ValidatorSection {
             password_file: None,
             fee_recipient: Address::ZERO,
             max_timestamp_drift_secs: DEFAULT_MAX_TIMESTAMP_DRIFT_SECS,
+            mempool_share_file: None,
         }
     }
 }

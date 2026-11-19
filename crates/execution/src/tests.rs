@@ -692,3 +692,38 @@ fn eip161_and_selfdestruct_leave_no_accounts() {
     assert!(changed[&a.address()].is_some() && changed[&cfg().treasury].is_some());
     assert!(!changed.contains_key(&fresh));
 }
+
+/// `ED25519VERIFY` (0x0A00…0001) is reachable through the EVM only from `ed25519VerifyBlock` on.
+#[test]
+fn ed25519_verify_precompile_is_activation_gated() {
+    use ed25519_consensus::SigningKey;
+    let sk = SigningKey::from([9u8; 32]);
+    let msg = b"XDEVS/VOTE/1 test";
+    let mut input = sk.verification_key().to_bytes().to_vec();
+    input.extend_from_slice(&sk.sign(msg).to_bytes());
+    input.extend_from_slice(msg);
+    let req = TransactionRequest {
+        to: Some(TxKind::Call(precompiles::ED25519_VERIFY_ADDRESS)),
+        input: Bytes::from(input).into(),
+        ..Default::default()
+    };
+    let st = funded_state();
+    let header = parent(); // block 0
+    let output = |exec: &EvmExecutor| match exec.call(&st, &header, &req, 1_000_000).unwrap() {
+        CallResult::Success { output, .. } => output,
+        other => panic!("unexpected {other:?}"),
+    };
+    // Not scheduled: an empty account (empty return data).
+    assert!(output(&EvmExecutor::new(cfg())).is_empty());
+    // Scheduled later: still absent at block 0.
+    let later = ChainConfig {
+        ed25519_verify_block: Some(1),
+        ..cfg()
+    };
+    assert!(output(&EvmExecutor::new(later)).is_empty());
+    let active = ChainConfig {
+        ed25519_verify_block: Some(0),
+        ..cfg()
+    };
+    assert_eq!(output(&EvmExecutor::new(active)), word(1));
+}

@@ -29,6 +29,8 @@ ctr.workspace = true
 zeroize.workspace = true
 subtle.workspace = true
 rand.workspace = true
+chacha20poly1305.workspace = true
+hkdf.workspace = true
 # Base58 for libp2p peer ids (already in the graph via libp2p-identity).
 bs58 = "0.5.1"
 

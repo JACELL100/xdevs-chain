@@ -94,7 +94,7 @@ With the unchanged genesis the new binary behaves exactly like the old one (the 
    restarts the node because its config changed; `xdevs_fork_height` refuses to start within
    `xdevs_fork_margin_blocks` of N). Steps 3 and 4 can be one rollout if the new genesis is in
    place when the binary is rolled out.
-4. On each node, the log shows `staking fork schedule updated from the genesis config` once and
+4. On each node, the log shows `fork schedule updated from the genesis config` once and
    `staking-driven validator set scheduled activation=N epoch_length=3600 first_epoch_block=…`
    at every start.
 

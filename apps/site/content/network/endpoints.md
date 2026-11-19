@@ -10,15 +10,15 @@ Enclave is a test network. It may be reset (with notice on the [status page](htt
 
 | Service | URL | Status |
 |---|---|---|
-| JSON-RPC (HTTPS) | `https://rpc.xdevschain.tech` | <span class="status ok">Live</span> |
-| WebSocket | `wss://ws.xdevschain.tech` | <span class="status ok">Live</span> |
+| JSON-RPC (HTTPS) | [`https://rpc.xdevschain.tech`](https://rpc.xdevschain.tech) | <span class="status ok">Live</span>: use it as the RPC URL; in a browser it opens the [RPC info page](https://status.xdevschain.tech/rpc) |
+| WebSocket | `wss://ws.xdevschain.tech` | <span class="status ok">Live</span>: `newHeads`, `logs`, `newPendingTransactions` |
 | Network status | [`https://status.xdevschain.tech`](https://status.xdevschain.tech) | <span class="status ok">Live</span>: blocks, finality, validators, every endpoint |
 | Block explorer | [`https://explorer.xdevschain.tech`](https://explorer.xdevschain.tech) | <span class="status ok">Live</span> |
 | Wallet | [`https://wallet.xdevschain.tech`](https://wallet.xdevschain.tech) | <span class="status ok">Live</span> (preview); passkey accounts need the bundler |
 | Faucet | [`https://faucet.xdevschain.tech`](https://faucet.xdevschain.tech) | <span class="status ok">Live</span>: 100 tXDS per claim, every 24 h |
-| Explorer API | `https://explorer-api.xdevschain.tech/api/v1/…` | <span class="status ok">Live</span>: indexer for history, tokens, approvals and vault queues ([spec](https://github.com/JACELL100/xdevs-chain/blob/main/docs/specs/explorer-api.md)) |
-| ERC-4337 bundler | `https://bundler.xdevschain.tech` | <span class="status next">Ready to deploy</span>: EntryPoint v0.9, validated mempool with ERC-7562 limits and reputation, sponsored account activation |
-| Website and docs | `https://xdevschain.tech` | This site |
+| Explorer API | `https://explorer-api.xdevschain.tech` · [`/api/v1/stats`](https://explorer-api.xdevschain.tech/api/v1/stats) · [`/health`](https://explorer-api.xdevschain.tech/health) | <span class="status ok">Live</span>: indexer for history, tokens, approvals and vault queues ([spec](https://github.com/JACELL100/xdevs-chain/blob/main/docs/specs/explorer-api.md)) |
+| ERC-4337 bundler | `https://bundler.xdevschain.tech` (not deployed yet) | <span class="status next">Ready to deploy</span>: EntryPoint v0.9, validated mempool with ERC-7562 limits and reputation, sponsored account activation |
+| Website and docs | [`https://xdevschain.tech`](https://xdevschain.tech) | This site |
 
 Opening `https://rpc.xdevschain.tech` in a browser takes you to its [info page](https://status.xdevschain.tech/rpc).
 
@@ -51,7 +51,7 @@ curl -s https://rpc.xdevschain.tech -H 'content-type: application/json' \
 | Finality | Every committed block is final (BFT, 2/3+ of the validators sign it) |
 | Validators | 4, equal power, set in genesis (staking-driven changes come with Phase 3) |
 | Genesis | Built with [`tools/genesis-builder`](https://github.com/JACELL100/xdevs-chain/tree/main/tools/genesis-builder) from [`configs/enclave.json`](https://github.com/JACELL100/xdevs-chain/blob/main/tools/genesis-builder/configs/enclave.json); system contracts at `0x…1000`–`0x…1009` ([predeploys](/concepts/predeploys)) |
-| Node release | [`v0.2.0-devnet.1`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.2.0-devnet.1) |
+| Node release | [`v0.2.0-devnet.1`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.2.0-devnet.1). The Phase 3 staking set and the Phase 4 safety RPCs (`xdevs_simulateTransaction`, `vaultEvents`, …) are merged in the code and reach Enclave with the next release |
 | Validator P2P | Open only between the validators; users and apps connect through the RPC |
 
 ## Faucet

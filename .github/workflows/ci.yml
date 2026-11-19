@@ -15,14 +15,52 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # Compiler-level cache (sccache on the GitHub Actions cache) on top of Swatinem/rust-cache:
+  # crates that did not change are reused even when Cargo.lock changes a little.
+  # Incremental compilation is off because sccache cannot cache incremental builds.
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
+  # Which parts of the repo a push touches. Rust jobs are skipped when only docs, TypeScript
+  # apps or the website change (those PRs then finish in minutes); main always runs everything
+  # that changed, and the ARM and Windows builds run only on main.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - "crates/**"
+              - "bin/**"
+              - "tests/**"
+              - "Cargo.toml"
+              - "Cargo.lock"
+              - "rust-toolchain.toml"
+              - ".cargo/**"
+              - "contracts/**"
+              - "deploy/configs/**"
+              - ".github/workflows/ci.yml"
+            contracts:
+              - "contracts/**"
+              - ".github/workflows/ci.yml"
+
   rust:
     name: rust (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm] # x86_64 + ARM64
+        # PRs: x86_64 only. main: x86_64 + ARM64.
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest","ubuntu-24.04-arm"]') }}
     runs-on: ${{ matrix.os }}
     # TODO: pin action versions to commit SHAs once the repo is set up.
     steps:
@@ -36,6 +74,9 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Use sccache
+        run: echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -44,6 +85,9 @@ jobs:
   # (Malachite, libp2p, redb, ...) compiling for x86_64-pc-windows-gnu.
   windows-check:
     name: windows-check (x86_64-pc-windows-gnu)
+    needs: changes
+    # main only: PRs are checked on Linux; Windows-specific breakage is caught when they land.
+    if: github.event_name != 'pull_request' && needs.changes.outputs.rust == 'true'
     runs-on: windows-latest
     timeout-minutes: 60
     defaults:
@@ -79,9 +123,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: windows-gnu
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Use sccache
+        run: echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
       - run: cargo check --workspace --locked
 
   audit:
+    needs: changes
+    # New advisories appear without any code change, so main always runs it.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -95,6 +145,8 @@ jobs:
 
   contracts:
     name: contracts (foundry)
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -110,12 +162,39 @@ jobs:
       - run: forge build --sizes
       - run: forge test
 
+  # Phase 7 light-client bridges: both directions end to end on two anvils with the real contracts and relayer
+  # (dev consensus keys; the real-data checks are the Foundry fixtures tests).
+  bridge-e2e:
+    name: bridge e2e (anvil)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.9.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            tools/bridge-relayer/package-lock.json
+            package-lock.json
+      - run: npm ci --no-audit --no-fund && npm run build:sdk
+      - run: npm ci --no-audit --no-fund
+        working-directory: tools/bridge-relayer
+      - run: forge build
+        working-directory: contracts
+      - run: npm run e2e
+        working-directory: tools/bridge-relayer
+
   js:
     name: js (${{ matrix.package }})
     strategy:
       fail-fast: false
       matrix:
-        package: [apps/faucet, apps/indexer, apps/bundler]
+        package: [apps/faucet, apps/indexer, tools/bridge-relayer, apps/bundler]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -132,7 +211,7 @@ jobs:
       # The indexer depends on the local SDK ("file:../../sdk/ts"); its dist/ is not committed. The SDK is a
       # member of the root npm workspace, so install the workspace and build it first.
       - name: Build @xdevs/sdk
-        if: matrix.package == 'apps/indexer'
+        if: matrix.package == 'apps/indexer' || matrix.package == 'tools/bridge-relayer'
         working-directory: .
         run: npm ci --no-audit --no-fund && npm run build:sdk
       # The bundler's integration / end-to-end tests run against anvil (--hardfork osaka + the dev genesis alloc).

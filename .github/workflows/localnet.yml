@@ -8,9 +8,9 @@ name: localnet
 on:
   push:
     branches: [main]
-    paths-ignore: ["docs/**", "apps/**", "sdk/**", "**/*.md"]
+    paths-ignore: ["docs/**", "apps/**", "sdk/**", "packages/**", "tools/**", "deploy/bundler/**", "deploy/cloudflare/**", "deploy/monitoring/**", "**/*.md", ".github/workflows/ci.yml", ".github/workflows/web-deploy.yml", ".github/workflows/docs.yml", "package.json", "package-lock.json"]
   pull_request:
-    paths-ignore: ["docs/**", "apps/**", "sdk/**", "**/*.md"]
+    paths-ignore: ["docs/**", "apps/**", "sdk/**", "packages/**", "tools/**", "deploy/bundler/**", "deploy/cloudflare/**", "deploy/monitoring/**", "**/*.md", ".github/workflows/ci.yml", ".github/workflows/web-deploy.yml", ".github/workflows/docs.yml", "package.json", "package-lock.json"]
   workflow_dispatch:
 
 permissions:

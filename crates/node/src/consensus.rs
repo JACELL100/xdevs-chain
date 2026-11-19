@@ -34,6 +34,37 @@ pub fn genesis_validator_set(genesis: &Genesis) -> anyhow::Result<Option<Validat
     ))
 }
 
+/// Read this validator's encrypted-mempool key share (`[validator] mempool_share_file`)
+/// and check it against the committee's verification key of its index. `Ok(None)` if no
+/// file is configured.
+pub fn load_mempool_share(
+    section: &ValidatorSection,
+    key: &xdevs_crypto::encrypted_tx::MempoolKey,
+) -> anyhow::Result<Option<xdevs_crypto::threshold::KeyShare>> {
+    let Some(path) = &section.mempool_share_file else {
+        return Ok(None);
+    };
+    let text = Zeroizing::new(
+        std::fs::read_to_string(path)
+            .with_context(|| format!("read mempool share file {}", path.display()))?,
+    );
+    let share = xdevs_crypto::threshold::KeyShare::from_text(&text)
+        .map_err(|e| anyhow::anyhow!("mempool share file {}: {e}", path.display()))?;
+    let expected = key.verification_key(share.index()).with_context(|| {
+        format!(
+            "mempool share index {} is outside the committee of {}",
+            share.index(),
+            key.committee_size()
+        )
+    })?;
+    anyhow::ensure!(
+        *expected == share.verification_key(),
+        "mempool share {} does not match the committee's verification key",
+        share.index()
+    );
+    Ok(Some(share))
+}
+
 /// Read the consensus key: a keystore v3 JSON (`ConsensusKeystore`, password from
 /// `password_file`, else `$XDEVS_KEY_PASSWORD`, else empty) or the 32-byte seed as hex.
 pub fn load_consensus_key(section: &ValidatorSection) -> anyhow::Result<Ed25519Seed> {
