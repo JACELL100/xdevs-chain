@@ -130,3 +130,16 @@ Symptom: claims succeed (the node accepted the tx) but the txs never get mined. 
 - **TODO — `.xdevs` names:** the form accepts names, but the API returns 400 `names_not_supported` until the node exposes `xdevs_resolveName`. Once it does, implement `resolveName()` in `src/address.ts`.
 - **TODO — legal:** terms of service and a privacy policy for the faucet (plan §30 checklist). The faucet sends client IPs to Cloudflare Turnstile and keeps IP-derived keys for 24 h.
 - **Not tested against real Cloudflare:** the tests are offline and use mocks for KV, Turnstile, JSON-RPC and the DO stub. Run `wrangler dev` with the Turnstile test keys against a local devnet before the first deploy.
+
+## Automatic top-up (Enclave)
+
+`xdevs-val-1` runs `xdevs-faucet-refill.timer` (hourly, systemd). The script
+`/usr/local/bin/xdevs-faucet-refill` reads the hot wallet's balance from the local node and, when it is
+below **20,000 tXDS**, sends enough to bring it back to **100,000 tXDS** from the validator's operator
+account (`xdevs-cli send`, keystore and password file in `/var/lib/xdevs/keys`). The hot wallet therefore
+never holds more than ~100,000 tXDS, while the faucet cannot run dry.
+
+- Logs: `journalctl -u xdevs-faucet-refill`; next run: `systemctl list-timers xdevs-faucet-refill.timer`.
+- Change the thresholds by editing `LOW` / `TARGET` in the script; pause with
+  `systemctl disable --now xdevs-faucet-refill.timer`.
+- The operator account held ~749.9 M tXDS at setup, enough for millions of claims.
