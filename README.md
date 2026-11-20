@@ -1,12 +1,15 @@
 # xDEVS Chain
 
-**Website:** [xdevschain.tech](https://xdevschain.tech) (coming soon) · **Built by [THE xDEVS](https://xdevs.in)**
+**Website & docs:** [xdevschain.tech](https://xdevschain.tech) · **Testnet:** [explorer](https://explorer.xdevschain.tech) · [wallet](https://wallet.xdevschain.tech) · [faucet](https://faucet.xdevschain.tech) · [status](https://status.xdevschain.tech) · **Built by [THE xDEVS](https://xdevs.in)**
 
 xDEVS Chain is an EVM-equivalent, Proof-of-Stake Layer 1 written in Rust, built around one idea: **protecting users at the protocol level** from scams, lost keys, front-running and drained wallets. It runs on `revm` and `alloy`, so Ethereum tooling (MetaMask, Foundry, Hardhat, viem, ethers) works unchanged.
 
 The native coin is **XDS** (testnet: **tXDS**, 18 decimals; the smallest unit is the "dev"). Names end in `.xdevs` (XNS, the xDEVS Name Service).
 
-> **Status: the Enclave public testnet is live (chain id 717171, since 17 Nov 2026)** with its RPC, explorer, explorer API, wallet, faucet, bundler and status page. Phases 1–2 are complete; the Phase 3 staking-driven validator set, the Phase 4 safety RPCs, Phase 5 (encrypted mempool, parallel execution, local fee markets) and a Phase 7 light-client bridge prototype are built and tested, and run on Enclave with release v0.3.0-enclave.1: the safety RPCs and parallel execution are on now, and the staking-driven validator set, local fee markets and ED25519VERIFY are live since block 97,200; the encrypted mempool stays off until it has a distributed key setup. Validators reach BFT consensus with Malachite, survive one validator going down, halt safely with two down and resume, and late nodes sync from genesis. Findings from an internal security review (denial-of-service in proposal streaming, gossip and RPC) are fixed and covered by tests; an external audit is still required before mainnet. The system and user-safety contracts, the TypeScript SDK and the faucet are built and tested. The staking-driven validator set (epoch system calls, rewards, downtime and double-sign slashing) is built and tested behind an activation height; switching Enclave over is a coordinated upgrade still to schedule. Testnet tokens have no value.
+> **Status: the Enclave public testnet is live** (chain id 717171, since 17 Nov 2026), running release [`v0.3.0-enclave.1`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.3.0-enclave.1) on 4 validators with a public RPC, explorer and explorer API, passkey wallet, faucet, ERC-4337 bundler and status page.
+> Live on Enclave: BFT consensus with one-block finality, the staking-driven validator set with block rewards and slashing (since block 97,200), the safety RPCs (transaction simulation, recipient checks, approvals and vault queries), local fee markets, Block-STM parallel execution, and the user-safety contracts (passkey smart accounts, Guardian Vault, expiring approvals, `.xdevs` names).
+> Built but not switched on: the encrypted mempool (waits for a distributed key setup and an external review) and the light-client bridge to Ethereum Sepolia (prototype, not deployed).
+> Still ahead: independent community validators, external security audits and mainnet preparation. Testnet tokens (tXDS) have no value.
 
 ## Why xDEVS Chain?
 
@@ -19,17 +22,17 @@ Most blockchains compete on speed and fees. Meanwhile the things that actually c
 | **Lost seed phrase = lost funds** | Smart wallets exist as optional add-ons (ERC-4337) | Wallet-level only | Smart accounts are a built-in system contract: **passkey login (Face ID / fingerprint), no seed phrase**, social recovery by guardians |
 | **Stolen key drains the wallet instantly** | Nothing at protocol level | Nothing at protocol level | **Guardian Vault**: large transfers, approvals and unknown contract calls wait out a cancel window, and switching protection off is delayed too. An opt-in protocol rule (XIP-0001) extends this to existing MetaMask addresses |
 | **Forgotten unlimited approvals get drained years later** | ERC-20 approvals are unlimited and permanent by default | Token delegations persist until revoked | **Approvals expire**: the XDRC-20 standard and a Permit2-style contract that requires an expiry on every allowance, plus one-click "revoke all" |
-| **Address poisoning and look-alike names** | Wallet warnings only; ENS still allows ASCII look-alikes such as `paypa1` | Wallet warnings only | Native `.xdevs` names that **reject look-alikes** (`paypa1` can't be registered while `paypal` exists), plus planned RPC checks for first-time and look-alike recipients |
-| **Blind signing of unreadable transactions** | Third-party simulation services | Third-party simulation services | Planned built-in `xdevs_simulateTransaction` RPC that shows asset changes and plain-language warnings before you sign |
-| **Front-running / sandwich bots (MEV)** | Private relays and builder markets, which centralise | Validator-level, widely exploited | Planned **encrypted mempool**: transactions stay hidden until their order is final |
-| **Time until a payment is final** | About 13 minutes (2 epochs) | Seconds, with past full-network outages | Planned **BFT finality in about 1–2 seconds**, with no reorgs after commit |
-| **One hot app makes everyone pay more** | Single global fee market | Local fee markets | Planned **local fee markets**: a congested contract gets its own fee; everyone else keeps paying the normal fee |
-| **Bridge hacks** | Many bridges secured by small multisigs | Same | Policy: **light-client bridges only**, no multisig bridges |
+| **Address poisoning and look-alike names** | Wallet warnings only; ENS still allows ASCII look-alikes such as `paypa1` | Wallet warnings only | Native `.xdevs` names that **reject look-alikes** (`paypa1` can't be registered while `paypal` exists), plus a built-in `xdevs_checkRecipient` RPC that flags first-time and look-alike recipients (live on Enclave) |
+| **Blind signing of unreadable transactions** | Third-party simulation services | Third-party simulation services | Built-in `xdevs_simulateTransaction` RPC that shows asset changes and plain-language warnings before you sign (live on Enclave) |
+| **Front-running / sandwich bots (MEV)** | Private relays and builder markets, which centralise | Validator-level, widely exploited | **Encrypted mempool**: transactions stay hidden until their order is final (built and tested; switched on after a distributed key setup and external review) |
+| **Time until a payment is final** | About 13 minutes (2 epochs) | Seconds, with past full-network outages | **BFT finality in one block (2 s on Enclave)**, with no reorgs after commit |
+| **One hot app makes everyone pay more** | Single global fee market | Local fee markets | **Local fee markets**: a congested contract gets its own fee; everyone else keeps paying the normal fee (live on Enclave) |
+| **Bridge hacks** | Many bridges secured by small multisigs | Same | **Light-client bridges only**, no multisig bridges (Sepolia bridge prototype built, not deployed yet) |
 | **Developer compatibility** | The standard | Different VM and languages | **EVM-equivalent** (revm, Osaka rules): Solidity, MetaMask, Foundry, Hardhat and viem work unchanged |
 
 All protection features are **opt-in** and **never reverse a finalized transaction**: there is no admin key that can freeze or seize anyone's funds.
 
-### What's built today vs planned
+### What's live, built and planned
 
 | Feature | Status |
 |---|---|
@@ -40,16 +43,18 @@ All protection features are **opt-in** and **never reverse a finalized transacti
 | Staking, governance, treasury, gas sponsorship (paymasters) | ✅ Contracts built and tested |
 | Guardian freeze (breaks owner-vs-thief recovery stalemates), EOA lock for existing MetaMask addresses | ✅ Contracts built and tested |
 | Node enforcement of the EOA lock ([XIP-0001](docs/specs/xip-0001-eoa-lock.md)) | ✅ Built and tested (dev node: block validity, block building, mempool, RPC) |
-| Multi-validator BFT consensus (Malachite), block sync, P2P tx gossip, incremental state root | ✅ Built and tested locally (Phase 2) |
+| Multi-validator BFT consensus (Malachite), block sync, P2P tx gossip, incremental state root | ✅ Live on Enclave (Phase 2) |
 | DoS hardening of consensus streaming, gossip and RPC (from the Phase 2 security review) | ✅ Built and tested |
 | 24-hour soak test of a multi-validator network | 📋 Planned on the testnet VMs (5-hour soaks run in CI) |
 | Public testnet (Enclave, 4 validators) | ✅ Live since 17 Nov 2026 |
-| Staking-driven validator set (epochs, rewards, downtime and double-sign slashing) | ✅ Built and tested on local networks; Enclave activation pending (Phase 3) |
-| Transaction simulation and safety RPCs (`xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, `vaultEvents`) | ✅ Built and tested (Phase 4); reference wallet uses them when the node serves them |
+| Explorer + indexer API, passkey wallet, faucet, ERC-4337 bundler, status page | ✅ Live on Enclave (see [Enclave testnet](#enclave-testnet-live)) |
+| Independent community validators, external audits, mainnet | 📋 Next (Phases 6–7) |
+| Staking-driven validator set (epochs, rewards, downtime and double-sign slashing) | ✅ Live on Enclave since block 97,200 (Phase 3) |
+| Transaction simulation and safety RPCs (`xdevs_simulateTransaction`, `xdevs_checkRecipient`, `xdevs_getApprovals`, `xdevs_getVaultQueue`, `vaultEvents`) | ✅ Live on Enclave (Phase 4); used by the wallet and explorer |
 | Encrypted mempool (threshold encryption, commit-then-reveal; `xdevs_sendEncryptedTransaction`) | 🧪 Prototype behind `encryptedMempoolBlock`, off on every network; a test shows it prevents a sandwich attack; needs a DKG and external review ([research doc](docs/research/encrypted-mempool.md)) |
-| Block-STM parallel execution | ✅ Built and tested behind `[execution] parallel` (off by default, node-local; identical results to sequential execution, checked by differential tests and a mixed parallel/sequential local network) ([research doc](docs/research/parallel-execution.md)) |
-| Local fee markets (per-contract congestion pricing, `xdevs_localFee`) | 🧪 Built behind `localFeeMarketsBlock`, off on every network ([research doc](docs/research/local-fee-markets.md)) |
-| Light-client bridges (Ethereum Sepolia) | 🧪 Prototype, not deployed: sync-committee light client on xDEVS, commit-certificate light client on Sepolia, lock/mint + burn/release, permissionless relayer, `ED25519VERIFY` precompile behind `ed25519VerifyBlock`; needs an external audit ([research doc](docs/research/light-client-bridges.md)) |
+| Block-STM parallel execution | ✅ Live on all Enclave validators (`[execution] parallel`, off by default for other nodes; identical results to sequential execution, checked by differential tests and a mixed parallel/sequential local network) ([research doc](docs/research/parallel-execution.md)) |
+| Local fee markets (per-contract congestion pricing, `xdevs_localFee`) | ✅ Live on Enclave since block 97,200 ([research doc](docs/research/local-fee-markets.md)) |
+| Light-client bridges (Ethereum Sepolia) | 🧪 Prototype, not deployed: sync-committee light client on xDEVS, commit-certificate light client on Sepolia, lock/mint + burn/release, permissionless relayer, `ED25519VERIFY` precompile (live on Enclave since block 97,200); needs an external audit ([research doc](docs/research/light-client-bridges.md)) |
 
 ### Node status (what the Rust node does today)
 
@@ -69,7 +74,7 @@ Works and is covered by tests (unit tests per crate plus in-process end-to-end t
 
 Not done yet:
 
-- The staking-driven validator set is not active on Enclave yet: it is enabled by `stakingValidatorsBlock` in a coordinated upgrade ([runbook](docs/runbooks/activate-staking-validators.md)); until then the genesis validator set signs. The block reward is a fixed amount per block (the plan's 7% → 2% inflation curve is not implemented).
+- The staking-driven validator set is live on Enclave since block 97,200 ([runbook](docs/runbooks/activate-staking-validators.md)); becoming a validator is not open to the public yet. The block reward is a fixed amount per block (the plan's 7% → 2% inflation curve is not implemented).
 - Filter methods (`eth_newFilter`, `eth_getFilterChanges`, ...), `eth_getProof`, and `debug_` / `trace_` / `txpool_` namespaces.
 - No pending block: the `pending` tag means `latest`, except that `eth_getTransactionCount` with `pending` counts pool transactions.
 - Block and receipt pruning (all blocks are kept) and JSON log output.
@@ -89,24 +94,37 @@ Not done yet:
 ```
 crates/            Rust node (xdevs-* crates)
   primitives/      block, header, tx and chain config types (alloy)
-  crypto/          sender recovery, signing, Web3 Secret Storage keystores
+  crypto/          signing, keystores, threshold encryption (encrypted mempool)
   storage/         redb tables with atomic per-block write batches
   state/           flat state and Ethereum MPT state roots
-  execution/       revm block executor (Osaka rules), fees, eth_call / estimateGas
+  execution/       revm block executor (Osaka rules), Block-STM, fees, local fee markets, precompiles
+  simulator/       transaction simulation for the safety RPCs
+  consensus/       Malachite BFT integration, commit certificates
+  network/         libp2p transaction gossip
   genesis/         genesis.json parsing and the dev genesis
   mempool/         transaction pool
-  rpc/             JSON-RPC server: eth_, net_, web3_, xdevs_getEoaLock
-  node/            dev block producer, RPC backend, chain store
+  rpc/             JSON-RPC server: eth_, net_, web3_, xdevs_ (+ WebSocket subscriptions)
+  metrics/         Prometheus metrics
+  node/            block production, consensus app, staking epochs, RPC backend
+  testutils/       in-process multi-validator networks for tests
 bin/
   xdevs/           node binary
-  xdevs-cli/       keys, transfers, balances
-tests/e2e/         end-to-end tests against an in-process node
-contracts/         Solidity predeploys (Foundry): staking, governance, smart accounts,
-                   Guardian Vault, XNS names, expiring approvals; see contracts/README.md
-sdk/ts/            @xdevs/sdk: viem chain configs and typed xdevs_ RPC actions
-apps/faucet/       tXDS faucet (Cloudflare Worker + Turnstile)
-docs/              ADRs (docs/adr), specs (docs/specs), runbooks (docs/runbooks)
-deploy/            dev genesis, systemd unit, local Docker setup
+  xdevs-cli/       keys, transfers, local test networks
+  xdevs-loadgen/   load generator
+contracts/         Solidity (Foundry): system predeploys, smart accounts, Guardian Vault, XNS,
+                   expiring approvals, paymasters, light-client bridges; see contracts/README.md
+sdk/ts/            @xdevs/sdk: viem chain configs (xdevsEnclave) and typed xdevs_ RPC actions
+packages/ui/       @xdevs/ui: shared brand kit for the web apps
+apps/site/         xdevschain.tech: landing page and docs (Next.js)
+apps/explorer/     explorer.xdevschain.tech (Next.js)
+apps/wallet/       wallet.xdevschain.tech: passkey smart-account wallet (Next.js)
+apps/faucet-web/   faucet.xdevschain.tech page; apps/faucet/ is its Cloudflare Worker API
+apps/status/       status.xdevschain.tech network dashboard and RPC info page
+apps/indexer/      explorer API (Postgres) and vault alerts
+apps/bundler/      ERC-4337 bundler (bundler.xdevschain.tech)
+tools/             genesis builder, bridge relayer
+docs/              ADRs, specs, runbooks, research notes
+deploy/            Enclave genesis, systemd units, Ansible, Cloudflare and monitoring docs
 ```
 
 ## Enclave testnet (live)
@@ -131,7 +149,7 @@ cast block-number --rpc-url https://rpc.xdevschain.tech
 
 Add it to MetaMask: network name `xDEVS Chain Enclave`, RPC `https://rpc.xdevschain.tech`, chain id `717171`, symbol `tXDS`, explorer `https://explorer.xdevschain.tech`. Details: [Network endpoints](https://xdevschain.tech/network/endpoints).
 
-## Quickstart (local dev chain)
+## Develop offline: local dev chain
 
 Prerequisites: Rust stable (pinned in `rust-toolchain.toml`) with `rustfmt` and `clippy`, and a C toolchain for your platform (on Windows, the `x86_64-pc-windows-gnu` toolchain with MinGW gcc). Optional: [Foundry](https://getfoundry.sh) and MetaMask.
 
@@ -217,12 +235,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules (determinism, Ethereum comp
 
 Heavy builds run in GitHub Actions rather than on developer laptops:
 
-- `.github/workflows/ci.yml` checks the Rust workspace on x86_64 and ARM64 (fmt, clippy, tests), runs `cargo audit`, and tests the contracts, SDK and faucet. Accepted audit advisories are documented with a reason and re-check date in `.cargo/audit.toml`.
-- `.github/workflows/release.yml` runs on a `v*` tag. It builds `xdevs` and `xdevs-cli` for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, writes SHA-256 checksums and publishes a GitHub Release.
+- `.github/workflows/ci.yml` checks the Rust workspace (fmt, clippy, tests; x86_64 on pull requests, x86_64 + ARM64 + Windows on `main`, with sccache), runs `cargo audit`, and tests the contracts, SDK, web apps, indexer, faucet and bundler. Jobs are skipped when a change doesn't touch their part of the repo; `localnet.yml` runs a 4-validator chaos test. Accepted audit advisories are documented with a reason and re-check date in `.cargo/audit.toml`.
+- `.github/workflows/release.yml` runs on a `v*` tag. It builds `xdevs`, `xdevs-cli` and `xdevs-loadgen` for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, writes SHA-256 checksums and publishes a GitHub Release (`-enclave.N` tags are full releases; `-devnet`/`-rc` tags are pre-releases).
+- `docs.yml` and `web-deploy.yml` deploy the website and the web apps to Cloudflare Pages; `genesis.yml` builds genesis files with the system predeploys.
 
 ## Roadmap
 
-The full design and phase plan is in [xDEVS_Chain_Implementation_Plan.md](xDEVS_Chain_Implementation_Plan.md).
+Phases 1–5 are built (Phase 5's encrypted mempool waits for a distributed key setup); Phase 6 (independent validators, long-lived testnet, bug bounty) and Phase 7 (audited bridges, mainnet preparation) are next. Live status: [xdevschain.tech/roadmap](https://xdevschain.tech/roadmap). The full design and phase plan is in [xDEVS_Chain_Implementation_Plan.md](xDEVS_Chain_Implementation_Plan.md).
 
 ## Security
 
