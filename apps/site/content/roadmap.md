@@ -43,7 +43,7 @@ The on-chain part is in the Enclave genesis: smart accounts with passkeys, socia
 - An alert bot for vault events (email / Telegram).
 - Exit criteria: a new user creates an account with only a passkey; the stolen-key demo works end to end in a wallet; simulation flags an unlimited approval in plain language.
 
-## Phase 5 — Performance and MEV protection <span class="status ok">Built</span> · parallel execution live on Enclave
+## Phase 5 — Performance and MEV protection <span class="status ok">Built</span> · parallel execution and local fee markets live on Enclave; encrypted mempool off
 
 Profiling and optimization, 1 s blocks if metrics allow, Block-STM parallel execution behind a flag, local fee markets, BLS aggregate signatures, and an **encrypted mempool** (research, prototype, then external review). Exit criteria include published benchmarks (throughput and finality latency) measured on reference hardware.
 
