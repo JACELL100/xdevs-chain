@@ -71,7 +71,7 @@ await addXdevsChainToWallet(wallet, xdevsEnclave) // sends wallet_addEthereumCha
 | `watchVaultEvents({ account, onEvent })` (WebSocket transport) | `eth_subscribe("vaultEvents")` | Live |
 | `resolveXnsName({ name })` | `xdevs_resolveName` | Live |
 | `reverseXnsName({ address })` | `xdevs_reverseName` | Live |
-| `getLocalFee({ contract })` | `xdevs_localFee` | Live on Enclave; reports a local fee once local fee markets activate at block 97,200 |
+| `getLocalFee({ contract })` | `xdevs_localFee` | Live on Enclave; reports a local fee now that local fee markets are active (since block 97,200) |
 
 Against a node that does not serve a method yet, the SDK throws `XdevsMethodNotAvailableError` (the node answers "method not found"):
 

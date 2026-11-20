@@ -6,7 +6,7 @@ type Status = 'built' | 'next' | 'planned'
 const PHASES: { n: string; h: string; p: string; s: Status }[] = [
   { n: 'P1', h: 'Single-node chain', p: 'EVM execution, JSON-RPC, MetaMask and Foundry.', s: 'built' },
   { n: 'P2', h: 'BFT network', p: 'Malachite consensus, block sync, gossip, WebSockets.', s: 'built' },
-  { n: 'P3', h: 'Proof of Stake testnet', p: 'Enclave live: explorer, wallet, faucet, bundler, status. Staking-driven validators activate at block 97,200.', s: 'built' },
+  { n: 'P3', h: 'Proof of Stake testnet', p: 'Enclave live: explorer, wallet, faucet, bundler, status. Staking-driven validators live since block 97,200.', s: 'built' },
   { n: 'P4', h: 'Safety layer RPCs', p: 'Live on Enclave: transaction simulation, recipient checks, approvals and vault RPCs, passkey wallet.', s: 'built' },
   { n: 'P5', h: 'Performance & MEV', p: 'Block-STM parallel execution (about 2x) live; local fee markets at block 97,200; encrypted mempool built, off.', s: 'built' },
   { n: 'P6', h: 'Public testnet', p: 'Long-lived testnet, independent validators, bug bounty.', s: 'next' },

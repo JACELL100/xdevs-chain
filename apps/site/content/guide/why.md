@@ -21,7 +21,7 @@ xDEVS Chain makes **user protection part of the chain itself**, while staying fu
 | **Blind signing of unreadable transactions** | Third-party simulation services | Third-party simulation services | Built-in `xdevs_simulateTransaction` RPC that shows asset changes and plain-language warnings before you sign (live on Enclave; the [wallet](https://wallet.xdevschain.tech) previews every send with it) |
 | **Front-running / sandwich bots (MEV)** | Private relays and builder markets, which centralise | Validator-level, widely exploited | **Encrypted mempool**: transactions stay hidden until their order is final (built as a prototype; off on Enclave until it has a distributed key setup) |
 | **Time until a payment is final** | About 13 minutes (2 epochs) | Seconds, with past full-network outages | **BFT finality**: a block is final when committed, no reorgs (live on Enclave with 2 s blocks; 1 s targeted later) |
-| **One hot app makes everyone pay more** | Single global fee market | Local fee markets | **Local fee markets**: a congested contract gets its own fee; everyone else keeps paying the normal fee (activates at block 97,200 on Enclave) |
+| **One hot app makes everyone pay more** | Single global fee market | Local fee markets | **Local fee markets**: a congested contract gets its own fee; everyone else keeps paying the normal fee (live on Enclave since block 97,200) |
 | **Bridge hacks** | Many bridges secured by small multisigs | Same | Policy: **light-client bridges only**, no multisig bridges (Sepolia prototype built, not deployed) |
 | **Developer compatibility** | The standard | Different VM and languages | **EVM-equivalent** (revm, Osaka rules): Solidity, MetaMask, Foundry, Hardhat and viem work unchanged |
 

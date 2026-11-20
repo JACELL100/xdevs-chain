@@ -51,10 +51,10 @@ The [SDK](/developers/sdk) can add the network with `addXdevsChainToWallet(walle
 | XIP-0001 (EOA lock) | Active from genesis | Active from genesis |
 | Epoch length | n/a (static validator set) | 3,600 blocks (staking set from block 97,200) |
 | Block reward | none | 1 tXDS per block from block 97,200 |
-| Local fee markets | off | Activate at block 97,200 |
-| `ED25519VERIFY` precompile (`0x0A00…0001`) | off | Activates at block 97,200 |
+| Local fee markets | off | Active since block 97,200 |
+| `ED25519VERIFY` precompile (`0x0A00…0001`) | off | Active since block 97,200 |
 | Encrypted mempool | off | Off (needs a distributed key setup first) |
-| Max validators | Set in genesis | 4 in genesis today; up to 100 once the staking set activates at block 97,200 |
+| Max validators | Set in genesis | 4 in genesis today; up to 100 with the staking set active since block 97,200 |
 | Guardian Vault default delay | 24 h (1 h–7 d, per account) | Same |
 | Social recovery delay | 48 h (1 h–30 d, per account) | Same |
 

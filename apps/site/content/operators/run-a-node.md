@@ -115,4 +115,4 @@ Use `--rpc` with several comma-separated URLs to spread sends across nodes, `--f
 
 ## Validators on Enclave
 
-Enclave has a static set of four validators until the staking-driven set activates at block 97,200; becoming a validator is not open to the public yet. See [Validators](/operators/validators).
+Enclave's validator set comes from the Staking contract since block 97,200 (still the same four validators); becoming a validator is not open to the public yet. See [Validators](/operators/validators).

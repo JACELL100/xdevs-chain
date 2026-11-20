@@ -24,7 +24,7 @@ Repository, Apache-2.0 license, contribution and security policies, and the arch
 - `xdevs-cli testnet init`, `xdevs-loadgen`, an in-process multi-node test harness, and a Docker localnet with chaos scripts run in CI.
 - Exit criteria: 4 nodes produce blocks; killing one keeps the chain going, killing two halts it and restarting resumes it, with no forks; a new node syncs from genesis. A 24-hour soak under load is part of the exit and runs on dedicated VMs.
 
-## Phase 3 — Proof of Stake and public devnet <span class="status ok">Live on Enclave</span> · staking set activates at block 97,200
+## Phase 3 — Proof of Stake and public devnet <span class="status ok">Live on Enclave</span> · staking set live since block 97,200
 
 - **Enclave testnet live** (17 Nov 2026): chain id 717171, 4 validators (Oracle Cloud, Hyderabad + Mumbai), public RPC/WebSocket through a Cloudflare Tunnel, explorer and explorer API, wallet with passkey accounts, faucet, ERC-4337 bundler, network status page. <span class="status ok">Live</span>
 

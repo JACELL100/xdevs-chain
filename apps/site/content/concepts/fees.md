@@ -51,7 +51,7 @@ On the dev node, the default `--fee-recipient` is the zero address, so tips go t
 
 On the public networks, the `FeeConfig` contract (`0x…1003`) holds parameters such as the gas limit, minimum base fee and burn share, and only Governance (a stake-weighted vote plus a timelock) can change them. FeeConfig is in the Enclave genesis; the built-in dev genesis doesn't contain it.
 
-## Local fee markets (activate at block 97,200 on Enclave)
+## Local fee markets (live on Enclave since block 97,200)
 
 On Ethereum, one popular mint makes everyone pay more. xDEVS Chain has **local fee markets**: if a single contract uses more than 25% of block gas, transactions to it pay an extra local base fee that rises and decays like EIP-1559, while everyone else keeps paying the normal fee. The price is exposed through `xdevs_localFee(address)`, already served by the public RPC (`active: false` until the activation). The first version is keyed by the top-level `to` address only. Details: [JSON-RPC reference](/developers/json-rpc#local-fee-markets-phase-5).
 

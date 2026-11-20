@@ -43,7 +43,7 @@ The Ethereum sync committee rotates every 8,192 slots (about 27 hours). The new 
 | Store a header (either side) | ~180k (cold) |
 | Mint / release with a receipt proof | ~150k–230k |
 
-Ethereum has no Ed25519 precompile, so certificate checks on Sepolia are the expensive part. A BLS-aggregated or zero-knowledge certificate would make them constant-cost. On xDEVS Chain, the `ED25519VERIFY` precompile (`0x0A00…0001`, about 3,000 gas) exists for contracts that verify Ed25519, behind a genesis activation block (`ed25519VerifyBlock`). It activates at block 97,200 on Enclave and is off by default elsewhere.
+Ethereum has no Ed25519 precompile, so certificate checks on Sepolia are the expensive part. A BLS-aggregated or zero-knowledge certificate would make them constant-cost. On xDEVS Chain, the `ED25519VERIFY` precompile (`0x0A00…0001`, about 3,000 gas) exists for contracts that verify Ed25519, behind a genesis activation block (`ed25519VerifyBlock`). It live on Enclave since block 97,200 and is off by default elsewhere.
 
 ## Safety switches
 

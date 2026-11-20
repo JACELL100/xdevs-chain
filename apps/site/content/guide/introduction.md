@@ -40,8 +40,8 @@ The validators run node release [`v0.3.0-enclave.1`](https://github.com/JACELL10
 - **Block-STM parallel execution** on all validators.
 :::
 
-:::info[Activates at block 97,200 on Enclave]
-At block **97,200** (about 19 November 2026, 21:37 UTC) the **staking-driven validator set** (epochs of 3,600 blocks, a 1 tXDS block reward, downtime and double-sign slashing), **local fee markets** and the **`ED25519VERIFY` precompile** switch on.
+:::info[Live since block 97,200]
+Since block **97,200** (19 November 2026, about 21:45 UTC) the **staking-driven validator set** (epochs of 3,600 blocks, a 1 tXDS block reward, downtime and double-sign slashing), **local fee markets** and the **`ED25519VERIFY` precompile** are active on Enclave.
 :::
 
 :::warning[Not yet]

@@ -32,7 +32,7 @@ The **built-in dev genesis** (`xdevs run --dev`, chain id 7117) does not contain
 | Address | What | Status |
 |---|---|---|
 | `0x0000000000000000000000000000000000000100` | `P256VERIFY` precompile (secp256r1 / passkeys, EIP-7951) | <span class="status ok">Live</span> (native in the node, revm Osaka) |
-| `0x0A00000000000000000000000000000000000001` | `ED25519VERIFY` precompile (about 3,000 gas), used by the [bridge](/concepts/bridges) light clients | Activates at block 97,200 on Enclave (`ed25519VerifyBlock`); off elsewhere by default |
+| `0x0A00000000000000000000000000000000000001` | `ED25519VERIFY` precompile (about 3,000 gas), used by the [bridge](/concepts/bridges) light clients | Live on Enclave since block 97,200 (`ed25519VerifyBlock`); off elsewhere by default |
 | `0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE` | `SYSTEM_ADDRESS`: caller of protocol system calls (no signature, no gas charge) | Used by the node |
 
 ## Genesis extras
