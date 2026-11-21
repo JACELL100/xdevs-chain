@@ -150,12 +150,18 @@ pub enum ValidatorSetError {
     PowerOverflow,
 }
 
-/// A validator set, sorted by address, with its total voting power (§6.4).
+/// A validator set, sorted by address, with its total voting power (§6.4) and the
+/// proposer rule of the height it is used at ([`ValidatorSet::with_proposer_rotation`]).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ValidatorSet {
     validators: Vec<Validator>,
     total_voting_power: u64,
+    proposer_rotation: bool,
 }
+
+/// `2^64 / φ` (golden ratio), odd: `s · GOLDEN_GAMMA mod 2^64` is a low-discrepancy
+/// sequence of 64-bit fractions (consecutive slots land about 0.618 apart).
+const GOLDEN_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
 
 impl ValidatorSet {
     /// Build a set: sorts by address and rejects empty sets, zero power, duplicates,
@@ -184,7 +190,21 @@ impl ValidatorSet {
         Ok(Self {
             validators,
             total_voting_power: total,
+            proposer_rotation: false,
         })
+    }
+
+    /// The same set with the proposer rule of a height at or after
+    /// `proposerRotationBlock` (`on = true`) or before it (`on = false`, the default).
+    #[must_use]
+    pub fn with_proposer_rotation(mut self, on: bool) -> Self {
+        self.proposer_rotation = on;
+        self
+    }
+
+    /// `true` if [`ValidatorSet::select_proposer`] uses the rotating rule.
+    pub const fn proposer_rotation(&self) -> bool {
+        self.proposer_rotation
     }
 
     /// Validators in address order.
@@ -231,12 +251,38 @@ impl ValidatorSet {
         (u128::from(self.total_voting_power) * 2 / 3 + 1) as u64
     }
 
-    /// Phase-2 proposer (§6.6): `k = (height + round) mod total_power`, then walk the
-    /// validators in address order accumulating power until the running sum exceeds `k`.
-    /// A pure function; equal powers give plain round-robin.
+    /// Proposer of `(height, round)` (§6.6), a pure function of the set, the height and
+    /// the round.
+    ///
+    /// * Rotating rule (from `proposerRotationBlock`, [`Self::with_proposer_rotation`]):
+    ///   slot `s = height + round`. Equal powers: `validators[s mod n]` in address order
+    ///   (round-robin; each new round moves to the next validator). Unequal powers:
+    ///   `k = floor(frac(s / φ) · total_power)` in 64-bit fixed point, then the walk
+    ///   below; each validator proposes its power share of the slots, interleaved.
+    /// * Original rule (before it): `k = (height + round) mod total_power`, then walk the
+    ///   validators in address order accumulating power until the running sum exceeds
+    ///   `k`. This is round-robin only for power 1 each: with power `p` each, a validator
+    ///   keeps the slot for `p` consecutive heights (12,500,000 on Enclave, so the
+    ///   lowest address proposed every block).
     pub fn select_proposer(&self, height: u64, round: u32) -> &Validator {
         let total = u128::from(self.total_voting_power);
-        let k = (u128::from(height) + u128::from(round)) % total;
+        if self.proposer_rotation {
+            let slot = height.wrapping_add(u64::from(round));
+            let first = self.validators[0].voting_power;
+            if self.validators.iter().all(|v| v.voting_power == first) {
+                // Fits: the index is < len.
+                let i = u128::from(slot) % self.validators.len() as u128;
+                return &self.validators[i as usize];
+            }
+            let frac = slot.wrapping_mul(GOLDEN_GAMMA);
+            return self.walk((u128::from(frac) * total) >> 64);
+        }
+        self.walk((u128::from(height) + u128::from(round)) % total)
+    }
+
+    /// The validator whose cumulative-power interval (address order) holds `k <
+    /// total_power`.
+    fn walk(&self, k: u128) -> &Validator {
         let mut sum: u128 = 0;
         for v in &self.validators {
             sum += u128::from(v.voting_power);
@@ -844,6 +890,76 @@ mod tests {
         }
         // No overflow at the extremes.
         let _ = s.select_proposer(u64::MAX, u32::MAX);
+    }
+
+    /// The original rule with Enclave's powers (12,500,000 each): one validator for the
+    /// first 12.5M heights, whatever the round offset. The rotating rule fixes it.
+    #[test]
+    fn original_rule_sticks_with_large_equal_powers() {
+        let (_, s) = set(&[12_500_000; 4]);
+        let first = s.validators()[0].address;
+        for h in [1u64, 2, 3, 1000, 97_200, 178_377, 12_499_999] {
+            assert_eq!(s.select_proposer(h, 0).address, first);
+        }
+        assert!(!s.proposer_rotation());
+        assert_eq!(s.select_proposer(12_500_000, 0).address, s.validators()[1].address);
+    }
+
+    #[test]
+    fn rotating_rule_equal_powers_is_round_robin() {
+        for power in [1u64, 12_500_000, u64::MAX / 4] {
+            let (_, s) = set(&[power; 4]);
+            let s = s.with_proposer_rotation(true);
+            let vs = s.validators();
+            for h in 178_000..178_016u64 {
+                for r in 0..6u32 {
+                    let want = &vs[((h + u64::from(r)) % 4) as usize];
+                    assert_eq!(s.select_proposer(h, r), want);
+                }
+                // Consecutive heights and consecutive rounds change proposer.
+                assert_ne!(s.select_proposer(h, 0), s.select_proposer(h + 1, 0));
+                assert_ne!(s.select_proposer(h, 0), s.select_proposer(h, 1));
+            }
+        }
+        // Deterministic and overflow-free at the extremes.
+        let (_, s) = set(&[7; 3]);
+        let s = s.with_proposer_rotation(true);
+        assert_eq!(
+            s.select_proposer(u64::MAX, u32::MAX),
+            s.select_proposer(u64::MAX, u32::MAX)
+        );
+    }
+
+    #[test]
+    fn rotating_rule_weighted_shares_and_interleaving() {
+        // Powers 1:2:3:4 scaled by a large factor (as Staking powers are).
+        let f = 1_000_003u64;
+        let (_, s) = set(&[f, 2 * f, 3 * f, 4 * f]);
+        let s = s.with_proposer_rotation(true);
+        let n = 100_000u64;
+        let mut counts = std::collections::BTreeMap::new();
+        let mut longest_run = 0;
+        let mut run = 0;
+        let mut prev = None;
+        for h in 0..n {
+            let p = s.select_proposer(h, 0).address;
+            *counts.entry(p).or_insert(0u64) += 1;
+            run = if prev == Some(p) { run + 1 } else { 1 };
+            longest_run = longest_run.max(run);
+            prev = Some(p);
+        }
+        for v in s.validators() {
+            // Share within 0.5 % of power / total.
+            let want = n * (v.voting_power / f) / 10;
+            let got = counts[&v.address];
+            assert!(got.abs_diff(want) <= n / 200, "{got} vs {want}");
+        }
+        // Interleaved: a 40 % validator never holds more than two slots in a row.
+        assert!(longest_run <= 2, "longest run {longest_run}");
+        // The original rule with the same set: one validator for the first f heights.
+        let old = s.clone().with_proposer_rotation(false);
+        let first = old.validators()[0].address;
+        assert!((0..1000).all(|h| old.select_proposer(h, 0).address == first));
     }
 
     #[test]

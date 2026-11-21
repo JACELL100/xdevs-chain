@@ -82,6 +82,10 @@ pub struct LocalNetOptions {
     pub parallel_validators: usize,
     /// Phase 5: `localFeeMarketsBlock` of the genesis (`None` = never).
     pub local_fee_markets_block: Option<u64>,
+    /// Voting power of each genesis validator of a static net (`None` = 1).
+    pub validator_power: Option<u64>,
+    /// `proposerRotationBlock` of the genesis (`None` = never).
+    pub proposer_rotation_block: Option<u64>,
 }
 
 /// Phase 5 options of a [`LocalNet`]: a fresh committee key (trusted dealer) whose share
@@ -113,6 +117,8 @@ impl Default for LocalNetOptions {
             encrypted_mempool: None,
             parallel_validators: 0,
             local_fee_markets_block: None,
+            validator_power: None,
+            proposer_rotation_block: None,
         }
     }
 }
@@ -382,7 +388,7 @@ impl LocalNet {
         let power = match &opts.staking {
             Some(st) => u64::try_from(st.stake / U256::from(10u64).pow(U256::from(18u64)))
                 .map_err(|_| anyhow!("stake too large"))?,
-            None => 1,
+            None => opts.validator_power.unwrap_or(1),
         };
         let mut genesis = Genesis::dev(DEV_CHAIN_ID);
         genesis.validators = seeds[..opts.validators]
@@ -400,6 +406,7 @@ impl LocalNet {
             add_staking(&mut genesis, st)?;
         }
         genesis.config.local_fee_markets_block = opts.local_fee_markets_block;
+        genesis.config.proposer_rotation_block = opts.proposer_rotation_block;
         let mut mempool_shares = Vec::new();
         if let Some(em) = &opts.encrypted_mempool {
             let n = u32::try_from(opts.validators).context("validator count")?;

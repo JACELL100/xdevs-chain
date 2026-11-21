@@ -315,6 +315,17 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
                         configured.ed25519_verify_block
                     );
                 }
+                let rotation_started =
+                    |c: &ChainConfig| c.proposer_rotation_active(head);
+                if stored.proposer_rotation_block != configured.proposer_rotation_block
+                    && (rotation_started(&stored) || rotation_started(&configured))
+                {
+                    bail!(
+                        "the proposer rotation activation (proposerRotationBlock) cannot change once it is active: head {head}, stored {:?}, configured {:?}",
+                        stored.proposer_rotation_block,
+                        configured.proposer_rotation_block
+                    );
+                }
                 if encrypted_changed && (started(&stored) || started(&configured)) {
                     bail!(
                         "the encrypted mempool schedule (encryptedMempoolBlock, \
@@ -350,6 +361,7 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
                     epoch_length = configured.epoch_length,
                     block_reward = %configured.block_reward,
                     encrypted_mempool = ?configured.encrypted_mempool_block,
+                    proposer_rotation = ?configured.proposer_rotation_block,
                     "fork schedule updated from the genesis config"
                 );
                 return Ok(hash);
@@ -386,6 +398,7 @@ fn same_but_fork_schedule(a: &ChainConfig, b: &ChainConfig) -> bool {
         encrypted_mempool: None,
         ed25519_verify_block: None,
         local_fee_markets_block: None,
+        proposer_rotation_block: None,
         ..c.clone()
     };
     same_but_staking_schedule(&strip(a), &strip(b))
@@ -486,6 +499,57 @@ mod tests {
         moved.config.staking_validators_block = Some(50);
         let err = init_genesis(&db, &moved).unwrap_err().to_string();
         assert!(err.contains("cannot change once it is active"), "{err}");
+    }
+
+    #[test]
+    fn proposer_rotation_can_be_added_before_activation_only() {
+        let db = MemDb::new();
+        let g = Genesis::dev(DEV_CHAIN_ID);
+        init_genesis(&db, &g).unwrap();
+        // Scheduled at 10 on a chain at height 0: accepted, stored, rescheduling too.
+        let mut scheduled = g.clone();
+        scheduled.config.proposer_rotation_block = Some(10);
+        init_genesis(&db, &scheduled).unwrap();
+        let stored = || -> ChainConfig {
+            serde_json::from_slice(
+                &db.get::<tables::Meta>(&meta_key(meta_keys::CHAIN_CONFIG))
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        assert_eq!(stored().proposer_rotation_block, Some(10));
+        let mut moved = scheduled.clone();
+        moved.config.proposer_rotation_block = Some(12);
+        init_genesis(&db, &moved).unwrap();
+        assert_eq!(stored().proposer_rotation_block, Some(12));
+
+        // Head at the activation: frozen (moving or removing it is refused).
+        let mut batch = WriteBatch::new();
+        batch.put::<tables::Meta>(
+            &meta_key(meta_keys::LATEST_BLOCK),
+            &12u64.to_be_bytes().to_vec(),
+        );
+        db.write(batch).unwrap();
+        for other in [Some(50), None] {
+            let mut changed = moved.clone();
+            changed.config.proposer_rotation_block = other;
+            let err = init_genesis(&db, &changed).unwrap_err().to_string();
+            assert!(err.contains("cannot change once it is active"), "{err}");
+        }
+        // Scheduling it at or below the head of a running chain is refused too.
+        let fresh_db = MemDb::new();
+        init_genesis(&fresh_db, &g).unwrap();
+        let mut batch = WriteBatch::new();
+        batch.put::<tables::Meta>(
+            &meta_key(meta_keys::LATEST_BLOCK),
+            &20u64.to_be_bytes().to_vec(),
+        );
+        fresh_db.write(batch).unwrap();
+        let mut late = g.clone();
+        late.config.proposer_rotation_block = Some(20);
+        assert!(init_genesis(&fresh_db, &late).is_err());
+        init_genesis(&db, &moved).unwrap();
     }
 
     #[test]

@@ -14,6 +14,7 @@ Operational runbooks (plan §33.8). The testnet's infrastructure as code is in
 8. Emergency coordinated restart from a known-good height: [emergency-restart.md](emergency-restart.md)
 9. Activating the staking-driven validator set (Phase 3 fork-height upgrade): [activate-staking-validators.md](activate-staking-validators.md)
 10. ERC-4337 bundler (bundler.xdevschain.tech): install, operator key, funding the operator and the paymaster, tunnel, monitoring: [bundler.md](bundler.md)
+11. Activating proposer rotation (`proposerRotationBlock`, fork-height upgrade): [activate-proposer-rotation.md](activate-proposer-rotation.md)
 
 ## Infrastructure
 

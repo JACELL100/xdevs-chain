@@ -7633,7 +7633,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -7649,7 +7649,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-cli"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloy-consensus",
  "alloy-rpc-types-eth",
@@ -7672,7 +7672,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-consensus"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloy-rlp",
  "anyhow",
@@ -7698,7 +7698,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-crypto"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "aes",
  "alloy-consensus",
@@ -7730,7 +7730,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-e2e"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloy-rpc-types-eth",
  "anyhow",
@@ -7748,7 +7748,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-execution"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7766,7 +7766,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-genesis"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloy-serde",
  "alloy-signer-local",
@@ -7779,7 +7779,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-loadgen"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -7796,7 +7796,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-mempool"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "parking_lot 0.13.0",
  "proptest",
@@ -7809,7 +7809,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-metrics"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "prometheus-client",
  "serde",
@@ -7820,7 +7820,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-network"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "libp2p",
@@ -7835,7 +7835,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-node"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-eth",
@@ -7869,7 +7869,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-primitives"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7884,7 +7884,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-rpc"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
@@ -7903,7 +7903,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-simulator"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloy-rpc-types-eth",
  "revm",
@@ -7915,7 +7915,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-state"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloy-rlp",
  "alloy-trie",
@@ -7928,7 +7928,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-storage"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloy-rlp",
  "parking_lot 0.13.0",
@@ -7940,7 +7940,7 @@ dependencies = [
 
 [[package]]
 name = "xdevs-testutils"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "ed25519-consensus",

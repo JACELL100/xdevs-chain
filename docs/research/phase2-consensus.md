@@ -466,9 +466,14 @@ CommitCertificate {            // RLP, stored in storage table CommitCertificate
 ### 6.6 Proposer selection (Phase 2)
 
 `select_proposer(set, h, r)` takes `k = (h + r) mod total_power` and walks the validators in
-address order, accumulating power, until the running sum exceeds `k`. With equal powers this is
-plain round-robin. It is a pure function, which is what `Context::select_proposer` needs, and it
-is deterministic.
+address order, accumulating power, until the running sum exceeds `k`. It is a pure function, which
+is what `Context::select_proposer` needs, and it is deterministic. **Erratum:** this is round-robin
+only with power 1 each. With equal power `p` a validator keeps the slot for `p` consecutive heights.
+On Enclave `p` is 12,500,000, so one validator proposed every block. From the genesis activation
+`proposerRotationBlock` on, the rule is slot `s = h + r`: with equal powers `validators[s mod n]`,
+otherwise `k = floor(frac(s / φ) · total_power)` (64-bit fixed point), then the same walk. That
+gives a weighted share with interleaving. See
+[activate-proposer-rotation.md](../runbooks/activate-proposer-rotation.md).
 
 In Phase 3, the app computes CometBFT proposer priorities at each commit and puts the
 priority-ordered queue into the `ValidatorSet` for the next height. `select_proposer` then

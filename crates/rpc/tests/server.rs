@@ -410,7 +410,7 @@ async fn simple_methods_use_hex_quantities() {
     assert_eq!(s.ok("net_listening", vec![]).await, json!(true));
     assert_eq!(
         s.ok("web3_clientVersion", vec![]).await,
-        json!("xdevs/v0.1.0")
+        json!(xdevs_primitives::constants::client_version())
     );
     assert_eq!(s.ok("eth_accounts", vec![]).await, json!([]));
     assert_eq!(s.ok("eth_syncing", vec![]).await, json!(false));

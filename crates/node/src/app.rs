@@ -1006,10 +1006,13 @@ impl ConsensusApp for ChainApp {
     }
 
     async fn validator_set(&self, height: u64) -> anyhow::Result<ValidatorSet> {
-        if self.inner.cfg.staking_validators_block.is_none() {
-            return Ok(self.inner.set.clone());
-        }
-        self.validator_set_at(height).await
+        let set = if self.inner.cfg.staking_validators_block.is_none() {
+            self.inner.set.clone()
+        } else {
+            self.validator_set_at(height).await?
+        };
+        // The proposer rule of `height` (`proposerRotationBlock`) travels with its set.
+        Ok(set.with_proposer_rotation(self.inner.cfg.proposer_rotation_active(height)))
     }
 
     async fn propose(&self, height: u64, round: u32, deadline: Instant) -> anyhow::Result<Block> {

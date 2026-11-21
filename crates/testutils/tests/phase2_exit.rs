@@ -35,6 +35,8 @@ fn opts(validators: usize, full_nodes: usize) -> LocalNetOptions {
         staking: None,
         parallel_validators: 0,
         local_fee_markets_block: None,
+        validator_power: None,
+        proposer_rotation_block: None,
     }
 }
 
