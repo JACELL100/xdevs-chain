@@ -141,7 +141,7 @@ export default function Dashboard() {
             </Card>
             <Card title="Finality" actions={latestCert ? <span className="st-card-meta">block #{latestCert.height.toLocaleString('en-US')}</span> : null}>
               {fin && latestCert ? (
-                <FinalityMeter signed={fin.signed} total={fin.total} quorum={fin.quorum} round={latestCert.round} source={net.validatorSource} />
+                <FinalityMeter signed={fin.signed} total={fin.total} quorum={fin.quorum} round={latestCert.round} source={net.validatorSource} height={latestCert.height} />
               ) : (
                 <p className="st-muted">
                   {net.certSupport === 'no'
@@ -200,7 +200,7 @@ function Kpi({ label, value, hint }: { label: string; value: React.ReactNode; hi
   )
 }
 
-function FinalityMeter({ signed, total, quorum, round, source }: { signed: number; total: number; quorum: boolean; round: number; source: 'rpc' | 'config' }) {
+function FinalityMeter({ signed, total, quorum, round, source, height }: { signed: number; total: number; quorum: boolean; round: number; source: 'rpc' | 'config'; height: number }) {
   const threshold = (2 / 3) * 100
   return (
     <div className="st-fin">
@@ -225,10 +225,18 @@ function FinalityMeter({ signed, total, quorum, round, source }: { signed: numbe
       </div>
       <p className="st-fin-note">
         Committed in round {round}. Every block is final the moment it is committed: no confirmations to wait for.
-        {source === 'config' ? ' Validator set size from the genesis config until xdevs_validators ships.' : ''}
+        {source === 'config' ? ` ${validatorSetNote(height)}` : ''}
       </p>
     </div>
   )
+}
+
+/** Where the validator set of `height` comes from, when the RPC does not serve it. */
+function validatorSetNote(height: number): string {
+  const from = config.stakingValidatorsBlock
+  return Number.isFinite(from) && from > 0 && height >= from
+    ? `Since block ${from.toLocaleString('en-US')} the validator set is chosen by the Staking contract; its size is the configured ${config.validatorCount} until the RPC serves the set.`
+    : 'Validator set size from the genesis config until the RPC serves the set.'
 }
 
 function ValidatorTable({ vals, head }: { vals: ReturnType<typeof validatorStats>; head: number | null }) {

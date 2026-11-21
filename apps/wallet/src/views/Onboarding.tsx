@@ -1,7 +1,6 @@
 'use client'
 // Create a wallet with a passkey (no seed phrase), or sign in with an existing passkey.
 import { AddressChip, Button } from '@xdevs/ui'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { type Address, getAddress, isAddress, toHex } from 'viem'
@@ -30,9 +29,18 @@ function passkeyEnvironmentProblem(): string | null {
   return null
 }
 
-export function Onboarding() {
+/**
+ * `hold(true)` is called just before a new account is saved (and selected), `hold(false)`
+ * when the user leaves onboarding. On "/" Home keeps this view while held, so the "Your
+ * wallet is ready" step is shown instead of an immediate swap to the dashboard.
+ */
+export function Onboarding({ hold }: { hold?: (on: boolean) => void } = {}) {
   const w = useWallet()
   const router = useRouter()
+  function finish() {
+    hold?.(false)
+    router.push('/')
+  }
   const [step, setStep] = useState<Step>('intro')
   const [label, setLabel] = useState('')
   const [vault, setVault] = useState<VaultForm>({ enabled: true, threshold: '10', daily: '50', delayHours: '24', blockUnlimited: true })
@@ -112,6 +120,7 @@ export function Onboarding() {
       const salt = saltFrom(BigInt(toHex(crypto.getRandomValues(new Uint8Array(8)))))
       const address = await w.backend.counterfactualAddress(params, salt)
       const rec: AccountRecord = { ...base, address, params, salt }
+      hold?.(true)
       w.addAndSelect(rec)
       setCreated(rec)
       setPk('done')
@@ -133,7 +142,7 @@ export function Onboarding() {
       if (w.demo) {
         await sleep(1_200)
         setPk('done')
-        router.push('/')
+        finish()
         return
       }
       const problem = passkeyEnvironmentProblem()
@@ -143,7 +152,7 @@ export function Onboarding() {
       if (i >= 0) {
         w.selectAccount(i)
         setPk('done')
-        router.push('/')
+        finish()
         return
       }
       setSigninKey(a)
@@ -175,7 +184,7 @@ export function Onboarding() {
         passkey: { credentialId: signinKey.credentialId, publicKey: key, rpId: signinKey.rpId, createdAt: Date.now() },
         createdAt: Date.now(),
       })
-      router.push('/')
+      finish()
     } catch (e) {
       setError(humanError(e))
     } finally {
@@ -187,7 +196,7 @@ export function Onboarding() {
     try {
       if (!isAddress(who.trim(), { strict: false })) throw new Error('Enter a 0x address to watch.')
       w.addAndSelect({ address: getAddress(who.trim()), label: 'Watch-only', kind: 'watch', createdAt: Date.now() })
-      router.push('/')
+      finish()
     } catch (e) {
       setError(humanError(e))
     }
@@ -317,7 +326,7 @@ export function Onboarding() {
             </li>
           </ul>
           <div className="w-flow-actions">
-            <Button size="lg" href="/" linkComponent={Link}>
+            <Button size="lg" onClick={finish}>
               Open my wallet
             </Button>
             <Button size="lg" variant="ghost" href={faucetLink(created.address)} external>

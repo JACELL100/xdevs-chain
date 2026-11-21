@@ -178,6 +178,18 @@ pub struct ChainConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub ed25519_verify_block: Option<u64>,
+    /// First height whose proposer is chosen by the rotating rule (`docs/research/
+    /// phase2-consensus.md` §6.6): with equal powers `(height + round) mod n` over the
+    /// validators in address order, otherwise a weighted interleaving. Before it, the
+    /// original walk of `(height + round) mod total_power` applies, which keeps one
+    /// proposer for `power` consecutive heights. JSON `proposerRotationBlock`; absent =
+    /// never (a fork parameter).
+    #[serde(
+        default,
+        with = "opt_u64_flex",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub proposer_rotation_block: Option<u64>,
 }
 
 /// Committee key of the encrypted mempool prototype (genesis `config.encryptedMempool`):
@@ -213,6 +225,7 @@ impl ChainConfig {
             local_fee_markets_block: None,
             encrypted_mempool: None,
             ed25519_verify_block: None,
+            proposer_rotation_block: None,
         }
     }
 
@@ -288,6 +301,13 @@ impl ChainConfig {
                 .is_some_and(|start| number >= start)
     }
 
+    /// `true` if the proposer of height `number` is chosen by the rotating rule
+    /// (`number >= proposerRotationBlock`).
+    pub fn proposer_rotation_active(&self, number: u64) -> bool {
+        self.proposer_rotation_block
+            .is_some_and(|start| number >= start)
+    }
+
     /// `true` if block `number` applies local fee markets (`number >=
     /// localFeeMarketsBlock`).
     pub fn local_fee_markets_active(&self, number: u64) -> bool {
@@ -351,6 +371,19 @@ mod tests {
         let none = ChainConfig::new(1);
         assert!(!none.ed25519_verify_active(u64::MAX));
         assert!(!serde_json::to_string(&none).unwrap().contains("ed25519"));
+    }
+
+    #[test]
+    fn proposer_rotation_activation() {
+        let cfg: ChainConfig =
+            serde_json::from_str(r#"{"chainId": 1, "proposerRotationBlock": 200000}"#).unwrap();
+        assert_eq!(cfg.proposer_rotation_block, Some(200_000));
+        assert!(!cfg.proposer_rotation_active(199_999));
+        assert!(cfg.proposer_rotation_active(200_000));
+        assert!(!ChainConfig::new(1).proposer_rotation_active(u64::MAX));
+        assert!(!serde_json::to_string(&ChainConfig::new(1))
+            .unwrap()
+            .contains("proposerRotation"));
     }
 
     #[test]

@@ -42,6 +42,8 @@ fn opts(validators: usize, staking: StakingNet) -> LocalNetOptions {
         staking: Some(staking),
         parallel_validators: 0,
         local_fee_markets_block: None,
+        validator_power: None,
+        proposer_rotation_block: None,
     }
 }
 

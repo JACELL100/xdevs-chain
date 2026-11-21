@@ -9,6 +9,7 @@ import { decodeCall, vaultActivity, type DecodedCall, type VaultActivity } from 
 import * as demo from './fixtures.ts'
 import { isUnreachable, setNet } from './net.ts'
 import * as rpc from './rpc.ts'
+import { knownValidatorName, UPTIME_WINDOW, uptimeFromCerts } from './validators.ts'
 import type { AddressSummary, Approval, BlockDetail, CommitDetail, NameInfo, Page, Source, TokenPage, TokenTransfer, TxDetail, TxSummary, ValidatorSet, VaultAction } from './types.ts'
 
 export class NotFoundError extends Error {
@@ -54,14 +55,31 @@ async function viaRpc<T>(fn: () => Promise<T>): Promise<T> {
 
 let validatorCache: { at: number; p: Promise<ValidatorSet> } | null = null
 
+/** Commit certificates of the last UPTIME_WINDOW blocks (null entries dropped). */
+async function recentCerts(): Promise<CommitDetail[]> {
+  const head = await rpc.rpcHead()
+  const from = Math.max(1, head - UPTIME_WINDOW + 1)
+  const certs = await Promise.all(Array.from({ length: head - from + 1 }, (_, i) => rpc.rpcCommit(from + i).catch(() => null)))
+  return certs.filter((c): c is CommitDetail => c !== null)
+}
+
 export function loadValidators(): Promise<ValidatorSet> {
   if (config.demo) return pause(DEMO_LATENCY).then(() => demo.demoValidatorSet())
   if (validatorCache && Date.now() - validatorCache.at < 60_000) return validatorCache.p
   const p = viaRpc(async () => {
     const set = await rpc.rpcValidators()
-    // Names via XNS reverse records (one batched round trip).
-    const names = await Promise.all(set.validators.map((v) => rpc.rpcPrimaryName(v.operator)))
-    set.validators.forEach((v, i) => (v.name = v.name ?? names[i] ?? null))
+    // Names via XNS reverse records, else the static names of the network's validators; uptime from the last
+    // UPTIME_WINDOW commit certificates when the node does not report it (batched round trips).
+    const needUptime = set.validators.some((v) => v.uptimeBps === null && v.inSigningSet)
+    const [names, certs] = await Promise.all([
+      Promise.all(set.validators.map((v) => rpc.rpcPrimaryName(v.operator).catch(() => null))),
+      needUptime ? recentCerts().catch(() => []) : Promise.resolve([]),
+    ])
+    const uptime = uptimeFromCerts(set.validators, certs)
+    set.validators.forEach((v, i) => {
+      v.name = v.name ?? names[i] ?? knownValidatorName(config.chainId, v.operator)
+      v.uptimeBps = v.uptimeBps ?? uptime[i] ?? null
+    })
     return set
   })
   validatorCache = { at: Date.now(), p }

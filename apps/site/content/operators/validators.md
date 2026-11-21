@@ -18,6 +18,15 @@ Becoming a validator on Enclave is **not open to the public yet**. The four vali
 - Eligible = registered, not jailed, not tombstoned, self-stake ≥ 10,000 tXDS.
 - Jailing, tombstoning or exiting during an epoch removes the validator from the contract's active set at once (it stops earning), and from consensus at the next boundary.
 
+## Proposer selection
+
+Each height has one proposer per round, a pure function of the height's validator set, the height and the round:
+
+- **Original rule** (in force on Enclave today): walk the validators in address order to `(height + round) mod total_power`. This rotates only when every validator has power 1. With Enclave's 12,500,000 each, the validator with the lowest consensus address (val-4) proposes every block, which is why every block's `miner` is val-4's fee recipient.
+- **Rotating rule**, from the genesis activation height `proposerRotationBlock` on: with equal powers, `validators[(height + round) mod n]` in address order (round-robin; a new round moves to the next validator). With unequal powers, each validator proposes its share of power, interleaved rather than in runs.
+
+The rotating rule is a fork. It is off until `proposerRotationBlock` is scheduled (not yet on Enclave), and every validator must upgrade before that height. See the [runbook](https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/activate-proposer-rotation.md).
+
 ## Join as a validator
 
 1. **Run a node that follows the chain**, with a consensus key (see [Run a node](/operators/run-a-node) and the [bootstrap runbook](https://github.com/JACELL100/xdevs-chain/blob/main/docs/runbooks/bootstrap-validator.md)):

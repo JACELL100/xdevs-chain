@@ -117,7 +117,7 @@ export function Names() {
         <ul className="w-name-rules">
           <li>3–63 characters: a–z, 0–9 and single hyphens.</li>
           <li>
-            Look-alikes are refused: while <code>paypal.xdevs</code> exists, <code>paypa1.xdevs</code> cannot be registered (0→o, 1→l, rn→m, vv→w, cl→d).
+            Look-alikes of registered names are refused (0→o, 1→l, rn→m, vv→w, cl→d): if <code>paypal.xdevs</code> is registered, <code>paypa1.xdevs</code> cannot be. A look-alike of a name nobody holds is still available.
           </li>
           <li>Names last a year and anyone can renew them. An expired name stops resolving immediately.</li>
         </ul>

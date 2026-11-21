@@ -30,6 +30,8 @@ export const config = {
   siteUrl: trim(process.env.NEXT_PUBLIC_SITE_URL || XDEVS_LINKS.site),
   /** Size of the genesis validator set, used until `xdevs_validators` (Phase 3) is served. */
   validatorCount: Number(process.env.NEXT_PUBLIC_VALIDATOR_COUNT || 4),
+  /** First block whose validator set comes from the Staking contract (`stakingValidatorsBlock`; 97,200 on Enclave). */
+  stakingValidatorsBlock: Number(process.env.NEXT_PUBLIC_STAKING_VALIDATORS_BLOCK || 97_200),
   /** Set to 1 once Enclave has launched: an unreachable RPC then reads as an outage, not "not launched yet". */
   launched: process.env.NEXT_PUBLIC_LAUNCHED === '1' || process.env.NEXT_PUBLIC_LAUNCHED === 'true',
   /** Labeled fixture data instead of live probes, for design review. */

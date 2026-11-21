@@ -173,7 +173,7 @@ pub trait RpcBackend: Send + Sync + 'static {
 
     /// `web3_clientVersion`.
     fn client_version(&self) -> String {
-        xdevs_primitives::constants::CLIENT_VERSION.to_string()
+        xdevs_primitives::constants::client_version()
     }
 
     /// `eth_blockNumber`: latest committed block.

@@ -64,8 +64,17 @@ pub const ENCRYPTED_INBOX_ADDRESS: Address = address!("0x00000000000000000000000
 /// Ethereum's system address: `msg.sender` of protocol-initiated calls (plan §18.2).
 pub const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
 
-/// Client version string reported by `web3_clientVersion` and put in dev-mode `extra_data`.
-pub const CLIENT_VERSION: &str = concat!("xdevs/v", env!("CARGO_PKG_VERSION"));
+/// Version of this build: `XDEVS_VERSION` at compile time (release builds set it from the
+/// git tag without its leading `v`, e.g. `0.3.0-enclave.1`), else the crate version.
+pub const VERSION: &str = match option_env!("XDEVS_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+/// Client version string reported by `web3_clientVersion`: `xdevs/v{VERSION}`.
+pub fn client_version() -> String {
+    format!("xdevs/v{VERSION}")
+}
 
 /// Domain byte of the consensus data commitment in `requests_hash`
 /// (see [`crate::consensus_data_hash`]).
