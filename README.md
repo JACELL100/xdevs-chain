@@ -6,7 +6,7 @@ xDEVS Chain is an EVM-equivalent, Proof-of-Stake Layer 1 written in Rust, built 
 
 The native coin is **XDS** (testnet: **tXDS**, 18 decimals; the smallest unit is the "dev"). Names end in `.xdevs` (XNS, the xDEVS Name Service).
 
-> **Status: the Enclave public testnet is live** (chain id 717171, since 17 Nov 2026), running release [`v0.3.0-enclave.1`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.3.0-enclave.1) on 4 validators with a public RPC, explorer and explorer API, passkey wallet, faucet, ERC-4337 bundler and status page.
+> **Status: the Enclave public testnet is live** (chain id 717171, since 17 Nov 2026), running release [`v0.3.1-enclave.2`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.3.1-enclave.2) on 4 validators with a public RPC, explorer and explorer API, passkey wallet, faucet, ERC-4337 bundler and status page.
 > Live on Enclave: BFT consensus with one-block finality, the staking-driven validator set with block rewards and slashing (since block 97,200), the safety RPCs (transaction simulation, recipient checks, approvals and vault queries), local fee markets, Block-STM parallel execution, and the user-safety contracts (passkey smart accounts, Guardian Vault, expiring approvals, `.xdevs` names).
 > Built but not switched on: the encrypted mempool (waits for a distributed key setup and an external review) and the light-client bridge to Ethereum Sepolia (prototype, not deployed).
 > Still ahead: independent community validators, external security audits and mainnet preparation. Testnet tokens (tXDS) have no value.

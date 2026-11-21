@@ -18,7 +18,8 @@
     "stakingValidatorsBlock": 97200,
     "blockReward": "1000000000000000000",
     "localFeeMarketsBlock": 97200,
-    "ed25519VerifyBlock": 97200
+    "ed25519VerifyBlock": 97200,
+    "proposerRotationBlock": 225000
   },
   "timestamp": "0x0",
   "gasLimit": "0x1c9c380",

@@ -1,5 +1,5 @@
 {
-  "_comment": "xDEVS Chain Enclave public testnet (enclave-1): 4 Oracle validators (Hyderabad val-1/val-2, Mumbai val-3/val-4); consensus keys generated on each VM. Allocations go to val-1's operator account, which funds the faucet hot wallet. tXDS has no value. Fork schedule added on 2026-11-19 with release v0.3.0-enclave.1 (genesis hash unchanged): staking-driven validators, local fee markets and ED25519VERIFY from block 97200. Encrypted mempool stays off (needs a distributed key setup first).",
+  "_comment": "xDEVS Chain Enclave public testnet (enclave-1): 4 Oracle validators (Hyderabad val-1/val-2, Mumbai val-3/val-4); consensus keys generated on each VM. Allocations go to val-1's operator account, which funds the faucet hot wallet. tXDS has no value. Fork schedule added on 2026-11-19 with release v0.3.0-enclave.1 (genesis hash unchanged): staking-driven validators, local fee markets and ED25519VERIFY from block 97200. Encrypted mempool stays off (needs a distributed key setup first). Proposer rotation scheduled at block 225000 with release v0.3.1-enclave.2 (before it, val-4 proposed every block because of the power-weighted rule with 12.5M powers).",
   "genesis": {
     "config": {
       "chainId": 717171,
@@ -20,7 +20,8 @@
       "stakingValidatorsBlock": 97200,
       "blockReward": "1000000000000000000",
       "localFeeMarketsBlock": 97200,
-      "ed25519VerifyBlock": 97200
+      "ed25519VerifyBlock": 97200,
+      "proposerRotationBlock": 225000
     },
     "timestamp": "0x0",
     "gasLimit": "0x1c9c380",
