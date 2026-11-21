@@ -18,7 +18,10 @@ describe('ENCLAVE constants', () => {
   it('builds the same EIP-3085 parameters as the SDK (plus an icon)', () => {
     const { iconUrls, ...rest } = enclaveAddChainParameters()
     assert.deepEqual(rest, getAddChainParameters(xdevsEnclave))
-    assert.equal(iconUrls?.length, 1)
+    // A raster icon first (wallets that need PNG), then the SVG.
+    assert.equal(iconUrls?.length, 2)
+    assert.match(iconUrls![0]!, /\.png$/)
+    assert.equal(iconUrls![1], ENCLAVE.iconUrl)
   })
 })
 
