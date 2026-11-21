@@ -902,7 +902,10 @@ mod tests {
             assert_eq!(s.select_proposer(h, 0).address, first);
         }
         assert!(!s.proposer_rotation());
-        assert_eq!(s.select_proposer(12_500_000, 0).address, s.validators()[1].address);
+        assert_eq!(
+            s.select_proposer(12_500_000, 0).address,
+            s.validators()[1].address
+        );
     }
 
     #[test]

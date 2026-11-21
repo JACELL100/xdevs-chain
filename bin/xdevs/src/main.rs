@@ -208,7 +208,10 @@ async fn main() -> anyhow::Result<()> {
             if cfg.log.format != "text" {
                 tracing::warn!(format = %cfg.log.format, "only text logs are supported yet");
             }
-            tracing::info!(version = xdevs_primitives::constants::VERSION, "starting xdevs node");
+            tracing::info!(
+                version = xdevs_primitives::constants::VERSION,
+                "starting xdevs node"
+            );
             let node = Node::new(cfg)?;
             tracing::info!(
                 chain_id = node.chain_config().chain_id,

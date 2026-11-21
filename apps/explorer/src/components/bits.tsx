@@ -142,12 +142,12 @@ const SOURCE_TEXT: Record<Source, string> = {
 }
 
 /** Where the page's data came from (small, right-aligned under the content). */
-export function SourceNote({ source }: { source: Source }) {
+export function SourceNote({ source, text }: { source: Source; text?: string }) {
   if (source === 'api') return null
   return (
     <p className={`x-source is-${source}`}>
       <span className="x-source-dot" aria-hidden="true" />
-      {SOURCE_TEXT[source]}
+      {text ?? SOURCE_TEXT[source]}
     </p>
   )
 }

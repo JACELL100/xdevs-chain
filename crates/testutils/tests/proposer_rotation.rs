@@ -53,9 +53,7 @@ async fn proposers_rotate_from_the_activation_block() -> anyhow::Result<()> {
             .with_context(|| format!("certificate of block {h}"))?;
         // The decided block was built in the decision round or, re-proposed with a
         // proof-of-lock, in an earlier one.
-        let rule = genesis_set
-            .clone()
-            .with_proposer_rotation(h >= ACTIVATION);
+        let rule = genesis_set.clone().with_proposer_rotation(h >= ACTIVATION);
         let proposers: Vec<Address> = (0..=cert.round)
             .map(|r| fee_recipient(&net, rule.select_proposer(h, r).address))
             .collect();
@@ -71,10 +69,18 @@ async fn proposers_rotate_from_the_activation_block() -> anyhow::Result<()> {
         }
     }
     eprintln!("proposers before {before:?}, after {after:?}");
-    assert_eq!(before.len(), 1, "unchanged before the activation: {before:?}");
+    assert_eq!(
+        before.len(),
+        1,
+        "unchanged before the activation: {before:?}"
+    );
     let lowest = fee_recipient(&net, genesis_set.validators()[0].address);
     assert!(before.contains(&lowest));
-    assert_eq!(after.len(), 4, "all four propose after the activation: {after:?}");
+    assert_eq!(
+        after.len(),
+        4,
+        "all four propose after the activation: {after:?}"
+    );
 
     let checked = net.assert_no_fork().await?;
     eprintln!("no fork over {checked} heights on 4 nodes");

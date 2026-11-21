@@ -9,6 +9,7 @@ import { formatDate, formatUnits } from '../lib/format'
 import { networkDown, useNet } from '../lib/net'
 import type { ValidatorRow } from '../lib/types'
 import { useLoad } from '../lib/useLoad'
+import { UPTIME_WINDOW } from '../lib/validators'
 import { NotReachable } from '../components/NotReachable'
 import { Page, Problem, useTitle } from './common'
 
@@ -64,7 +65,7 @@ export function ValidatorsView() {
       },
     },
     { key: 'commission', header: 'Commission', align: 'right', render: (v) => <span className="x-num">{(v.commissionBps / 100).toFixed(v.commissionBps % 100 ? 1 : 0)}%</span> },
-    { key: 'uptime', header: 'Uptime', align: 'right', render: (v) => (v.uptimeBps === null ? <span className="x-dim">—</span> : <span className={`x-num ${v.uptimeBps < 9500 ? 'x-warn-text' : ''}`}>{(v.uptimeBps / 100).toFixed(2)}%</span>) },
+    { key: 'uptime', header: `Uptime (last ${UPTIME_WINDOW} blocks)`, align: 'right', render: (v) => (v.uptimeBps === null ? <span className="x-dim">—</span> : <span className={`x-num ${v.uptimeBps < 9500 ? 'x-warn-text' : ''}`}>{(v.uptimeBps / 100).toFixed(2)}%</span>) },
   ]
 
   return (
@@ -84,7 +85,8 @@ export function ValidatorsView() {
       <Card title="Validator set" flush className="x-section">
         <Table caption="Validators" columns={cols} rows={rows} rowKey={(v) => v.operator} loading={!set && !r.error} skeletonRows={7} empty={<p className="x-empty-row">No validators registered in the Staking predeploy.</p>} className="x-table" />
       </Card>
-      {set ? <SourceNote source={config.demo ? 'demo' : 'rpc'} /> : null}
+      {/* The set is always read from the node (Staking contract); the indexer's state does not matter here. */}
+      {set ? <SourceNote source={config.demo ? 'demo' : 'rpc'} text={config.demo ? undefined : 'Read directly from the node (Staking contract)'} /> : null}
     </Page>
   )
 }

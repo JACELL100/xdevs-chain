@@ -7,6 +7,8 @@ import { decodeCall, decodeLog, displayValue, vaultActivity } from '../src/lib/d
 import { decodeDemoTxHash, demoBlock, demoCommit, demoHead, demoTx, demoTxHash, demoVaultTxHash, DEMO_VALIDATORS } from '../src/lib/fixtures.ts'
 import { mergeBlocks, mergeTxs } from '../src/lib/live.ts'
 import { isUnreachable } from '../src/lib/net.ts'
+import { knownValidatorName, uptimeFromCerts } from '../src/lib/validators.ts'
+import type { ValidatorRow } from '../src/lib/types.ts'
 
 test('stats are computed from the block window, not claimed', () => {
   const blocks = Array.from({ length: 11 }, (_, i) => ({ number: 100 + i, timestamp: 1000 + i * 2, txCount: 4 }))
@@ -43,6 +45,19 @@ test('commit certificate: 2/3+ quorum by voting power, unknown signers kept', ()
   assert.equal(stranger.votes.at(-1)!.operator, null)
   assert.equal(commitView([], []).quorum, null)
   assert.equal(consensusAddress('0x12'), '0x')
+})
+
+test('validators: Enclave names, uptime from commit certificates', () => {
+  assert.equal(knownValidatorName(717171, '0x42073689894ba795fF54D4Aa2b528F5b48280782'), 'val-4 · Mumbai')
+  assert.equal(knownValidatorName(717171, '0x4E0a69305925f213D717e002EF7E4bae4f5B0402'), 'val-1 · Hyderabad')
+  assert.equal(knownValidatorName(1, '0x42073689894ba795fF54D4Aa2b528F5b48280782'), null)
+  const row = (k: string, inSigningSet = true) =>
+    ({ operator: '0x' + k.repeat(40), consensusKey: '0x' + k.repeat(64), inSigningSet, uptimeBps: null }) as unknown as ValidatorRow
+  const [a, b, c] = [row('a'), row('b'), row('c', false)]
+  const cert = (...keys: string[]) => ({ height: 1, round: 0, blockHash: '0x', signatures: keys.map((k) => ({ validator: consensusAddress('0x' + k.repeat(64)), signature: '0x01' })) })
+  const certs = [cert('a', 'b'), cert('a'), cert('a', 'b'), cert('a')]
+  assert.deepEqual(uptimeFromCerts([a!, b!, c!], certs), [10000, 5000, null])
+  assert.deepEqual(uptimeFromCerts([a!], []), [null])
 })
 
 test('calldata decoding for predeploys and token standards', () => {

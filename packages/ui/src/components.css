@@ -512,6 +512,10 @@ a.xu-hash-text:hover {
   height: 14px;
 }
 .xu-copy.has-label {
+  /* Icon and label side by side: the grid would otherwise stack the label in a second
+     row, below the 30px-high button. */
+  grid-auto-flow: column;
+  white-space: nowrap;
   width: auto;
   gap: 6px;
   padding: 0 10px;

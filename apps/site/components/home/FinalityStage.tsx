@@ -44,7 +44,31 @@ const VALIDATORS = ANG.map((a, i) => {
 })
 
 type Phase = 'propose' | 'vote' | 'final'
+/** Shown until (or if never) the live Enclave height arrives. */
 const BASE = 18204
+const RPC_URL = 'https://rpc.xdevschain.tech'
+
+/** Current Enclave block height (one `eth_blockNumber`, 4 s timeout), or `null`. */
+async function liveHeight(): Promise<number | null> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 4000)
+  try {
+    const res = await fetch(RPC_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+      signal: ctrl.signal,
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as { result?: unknown }
+    const n = typeof body.result === 'string' ? Number.parseInt(body.result, 16) : NaN
+    return Number.isSafeInteger(n) && n > 10 ? n : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
 const fmt = (n: number) => n.toLocaleString('en-US')
 
 export default function FinalityStage() {
@@ -55,13 +79,27 @@ export default function FinalityStage() {
   const [offline, setOffline] = useState(-1)
   const [phase, setPhase] = useState<Phase>('final')
   const [chain, setChain] = useState(() => [1, 2, 3, 4, 5, 6].map((k) => BASE - k))
+  const next = useRef(BASE)
+
+  // Start from the live chain height (client side, once); the static number is the fallback.
+  useEffect(() => {
+    let alive = true
+    liveHeight().then((n) => {
+      if (!alive || n === null) return
+      next.current = n + 1
+      setHeight(n + 1)
+      setChain([0, 1, 2, 3, 4, 5].map((k) => n - k))
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   useEffect(() => {
     if (!inView || reducedMotion()) return
     let alive = true
     ;(async () => {
       let round = 0
-      let h = BASE
       while (alive) {
         const off = round % 3 === 2 ? 2 : -1
         setPhase('propose')
@@ -81,10 +119,10 @@ export default function FinalityStage() {
         }
         await wait(1100)
         if (!alive) return
-        const done = h
-        setChain((c) => [done, ...c].slice(0, 7))
-        h += 1
-        setHeight(h)
+        const done = next.current
+        setChain((c) => [done, ...c.filter((x) => x < done)].slice(0, 7))
+        next.current = done + 1
+        setHeight(done + 1)
         round++
         await wait(260)
       }

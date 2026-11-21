@@ -315,8 +315,7 @@ pub fn init_genesis(db: &dyn Database, genesis: &Genesis) -> anyhow::Result<B256
                         configured.ed25519_verify_block
                     );
                 }
-                let rotation_started =
-                    |c: &ChainConfig| c.proposer_rotation_active(head);
+                let rotation_started = |c: &ChainConfig| c.proposer_rotation_active(head);
                 if stored.proposer_rotation_block != configured.proposer_rotation_block
                     && (rotation_started(&stored) || rotation_started(&configured))
                 {
