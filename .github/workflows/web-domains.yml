@@ -19,10 +19,14 @@ jobs:
     env:
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       ACC: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      ZONE: ${{ vars.CLOUDFLARE_ZONE_ID }}
       APEX: xdevschain.tech
       DOCS: docs.xdevschain.tech
     steps:
+      - name: Find the xdevschain.tech zone
+        run: |
+          z=$(curl -sS -H "Authorization: Bearer $CF_TOKEN" "https://api.cloudflare.com/client/v4/zones?name=$APEX" | jq -r '.result[0].id // empty')
+          [ -n "$z" ] || { echo "zone not found"; exit 1; }
+          echo "ZONE=$z" >> "$GITHUB_ENV"
       - name: Current state
         run: |
           cf() { curl -sS -H "Authorization: Bearer $CF_TOKEN" -H 'content-type: application/json' "$@"; }
@@ -50,6 +54,10 @@ jobs:
           cf -X DELETE "$P/xdevs-chain-docs/domains/$APEX" | jq -c '{success, errors}'
           cf -X POST "$P/xdevs-chain-web/domains" -d '{"name":"'$APEX'"}' | jq -c '{success, errors}'
           upsert "$APEX" xdevs-chain-web.pages.dev
+          echo "3. www -> product site (the www->apex redirect rule still applies)"
+          cf -X DELETE "$P/xdevs-chain-docs/domains/www.$APEX" | jq -c '{success, errors}'
+          cf -X POST "$P/xdevs-chain-web/domains" -d '{"name":"www.'$APEX'"}' | jq -c '{success, errors}'
+          upsert "www.$APEX" xdevs-chain-web.pages.dev
           sleep 30
           for p in xdevs-chain-docs xdevs-chain-web; do
             echo "== $p domains"; cf "$P/$p/domains" | jq -r '.result[]? | "\(.name)  \(.status)"'
