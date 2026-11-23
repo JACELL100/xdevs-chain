@@ -10,7 +10,7 @@ import { fmtInt, useChain } from '@/lib/chain'
 
 export function NamesScreen() {
   return (
-    <div className="ui" role="img" aria-label="Illustration: the wallet refuses to register paypa1.xdevs because it looks like paypal.xdevs">
+    <div className="ui" role="img" aria-label="Illustration: the wallet refuses to register a1ice.xdevs because it looks like alice.xdevs">
       <div>
         <p className="ui-label">xns · illustration</p>
         <p className="ui-title">Claim a name</p>
@@ -19,19 +19,19 @@ export function NamesScreen() {
       <div className="ui-card">
         <p className="ui-label">claim a name</p>
         <div className="ui-input is-bad">
-          paypa1<span>.xdevs</span>
+          a1ice<span>.xdevs</span>
         </div>
         <p className="ui-msg is-bad">
           <Warn />
-          Refused: looks like paypal.xdevs, which already exists.
+          Refused: looks like alice.xdevs, which already exists.
         </p>
       </div>
       <div className="ui-card">
         <p className="ui-label">treated as the same name</p>
         {[
-          ['paypa1', 'paypal'],
-          ['g00gle', 'google'],
-          ['rnetamask', 'metamask'],
+          ['a1ice', 'alice'],
+          ['n00r', 'noor'],
+          ['rnila', 'mila'],
           ['vvallet', 'wallet'],
         ].map(([a, b]) => (
           <div className="ui-row" key={a}>

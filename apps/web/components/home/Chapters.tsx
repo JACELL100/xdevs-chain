@@ -82,7 +82,7 @@ const CHAPTERS: Chapter[] = [
     id: 'names',
     eyebrow: '.xdevs names',
     title: 'Names that refuse to be faked.',
-    body: 'XNS turns a long address into a name like aria.xdevs and rejects names that look like one that already exists. While paypal.xdevs exists, nobody can register paypa1.xdevs.',
+    body: 'XNS turns a long address into a name like aria.xdevs and rejects names that look like one that already exists. While alice.xdevs exists, nobody can register a1ice.xdevs.',
     points: ['Only a to z, 0 to 9 and hyphens: no look-alike Unicode', '0, 1, rn, vv and cl count as o, l, m, w and d', 'The first registrant wins'],
     screen: 'names',
     more: '/concepts/xns',

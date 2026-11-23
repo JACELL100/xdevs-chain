@@ -1,0 +1,56 @@
+name: web-domains
+
+# One-off, manual: moves the apex domain from the docs Pages project to the product site and
+# serves the docs at docs.xdevschain.tech. `plan` only lists the current state; `apply` changes it.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: plan or apply
+        default: plan
+
+permissions:
+  contents: read
+
+jobs:
+  domains:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ACC: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      ZONE: ${{ vars.CLOUDFLARE_ZONE_ID }}
+      APEX: xdevschain.tech
+      DOCS: docs.xdevschain.tech
+    steps:
+      - name: Current state
+        run: |
+          cf() { curl -sS -H "Authorization: Bearer $CF_TOKEN" -H 'content-type: application/json' "$@"; }
+          P=https://api.cloudflare.com/client/v4/accounts/$ACC/pages/projects
+          for p in xdevs-chain-docs xdevs-chain-web; do
+            echo "== $p domains"; cf "$P/$p/domains" | jq -r '.result[]? | "\(.name)  \(.status)"'
+          done
+          echo "== DNS"; cf "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records?per_page=100" | jq -r '.result[] | select(.name=="'$APEX'" or .name=="www.'$APEX'" or .name=="'$DOCS'") | "\(.type) \(.name) -> \(.content) proxied=\(.proxied)"'
+      - name: Apply
+        if: inputs.mode == 'apply'
+        run: |
+          set -e
+          cf() { curl -sS -H "Authorization: Bearer $CF_TOKEN" -H 'content-type: application/json' "$@"; }
+          P=https://api.cloudflare.com/client/v4/accounts/$ACC/pages/projects
+          D=https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records
+          upsert() { # name target
+            id=$(cf "$D?name=$1" | jq -r '.result[0].id // empty')
+            body='{"type":"CNAME","name":"'$1'","content":"'$2'","proxied":true}'
+            if [ -n "$id" ]; then cf -X PUT "$D/$id" -d "$body"; else cf -X POST "$D" -d "$body"; fi | jq -c '{success, errors}'
+          }
+          echo "1. docs subdomain -> docs project"
+          cf -X POST "$P/xdevs-chain-docs/domains" -d '{"name":"'$DOCS'"}' | jq -c '{success, errors}'
+          upsert "$DOCS" xdevs-chain-docs.pages.dev
+          echo "2. apex -> product site"
+          cf -X DELETE "$P/xdevs-chain-docs/domains/$APEX" | jq -c '{success, errors}'
+          cf -X POST "$P/xdevs-chain-web/domains" -d '{"name":"'$APEX'"}' | jq -c '{success, errors}'
+          upsert "$APEX" xdevs-chain-web.pages.dev
+          sleep 30
+          for p in xdevs-chain-docs xdevs-chain-web; do
+            echo "== $p domains"; cf "$P/$p/domains" | jq -r '.result[]? | "\(.name)  \(.status)"'
+          done
