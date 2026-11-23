@@ -108,7 +108,7 @@ export function LaunchingSoon() {
             status.xdevschain.tech
           </a>{' '}
           or read how the wallet works in the{' '}
-          <a className="xh-textlink" href={`${config.siteUrl}/concepts/smart-accounts`}>
+          <a className="xh-textlink" href="https://docs.xdevschain.tech/concepts/smart-accounts">
             docs
           </a>
           .

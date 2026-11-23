@@ -1,6 +1,8 @@
 /** Site-wide constants and the top navigation (same structure as the old VitePress nav). */
 
-export const SITE_URL = 'https://xdevschain.tech'
+/** This app is the documentation site. The product site lives on the apex domain. */
+export const SITE_URL = 'https://docs.xdevschain.tech'
+export const PRODUCT_URL = 'https://xdevschain.tech'
 export const SITE_NAME = 'xDEVS Chain'
 export const TAGLINE = 'The chain that has your back'
 export const SITE_DESCRIPTION =
@@ -22,4 +24,5 @@ export const NAV_MORE: NavLink[] = [
   { text: 'Roadmap', href: '/roadmap', activeMatch: '/roadmap' },
   { text: 'Security', href: '/security', activeMatch: '/security' },
   { text: 'THE xDEVS', href: XDEVS_URL, external: true },
+  { text: '← xdevschain.tech', href: PRODUCT_URL },
 ]

@@ -9,8 +9,8 @@ const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-geist-mono'
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: `${SITE_NAME}: ${TAGLINE.toLowerCase()}`,
-    template: `%s · ${SITE_NAME}`,
+    default: `${SITE_NAME} Docs`,
+    template: `%s · ${SITE_NAME} Docs`,
   },
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
@@ -22,15 +22,15 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     siteName: SITE_NAME,
-    title: `${SITE_NAME}: ${TAGLINE.toLowerCase()}`,
-    description: 'An EVM-equivalent PoS Layer 1 with user protection built into the chain. Built by THE xDEVS.',
+    title: `${SITE_NAME} Docs`,
+    description: 'Guides, concepts, the JSON-RPC reference and node operator docs for xDEVS Chain and the Enclave testnet.',
     url: SITE_URL,
     images: [{ url: '/og.png', width: 1200, height: 630, alt: `${SITE_NAME}: ${TAGLINE.toLowerCase()}` }],
   },
   twitter: {
     card: 'summary_large_image',
-    title: `${SITE_NAME}: ${TAGLINE.toLowerCase()}`,
-    description: 'An EVM-equivalent PoS Layer 1 with user protection built into the chain. Built by THE xDEVS.',
+    title: `${SITE_NAME} Docs`,
+    description: 'Guides, concepts, the JSON-RPC reference and node operator docs for xDEVS Chain and the Enclave testnet.',
     images: ['/og.png'],
   },
 }

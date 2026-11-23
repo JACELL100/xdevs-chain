@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import HeaderNav from './HeaderNav'
-import { GITHUB_URL } from './nav'
+import { GITHUB_URL, PRODUCT_URL } from './nav'
 import './site.css'
 
 export type HeaderProps = {
@@ -35,14 +35,20 @@ export default function Header({ search, mobileStart, variant = 'docs' }: Header
       </a>
       <div className="xh-header-inner">
         {mobileStart ? <div className="xh-header-mstart">{mobileStart}</div> : null}
-        <Link href="/" className="xh-brand" aria-label="xDEVS Chain home">
+        <a href={PRODUCT_URL} className="xh-brand" aria-label="xDEVS Chain website">
           <img src="/brand/xdevs-chain-mark.svg" width={26} height={26} alt="" />
           <span className="xh-brand-word">
             xDEVS <span>Chain</span>
           </span>
+        </a>
+        <Link href="/" className="xh-brand-docs">
+          Docs
         </Link>
         {search ? <div className="xh-header-search">{search}</div> : null}
         <HeaderNav />
+        <a className="xh-header-back" href={PRODUCT_URL}>
+          ← xdevschain.tech
+        </a>
         <a className="xh-header-gh" href={GITHUB_URL} target="_blank" rel="noopener" aria-label="xDEVS Chain on GitHub">
           <GitHubIcon />
         </a>

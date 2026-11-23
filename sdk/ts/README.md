@@ -5,7 +5,7 @@ Built on [viem](https://viem.sh): chain definitions, typed `xdevs_` JSON-RPC act
 name helpers and address-poisoning helpers.
 
 > Status: pre-release (0.1.0). The public testnet is **xDEVS Chain Enclave** (chain id 717171, coin EnclaveXDS / tXDS);
-> its endpoints under xdevschain.tech are announced on https://xdevschain.tech/network/endpoints as they go live.
+> its endpoints under xdevschain.tech are announced on https://docs.xdevschain.tech/network/endpoints as they go live.
 > Most `xdevs_` methods are implemented by the node only from Phase 3–5 (see table below); the SDK
 > throws `XdevsMethodNotAvailableError` when the node does not have them yet.
 

@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { GITHUB_URL, XDEVS_URL } from './nav'
+import { GITHUB_URL, PRODUCT_URL, XDEVS_URL } from './nav'
 import './site.css'
 
 export type FooterProps = {
@@ -48,7 +48,8 @@ export default function Footer({ variant = 'full' }: FooterProps) {
       Built by{' '}
       <a href={XDEVS_URL} target="_blank" rel="noopener">
         THE xDEVS
-      </a>
+      </a>{' '}
+      · <a href={PRODUCT_URL}>xdevschain.tech</a>
     </p>
   )
 

@@ -1,8 +1,9 @@
 name: docs
 
-# Builds the website (landing page + docs, a static Next.js export in apps/site) on every
-# PR and push to main that touches it, and deploys main to Cloudflare Pages: project
-# `xdevs-chain-docs`, served at https://xdevschain.tech.
+# Builds the documentation site (a static Next.js export in apps/site) on every PR and
+# push to main that touches it, and deploys main to Cloudflare Pages: project
+# `xdevs-chain-docs`, served at https://docs.xdevschain.tech. The product website at
+# https://xdevschain.tech is apps/web (see web.yml).
 #
 # Needs the repository secret CLOUDFLARE_API_TOKEN (Pages: Edit) and the repository
 # variable CLOUDFLARE_ACCOUNT_ID.
@@ -52,7 +53,7 @@ jobs:
     timeout-minutes: 10
     environment:
       name: docs
-      url: https://xdevschain.tech
+      url: https://docs.xdevschain.tech
     concurrency:
       group: docs-deploy
       cancel-in-progress: false

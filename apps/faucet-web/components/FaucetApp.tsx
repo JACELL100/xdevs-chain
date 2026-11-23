@@ -399,7 +399,7 @@ function LaunchingSoon() {
         <Button href={config.statusUrl} variant="ghost" size="sm" external icon={<ExternalIcon />}>
           Network status
         </Button>
-        <Button href="https://xdevschain.tech/network/endpoints" variant="quiet" size="sm" external icon={<ExternalIcon />}>
+        <Button href="https://docs.xdevschain.tech/network/endpoints" variant="quiet" size="sm" external icon={<ExternalIcon />}>
           Planned endpoints
         </Button>
       </div>
