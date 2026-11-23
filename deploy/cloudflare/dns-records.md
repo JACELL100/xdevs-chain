@@ -9,7 +9,8 @@ Values in angle brackets are placeholders. Never commit real IPs to the repo.
 
 | Name | Type | Content | Proxy | Created by | Purpose |
 |---|---|---|---|---|---|
-| `xdevschain.tech` (apex) and `www` | CNAME (flattened) | `xdevs-chain-docs.pages.dev` | Proxied | Pages -> Custom domains | Website and docs; `www` 301-redirects to the apex (Single Redirect rule) |
+| `xdevschain.tech` (apex) and `www` | CNAME (flattened) | `xdevs-chain-web.pages.dev` | Proxied | Pages -> Custom domains | Product website (`apps/web`); `www` 301-redirects to the apex (Single Redirect rule). Old docs paths 301 to `docs` via `apps/web/public/_redirects` |
+| `docs` | CNAME | `xdevs-chain-docs.pages.dev` | Proxied | Pages -> Custom domains | Documentation (`apps/site`) |
 | `rpc` | CNAME | `<tunnel-id>.cfargotunnel.com` | Proxied | `cloudflared tunnel route dns` | Public JSON-RPC (HTTPS) |
 | `ws` | CNAME | `<tunnel-id>.cfargotunnel.com` | Proxied | `cloudflared tunnel route dns` | Public WebSocket (`wss://`) |
 | `explorer` | CNAME | `<explorer-host>` (e.g. `<project>.pages.dev`, or `cname.vercel-dns.com`) | Proxied for Pages; **DNS only** for Vercel (Vercel issues its own certificate) | Hosting provider | Block explorer UI |

@@ -3,7 +3,7 @@ import { DOCS_FLAT } from '@/lib/docs/nav'
 
 export const dynamic = 'force-static'
 
-const SITE = 'https://xdevschain.tech'
+const SITE = 'https://docs.xdevschain.tech'
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [

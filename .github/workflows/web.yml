@@ -1,0 +1,77 @@
+name: web
+
+# Builds the product website (a static Next.js export in apps/web) on every PR and push to
+# main that touches it, and deploys main to Cloudflare Pages: project `xdevs-chain-web`,
+# served at https://xdevschain.tech. The docs are apps/site (docs.yml, docs.xdevschain.tech).
+#
+# Needs the repository secret CLOUDFLARE_API_TOKEN (Pages: Edit) and the repository
+# variable CLOUDFLARE_ACCOUNT_ID.
+
+on:
+  push:
+    branches: [main]
+    paths: ["apps/web/**", ".github/workflows/web.yml"]
+  pull_request:
+    paths: ["apps/web/**", ".github/workflows/web.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-site
+          path: apps/web/out
+          retention-days: 7
+
+  deploy:
+    # Only main is published; PRs just build.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: web
+      url: https://xdevschain.tech
+    concurrency:
+      group: web-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-site
+          path: dist
+      - name: Create the Pages project if it doesn't exist
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          api=https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects
+          if ! curl -fsS -H "Authorization: Bearer $CF_TOKEN" "$api/xdevs-chain-web" >/dev/null 2>&1; then
+            curl -fsS -X POST -H "Authorization: Bearer $CF_TOKEN" -H 'content-type: application/json'               -d '{"name":"xdevs-chain-web","production_branch":"main"}' "$api" | jq '{success, errors}'
+          fi
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=xdevs-chain-web --branch=main --commit-dirty=true

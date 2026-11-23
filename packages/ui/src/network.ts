@@ -22,8 +22,10 @@ export const ENCLAVE = {
 /** Public xDEVS web properties, used for the footer cross-links. */
 export const XDEVS_LINKS = {
   site: 'https://xdevschain.tech',
-  docs: 'https://xdevschain.tech/guide/introduction',
-  endpoints: 'https://xdevschain.tech/network/endpoints',
+  /** Root of the documentation site (docs.xdevschain.tech). */
+  docsSite: 'https://docs.xdevschain.tech',
+  docs: 'https://docs.xdevschain.tech/guide/introduction',
+  endpoints: 'https://docs.xdevschain.tech/network/endpoints',
   explorer: 'https://explorer.xdevschain.tech',
   wallet: 'https://wallet.xdevschain.tech',
   faucet: 'https://faucet.xdevschain.tech',

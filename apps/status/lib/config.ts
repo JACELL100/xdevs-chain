@@ -47,6 +47,6 @@ export const PLANNED = {
 
 export const docsLinks = {
   endpoints: XDEVS_LINKS.endpoints,
-  jsonRpc: `${XDEVS_LINKS.site}/developers/json-rpc`,
-  quickstart: `${XDEVS_LINKS.site}/guide/quickstart`,
+  jsonRpc: `${XDEVS_LINKS.docsSite}/developers/json-rpc`,
+  quickstart: `${XDEVS_LINKS.docsSite}/guide/quickstart`,
 } as const

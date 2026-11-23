@@ -1,6 +1,6 @@
 # xDEVS Chain
 
-**Website & docs:** [xdevschain.tech](https://xdevschain.tech) · **Testnet:** [explorer](https://explorer.xdevschain.tech) · [wallet](https://wallet.xdevschain.tech) · [faucet](https://faucet.xdevschain.tech) · [status](https://status.xdevschain.tech) · **Built by [THE xDEVS](https://xdevs.in)**
+**Website:** [xdevschain.tech](https://xdevschain.tech) · **Docs:** [docs.xdevschain.tech](https://docs.xdevschain.tech) · **Testnet:** [explorer](https://explorer.xdevschain.tech) · [wallet](https://wallet.xdevschain.tech) · [faucet](https://faucet.xdevschain.tech) · [status](https://status.xdevschain.tech) · **Built by [THE xDEVS](https://xdevs.in)**
 
 xDEVS Chain is an EVM-equivalent, Proof-of-Stake Layer 1 written in Rust, built around one idea: **protecting users at the protocol level** from scams, lost keys, front-running and drained wallets. It runs on `revm` and `alloy`, so Ethereum tooling (MetaMask, Foundry, Hardhat, viem, ethers) works unchanged.
 
@@ -115,7 +115,8 @@ contracts/         Solidity (Foundry): system predeploys, smart accounts, Guardi
                    expiring approvals, paymasters, light-client bridges; see contracts/README.md
 sdk/ts/            @xdevs/sdk: viem chain configs (xdevsEnclave) and typed xdevs_ RPC actions
 packages/ui/       @xdevs/ui: shared brand kit for the web apps
-apps/site/         xdevschain.tech: landing page and docs (Next.js)
+apps/web/          xdevschain.tech: product website (Next.js)
+apps/site/         docs.xdevschain.tech: documentation (Next.js)
 apps/explorer/     explorer.xdevschain.tech (Next.js)
 apps/wallet/       wallet.xdevschain.tech: passkey smart-account wallet (Next.js)
 apps/faucet-web/   faucet.xdevschain.tech page; apps/faucet/ is its Cloudflare Worker API
@@ -141,13 +142,14 @@ deploy/            Enclave genesis, systemd units, Ansible, Cloudflare and monit
 | Faucet | [faucet.xdevschain.tech](https://faucet.xdevschain.tech) | ✅ Live (100 tXDS per claim, once every 24 h) |
 | Explorer API | `https://explorer-api.xdevschain.tech` · [`/api/v1/stats`](https://explorer-api.xdevschain.tech/api/v1/stats) · [`/health`](https://explorer-api.xdevschain.tech/health) | ✅ Live (indexer on Postgres; [API spec](docs/specs/explorer-api.md)) |
 | ERC-4337 bundler | [`https://bundler.xdevschain.tech`](https://bundler.xdevschain.tech/health) | ✅ Live (sponsored passkey-account activation) |
-| Website and docs | [xdevschain.tech](https://xdevschain.tech) · [network endpoints](https://xdevschain.tech/network/endpoints) | ✅ Live |
+| Website | [xdevschain.tech](https://xdevschain.tech) | ✅ Live |
+| Docs | [docs.xdevschain.tech](https://docs.xdevschain.tech) · [network endpoints](https://docs.xdevschain.tech/network/endpoints) | ✅ Live |
 
 ```bash
 cast block-number --rpc-url https://rpc.xdevschain.tech
 ```
 
-Add it to MetaMask: network name `xDEVS Chain Enclave`, RPC `https://rpc.xdevschain.tech`, chain id `717171`, symbol `tXDS`, explorer `https://explorer.xdevschain.tech`. Details: [Network endpoints](https://xdevschain.tech/network/endpoints).
+Add it to MetaMask: network name `xDEVS Chain Enclave`, RPC `https://rpc.xdevschain.tech`, chain id `717171`, symbol `tXDS`, explorer `https://explorer.xdevschain.tech`. Details: [Network endpoints](https://docs.xdevschain.tech/network/endpoints).
 
 ## Develop offline: local dev chain
 
@@ -241,7 +243,7 @@ Heavy builds run in GitHub Actions rather than on developer laptops:
 
 ## Roadmap
 
-Phases 1–5 are built (Phase 5's encrypted mempool waits for a distributed key setup); Phase 6 (independent validators, long-lived testnet, bug bounty) and Phase 7 (audited bridges, mainnet preparation) are next. Live status: [xdevschain.tech/roadmap](https://xdevschain.tech/roadmap). The full design and phase plan is in [xDEVS_Chain_Implementation_Plan.md](xDEVS_Chain_Implementation_Plan.md).
+Phases 1–5 are built (Phase 5's encrypted mempool waits for a distributed key setup); Phase 6 (independent validators, long-lived testnet, bug bounty) and Phase 7 (audited bridges, mainnet preparation) are next. Live status: [xdevschain.tech/roadmap](https://xdevschain.tech/roadmap) (details: [docs.xdevschain.tech/roadmap](https://docs.xdevschain.tech/roadmap)). The full design and phase plan is in [xDEVS_Chain_Implementation_Plan.md](xDEVS_Chain_Implementation_Plan.md).
 
 ## Security
 

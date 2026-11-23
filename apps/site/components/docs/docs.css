@@ -1200,3 +1200,89 @@
     animation: none;
   }
 }
+
+/* ---------- docs home (/) ---------- */
+.d-page:has(> .d-home) {
+  grid-template-columns: minmax(0, 960px);
+}
+.d-home h1 {
+  margin: 0;
+  font-size: clamp(32px, 4vw, 48px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  font-weight: 600;
+}
+.d-home-kicker {
+  margin: 0 0 14px;
+  font-family: var(--xh-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--xh-final);
+}
+.d-home-lead {
+  margin: 18px 0 0;
+  max-width: 44em;
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--xh-text-2);
+}
+.d-home-lead a {
+  color: var(--xh-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--xh-line-3);
+}
+.d-home-start,
+.d-home-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 32px;
+}
+.d-home-groups {
+  margin-top: 14px;
+}
+.d-home-card {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 20px 22px;
+  border-radius: var(--xh-radius-md);
+  border: 1px solid var(--xh-line);
+  background: var(--xh-surface);
+  transition: border-color 0.2s;
+}
+.d-home-card.is-start:hover {
+  border-color: rgba(79, 227, 207, 0.4);
+}
+.d-home-card strong {
+  font-size: 16px;
+  color: var(--xh-text);
+}
+.d-home-card span,
+.d-home-card p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--xh-muted);
+}
+.d-home-card h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--xh-text);
+}
+.d-home-card ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.d-home-card li a {
+  font-size: 14.5px;
+  color: var(--xh-text-2);
+}
+.d-home-card li a:hover {
+  color: var(--xh-final);
+}

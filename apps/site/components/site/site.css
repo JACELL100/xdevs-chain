@@ -41,6 +41,35 @@
   gap: 10px;
   flex: none;
 }
+.xh-brand-docs {
+  margin-left: -2px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--xh-line-2);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--xh-text-2);
+  white-space: nowrap;
+  transition: color 0.2s, border-color 0.2s;
+}
+.xh-brand-docs:hover {
+  color: var(--xh-text);
+  border-color: var(--xh-line-3);
+}
+.xh-header-back {
+  font-size: 13px;
+  color: var(--xh-muted);
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+.xh-header-back:hover {
+  color: var(--xh-text);
+}
+@media (max-width: 1100px) {
+  .xh-header-back {
+    display: none;
+  }
+}
 .xh-brand img {
   width: 26px;
   height: 26px;

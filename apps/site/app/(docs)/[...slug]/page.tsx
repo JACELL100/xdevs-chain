@@ -58,7 +58,7 @@ export default async function DocPage({ params }: Props) {
         <nav className="d-crumbs" aria-label="Breadcrumb" data-pagefind-ignore="all">
           <ol>
             <li>
-              <Link href="/guide/introduction">Docs</Link>
+              <Link href="/">Docs</Link>
             </li>
             <li>
               <span>{doc.group}</span>

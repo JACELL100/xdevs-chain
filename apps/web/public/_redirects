@@ -1,0 +1,17 @@
+# Cloudflare Pages redirects for xdevschain.tech (the product site).
+# The documentation moved to https://docs.xdevschain.tech with the same paths.
+# /roadmap and /security stay here as product pages (they link to the docs for detail).
+# /developers is a product page too, so only the old docs pages under it are redirected:
+# a /developers/* splat would also catch this site's own /developers/ RSC payload files.
+
+/guide/*                     https://docs.xdevschain.tech/guide/:splat        301
+/concepts/*                  https://docs.xdevschain.tech/concepts/:splat     301
+/network/*                   https://docs.xdevschain.tech/network/:splat      301
+/operators/*                 https://docs.xdevschain.tech/operators/:splat    301
+/developers/json-rpc         https://docs.xdevschain.tech/developers/json-rpc         301
+/developers/sdk              https://docs.xdevschain.tech/developers/sdk              301
+/developers/deploy-contracts https://docs.xdevschain.tech/developers/deploy-contracts 301
+/developers/chain-ids        https://docs.xdevschain.tech/developers/chain-ids        301
+/docs                        https://docs.xdevschain.tech/                    301
+/docs/*                      https://docs.xdevschain.tech/:splat              301
+/pagefind/*                  https://docs.xdevschain.tech/pagefind/:splat     301
