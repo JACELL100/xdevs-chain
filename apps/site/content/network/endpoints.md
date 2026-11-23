@@ -51,7 +51,7 @@ curl -s https://rpc.xdevschain.tech -H 'content-type: application/json' \
 | Finality | Every committed block is final (BFT, 2/3+ of the validators sign it) |
 | Validators | 4, equal power, set in genesis; the staking-driven set takes over from block 97,200 ([validators](/operators/validators)) |
 | Genesis | Built with [`tools/genesis-builder`](https://github.com/JACELL100/xdevs-chain/tree/main/tools/genesis-builder) from [`configs/enclave.json`](https://github.com/JACELL100/xdevs-chain/blob/main/tools/genesis-builder/configs/enclave.json); system contracts at `0x…1000`–`0x…1009` ([predeploys](/concepts/predeploys)) |
-| Node release | [`v0.3.1-enclave.2`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.3.1-enclave.2) on all validators. Proposer rotation (all four validators take turns proposing) activates at block **225,000** (≈ 23 Nov 2026); before it, one validator proposed every block. |
+| Node release | [`v0.3.1-enclave.2`](https://github.com/JACELL100/xdevs-chain/releases/tag/v0.3.1-enclave.2) on all validators. Proposer rotation is live since block **225,000** (23 Nov 2026): the four validators take turns proposing (round-robin); before it, one validator proposed every block. |
 | Upgrade at block 97,200 | Active since block **97,200** (19 Nov 2026, about 21:45 UTC): staking-driven validator set (1 tXDS block reward), local fee markets and the `ED25519VERIFY` precompile. The encrypted mempool stays off until it has a distributed key setup |
 | Validator P2P | Open only between the validators; users and apps connect through the RPC |
 

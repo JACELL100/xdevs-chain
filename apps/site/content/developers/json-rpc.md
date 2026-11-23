@@ -30,7 +30,7 @@ curl -s https://rpc.xdevschain.tech -H 'content-type: application/json' \n  -d '
 | `eth_call` | Gas cap 50,000,000 (`[rpc] gas_cap`) |
 | `eth_estimateGas` | Returns XIP-0001 errors for EOA-locked senders |
 | `eth_sendRawTransaction` | Legacy, EIP-2930, EIP-1559 and EIP-7702 (type 4). Blob (type 3) is rejected |
-| `eth_getBlockByNumber`, `eth_getBlockByHash` | `miner` is the fee recipient of the validator that proposed the block. Until `proposerRotationBlock` (not yet scheduled on Enclave) the same validator proposes every block; see [proposer selection](/operators/validators#proposer-selection) |
+| `eth_getBlockByNumber`, `eth_getBlockByHash` | `miner` is the fee recipient of the validator that proposed the block. On Enclave the four validators take turns since `proposerRotationBlock` 225,000 (before it, one validator proposed every block); see [proposer selection](/operators/validators#proposer-selection) |
 | `eth_getBlockTransactionCountByNumber`, `eth_getBlockTransactionCountByHash` | |
 | `eth_getTransactionByHash`, `eth_getTransactionReceipt`, `eth_getBlockReceipts` | |
 | `eth_getLogs` | At most 10,000 blocks per query and 10,000 results |
