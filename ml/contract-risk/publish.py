@@ -44,13 +44,19 @@ def main():
     ap.add_argument("--model-dir", default="out")
     ap.add_argument("--repo", default="xdevs-contract-risk")
     ap.add_argument("--space", default="xdevs-contract-risk-demo")
+    ap.add_argument("--space-only", action="store_true", help="only (re)publish the demo Space")
     a = ap.parse_args()
     api = HfApi(token=os.environ["HF_TOKEN"])
     user = api.whoami()["name"]
     repo, space = f"{user}/{a.repo}", f"{user}/{a.space}"
     md = Path(a.model_dir)
-    metrics = json.loads((md / "metrics.json").read_text())
+    if not a.space_only:
+        publish_model(api, md, repo, space)
+    publish_space(api, repo, space)
 
+
+def publish_model(api, md, repo, space):
+    metrics = json.loads((md / "metrics.json").read_text())
     with tempfile.TemporaryDirectory() as tmp:
         t = Path(tmp)
         for f in ("model.txt", "linear.npz", "config.json", "metrics.json", "evaluation.png"):
@@ -62,6 +68,8 @@ def main():
         api.upload_folder(repo_id=repo, repo_type="model", folder_path=str(t), commit_message="Train and publish xDEVS Contract Risk")
     print("model:", f"https://huggingface.co/{repo}")
 
+
+def publish_space(api, repo, space):
     with tempfile.TemporaryDirectory() as tmp:
         t = Path(tmp)
         shutil.copytree(HERE / "space", t, dirs_exist_ok=True)
@@ -69,7 +77,12 @@ def main():
         for f in ("app.py", "README.md"):
             txt = (t / f).read_text(encoding="utf-8").replace("__MODEL_REPO__", repo).replace("__MODEL__", repo)
             (t / f).write_text(txt, encoding="utf-8")
-        api.create_repo(space, repo_type="space", space_sdk="gradio", exist_ok=True)
+        try:
+            api.create_repo(space, repo_type="space", space_sdk="gradio", exist_ok=True)
+        except Exception as e:  # e.g. 402 when the account may not create Spaces via the API: create it in the UI
+            if not api.repo_exists(space, repo_type="space"):
+                raise SystemExit(f"Could not create the Space {space} ({e}). Create it at https://huggingface.co/new-space "
+                                 "(SDK: Gradio, hardware: CPU basic, public) and run again with --space-only.")
         api.upload_folder(repo_id=space, repo_type="space", folder_path=str(t), commit_message="Demo for xDEVS Contract Risk")
     print("space:", f"https://huggingface.co/spaces/{space}")
 
