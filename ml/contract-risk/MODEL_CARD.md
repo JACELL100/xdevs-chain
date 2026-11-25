@@ -52,7 +52,8 @@ Confusion matrix: {tp} malicious caught, {fn} missed, {fp} benign contracts flag
 - [forta/malicious-smart-contract-dataset](https://huggingface.co/datasets/forta/malicious-smart-contract-dataset) (MIT):
   Ethereum mainnet contracts with creation bytecode and a malicious/benign label.
 - [forta-network/labelled-datasets](https://github.com/forta-network/labelled-datasets) (MIT): malicious smart contracts
-  (exploit and drainer contracts, with their creation transactions) and phishing/scam contracts on Ethereum. Their bytecode
+  (exploit, drainer and phishing contracts, with their creation transactions) on Ethereum; the contracts in its
+  phishing list are all part of this set. Their bytecode
   is fetched from mainnet: the creation input when available (so self-destructed contracts are included), otherwise the
   current runtime code.
 - Rows read: {sources}.
@@ -105,6 +106,8 @@ model.predict("0x6080...")   # {{'risk_score': ..., 'risk_level': 'low'|'medium'
 
 ## Limitations
 
+- **It misses about half of malicious contracts** at the released threshold (the threshold favours very few false alarms).
+  Recall varies between folds (see the cross-validation numbers): more labelled malicious code would help most.
 - **Advice, not proof.** A high score means the code resembles malicious code in the training data. Proxies, obfuscated or
   brand-new attack patterns can be missed, and unusual but honest code can be flagged. Show it as a warning next to
   simulation results, never as a block on its own.

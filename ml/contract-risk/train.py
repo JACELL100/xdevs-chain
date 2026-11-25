@@ -1,8 +1,9 @@
 """Train and evaluate xDEVS Contract Risk (malicious-contract classifier on EVM bytecode).
 
 Data (all MIT, Ethereum mainnet): the Forta "Malicious Smart Contract Classification Dataset" on Hugging Face
-(83k unique contracts, 127 malicious) plus the malicious and phishing contracts listed in
-forta-network/labelled-datasets, whose bytecode is fetched from an Ethereum RPC. (flipguard/malicious-contracts
+(83k unique contracts, 127 malicious) plus the malicious contracts listed in
+forta-network/labelled-datasets (its phishing contracts are a subset of them), whose bytecode is fetched from an
+Ethereum RPC. (flipguard/malicious-contracts
 was checked and is an exact copy of the Forta parquet, so it adds nothing.)
 
 Method
@@ -83,7 +84,7 @@ def iter_forta_labels():
     have = {i[0] for i in items}
     items += [(r["address"].lower(), None, "phishing_scams") for r in phish if r["address"].lower() not in have]
     log("forta labels:", len(mal), "malicious contracts,", len(phish), "phishing contracts ->", len(items), "addresses")
-    assert len(phish) > 500, "phishing contracts missing"
+    assert len(phish) > 500, "phishing contracts missing"  # all are also in the malicious list (checked)
     got = {"creation_input": 0, "runtime": 0, "empty": 0}
     for b in range(0, len(items), 40):
         chunk = items[b:b + 40]
