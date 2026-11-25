@@ -14,9 +14,9 @@ precision 94% at a 0.025% false-positive rate, 65% recall at a 1% false-positive
 |---|---|
 | `xdevs_contract_risk.py` | Disassembler, stateless featurizer and `ContractRiskModel` for inference |
 | `train.py` | Data loading, de-duplication, clone grouping, grouped CV, model selection, test evaluation |
-| `publish.py` | Uploads the model (with the generated model card) and the Gradio demo to Hugging Face |
+| `publish.py` | Uploads the model (with the generated model card) and the static demo to Hugging Face |
 | `MODEL_CARD.md` | Model card template, filled with the run's metrics by `publish.py` |
-| `space/` | Gradio demo app |
+| `static/` | Browser demo (static Space): JavaScript port of the featurizer and model, export and parity check |
 | `data/` | Vendored labels from forta-network/labelled-datasets (MIT) |
 
 Training runs on GitHub Actions: **Actions → ml-contract-risk → Run workflow** (`mode=train`, `publish=true` to upload;

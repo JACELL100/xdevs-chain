@@ -1,10 +1,11 @@
-"""Upload the trained model (model repo) and the demo (Gradio Space) to Hugging Face. Needs HF_TOKEN."""
+"""Upload the trained model (model repo) and the browser demo (static Space) to Hugging Face. Needs HF_TOKEN."""
 from __future__ import annotations
 
 import argparse
 import json
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -52,7 +53,7 @@ def main():
     md = Path(a.model_dir)
     if not a.space_only:
         publish_model(api, md, repo, space)
-    publish_space(api, repo, space)
+    publish_space(api, repo, space, md)
 
 
 def publish_model(api, md, repo, space):
@@ -69,21 +70,33 @@ def publish_model(api, md, repo, space):
     print("model:", f"https://huggingface.co/{repo}")
 
 
-def publish_space(api, repo, space):
+def publish_space(api, repo, space, md: Path | None):
+    """Static Space (free tier): the model runs in the browser via static/core.js. Before uploading, parity.mjs checks that
+    the JavaScript port reproduces the Python scores on real mainnet contracts."""
+    import subprocess
+
+    from huggingface_hub import snapshot_download
+
+    sys.path.insert(0, str(HERE / "static"))
+    from export import export  # noqa: E402
+
+    if md is None or not (md / "model.txt").exists():
+        md = Path(snapshot_download(repo, allow_patterns=["model.txt", "linear.npz", "config.json", "metrics.json"]))
     with tempfile.TemporaryDirectory() as tmp:
         t = Path(tmp)
-        shutil.copytree(HERE / "space", t, dirs_exist_ok=True)
-        shutil.copy(HERE / "xdevs_contract_risk.py", t / "xdevs_contract_risk.py")
-        for f in ("app.py", "README.md"):
-            txt = (t / f).read_text(encoding="utf-8").replace("__MODEL_REPO__", repo).replace("__MODEL__", repo)
+        export(md, t)
+        for f in ("index.html", "app.js", "core.js", "README.md"):
+            txt = (HERE / "static" / f).read_text(encoding="utf-8").replace("__MODEL__", repo)
             (t / f).write_text(txt, encoding="utf-8")
+        subprocess.run([sys.executable, str(HERE / "static" / "parity.py"), str(md), str(t / "parity.json")], check=True)
+        subprocess.run(["node", str(HERE / "static" / "parity.mjs"), str(t), str(t / "parity.json")], check=True)
+        (t / "parity.json").unlink()
         try:
-            api.create_repo(space, repo_type="space", space_sdk="gradio", exist_ok=True)
-        except Exception as e:  # e.g. 402 when the account may not create Spaces via the API: create it in the UI
+            api.create_repo(space, repo_type="space", space_sdk="static", exist_ok=True)
+        except Exception as e:
             if not api.repo_exists(space, repo_type="space"):
-                raise SystemExit(f"Could not create the Space {space} ({e}). Create it at https://huggingface.co/new-space "
-                                 "(SDK: Gradio, hardware: CPU basic, public) and run again with --space-only.")
-        api.upload_folder(repo_id=space, repo_type="space", folder_path=str(t), commit_message="Demo for xDEVS Contract Risk")
+                raise SystemExit(f"Could not create the Space {space}: {e}")
+        api.upload_folder(repo_id=space, repo_type="space", folder_path=str(t), commit_message="Static demo for xDEVS Contract Risk")
     print("space:", f"https://huggingface.co/spaces/{space}")
 
 
