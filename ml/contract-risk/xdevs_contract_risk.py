@@ -117,7 +117,7 @@ def disassemble(code_hex: str) -> tuple[list[str], list[str], int]:
     return ops, sels, n
 
 
-_OPS_VEC = HashingVectorizer(n_features=2**18, ngram_range=(1, 3), token_pattern=r"\S+", lowercase=False,
+_OPS_VEC = HashingVectorizer(n_features=2**18, ngram_range=(1, 2), token_pattern=r"\S+", lowercase=False,
                              alternate_sign=False, norm="l1")
 _SEL_VEC = HashingVectorizer(n_features=2**16, token_pattern=r"\S+", lowercase=False, alternate_sign=False,
                              binary=True, norm=None)

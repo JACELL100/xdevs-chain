@@ -8,10 +8,8 @@ csv.field_size_limit(sys.maxsize)
 forta = pq.read_table(hf_hub_download("forta/malicious-smart-contract-dataset", "malicious_contract_training_dataset_final.parquet", repo_type="dataset"), columns=["creation_bytecode", "malicious"]).to_pandas()
 fh = {hashlib.sha1(b.encode()).hexdigest(): m for b, m in zip(forta.creation_bytecode, forta.malicious)}
 print("forta unique bytecodes", len(fh), "malicious unique", sum(fh.values()))
-url = "https://huggingface.co/datasets/flipguard/malicious-contracts/resolve/main/malicious-contracts.csv"
-r = requests.get(url, stream=True, timeout=60)
-lines = io.TextIOWrapper(r.raw, encoding="utf-8-sig", newline="")
-rd = csv.reader(lines)
+path = hf_hub_download("flipguard/malicious-contracts", "malicious-contracts.csv", repo_type="dataset")
+rd = csv.reader(open(path, encoding="utf-8-sig", newline=""))
 hdr = next(rd); print("header", hdr)
 n = mal = 0; uniq = {}; inforta = 0
 for row in rd:
