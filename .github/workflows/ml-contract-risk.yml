@@ -23,6 +23,9 @@ jobs:
       run:
         working-directory: ml/contract-risk
     steps:
+      - name: Free runner disk for the 10 GB dataset
+        working-directory: /
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h / | tail -1
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
