@@ -1,7 +1,9 @@
 """Train and evaluate xDEVS Contract Risk (malicious-contract classifier on EVM bytecode).
 
-Data: Forta "Malicious Smart Contract Classification Dataset" (MIT) and, if enabled, the FlipGuard
-malicious-contracts dataset (MIT). Both are Ethereum mainnet contracts with creation bytecode and a label.
+Data (all MIT, Ethereum mainnet): the Forta "Malicious Smart Contract Classification Dataset" on Hugging Face
+(83k unique contracts, 127 malicious) plus the malicious and phishing contracts listed in
+forta-network/labelled-datasets, whose bytecode is fetched from an Ethereum RPC. (flipguard/malicious-contracts
+was checked and is an exact copy of the Forta parquet, so it adds nothing.)
 
 Method
   1. Featurize every contract from its runtime code (constructor and CBOR metadata stripped):
@@ -18,6 +20,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import os
 import io
 import json
 import sys
@@ -55,6 +58,56 @@ def iter_forta():
         yield from zip(d["creation_bytecode"], d["malicious"], ["forta"] * len(d["malicious"]))
 
 
+LABELS = "https://raw.githubusercontent.com/forta-network/labelled-datasets/main/labels/1"
+ETH_RPC = os.environ.get("ETH_RPC", "https://ethereum-rpc.publicnode.com")
+
+
+def _rpc_batch(calls, tries=4):
+    import requests
+
+    for k in range(tries):
+        try:
+            r = requests.post(ETH_RPC, json=[{"jsonrpc": "2.0", "id": i, "method": m, "params": p} for i, (m, p) in enumerate(calls)],
+                              headers={"user-agent": "xdevs-contract-risk-training"}, timeout=60)
+            r.raise_for_status()
+            res = {x["id"]: x.get("result") for x in r.json()}
+            return [res.get(i) for i in range(len(calls))]
+        except Exception as e:  # rate limits, timeouts
+            log("rpc retry", k, repr(e)[:120]); time.sleep(3 * (k + 1))
+    return [None] * len(calls)
+
+
+def iter_forta_labels():
+    """Malicious contracts from forta-network/labelled-datasets (MIT): 'malicious_smart_contracts' (with creation tx)
+    and the contracts in 'phishing_scams'. Code comes from Ethereum mainnet: the creation input when the creation tx
+    deployed it directly (works even after SELFDESTRUCT), otherwise the current runtime code."""
+    import pandas as pd
+
+    mal = pd.read_csv(f"{LABELS}/malicious_smart_contracts.csv")
+    phish = pd.read_csv(f"{LABELS}/phishing_scams.csv")
+    phish = phish[phish["is_contract"].astype(str).str.lower() == "true"]
+    items = [(a.lower(), t, "malicious_smart_contracts") for a, t in zip(mal.contract_address, mal.contract_creation_tx)]
+    items += [(a.lower(), None, "phishing_scams") for a in phish.address if a.lower() not in {i[0] for i in items}]
+    log("forta labels:", len(items), "malicious addresses")
+    got = {"creation_input": 0, "runtime": 0, "empty": 0}
+    for b in range(0, len(items), 40):
+        chunk = items[b:b + 40]
+        txs = _rpc_batch([("eth_getTransactionByHash", [t]) for _, t, _ in chunk if t])
+        txmap = dict(zip([a for a, t, _ in chunk if t], txs))
+        codes = _rpc_batch([("eth_getCode", [a, "latest"]) for a, _, _ in chunk])
+        for (a, t, src), code in zip(chunk, codes):
+            tx = txmap.get(a)
+            if tx and tx.get("to") is None and len(tx.get("input") or "") > 10:
+                got["creation_input"] += 1
+                yield tx["input"], True, f"forta-labels/{src}"
+            elif code and len(code) > 4:
+                got["runtime"] += 1
+                yield code, True, f"forta-labels/{src}"
+            else:
+                got["empty"] += 1
+    log("forta labels fetched:", got)
+
+
 def iter_flipguard():
     from huggingface_hub import hf_hub_download
 
@@ -81,7 +134,11 @@ def build_dataset(sources: list[str], max_benign: int | None):
     chunks, chunk = [], []
     stats = {"rows": 0, "exact_duplicates": 0, "label_conflicts": 0, "benign_dropped_cap": 0, "per_source": {}}
     n_benign = 0
-    its = [iter_forta()] + ([iter_flipguard()] if "flipguard" in sources else [])
+    its = [iter_forta()]
+    if "forta-labels" in sources:
+        its.append(iter_forta_labels())
+    if "flipguard" in sources:  # an exact copy of the Forta parquet (checked); kept for completeness
+        its.append(iter_flipguard())
     for it in its:
         for code, mal, src in it:
             stats["rows"] += 1
@@ -205,7 +262,7 @@ def feature_names():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="out")
-    ap.add_argument("--sources", default="forta,flipguard")
+    ap.add_argument("--sources", default="forta,forta-labels")
     ap.add_argument("--max-benign", type=int, default=None, help="cap benign contracts (speed); default keep all")
     ap.add_argument("--folds", type=int, default=5)
     a = ap.parse_args()

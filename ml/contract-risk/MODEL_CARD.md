@@ -10,7 +10,6 @@ tags:
 - blockchain
 datasets:
 - forta/malicious-smart-contract-dataset
-- flipguard/malicious-contracts
 metrics:
 - roc_auc
 - average_precision
@@ -50,9 +49,13 @@ Confusion matrix: {tp} malicious caught, {fn} missed, {fp} benign contracts flag
 
 ## Data
 
-- [forta/malicious-smart-contract-dataset](https://huggingface.co/datasets/forta/malicious-smart-contract-dataset) (MIT)
-  and [flipguard/malicious-contracts](https://huggingface.co/datasets/flipguard/malicious-contracts) (MIT): Ethereum mainnet
-  contracts with creation bytecode and a malicious/benign label. Rows read: {sources}.
+- [forta/malicious-smart-contract-dataset](https://huggingface.co/datasets/forta/malicious-smart-contract-dataset) (MIT):
+  Ethereum mainnet contracts with creation bytecode and a malicious/benign label.
+- [forta-network/labelled-datasets](https://github.com/forta-network/labelled-datasets) (MIT): malicious smart contracts
+  (exploit and drainer contracts, with their creation transactions) and phishing/scam contracts on Ethereum. Their bytecode
+  is fetched from mainnet: the creation input when available (so self-destructed contracts are included), otherwise the
+  current runtime code.
+- Rows read: {sources}.
 - {rows} rows, {dups} exact duplicates removed, **{unique} unique contracts ({malicious} malicious)** in {groups} groups.
 - Train: {train} contracts ({train_mal} malicious). Test: {test} contracts ({test_mal} malicious).
 
@@ -105,4 +108,4 @@ model.predict("0x6080...")   # {{'risk_score': ..., 'risk_level': 'low'|'medium'
 ## Licence and credits
 
 Code and model: Apache-2.0, by THE xDEVS ([source](https://github.com/JACELL100/xdevs-chain/tree/main/ml/contract-risk)).
-Training data by Forta Network and FlipGuard (MIT).
+Training data by Forta Network (MIT).
