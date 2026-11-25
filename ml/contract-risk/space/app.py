@@ -5,7 +5,7 @@ from huggingface_hub import snapshot_download
 
 from xdevs_contract_risk import ContractRiskModel, clean_hex
 
-MODEL = ContractRiskModel(snapshot_download("__MODEL_REPO__", allow_patterns=["model.txt", "config.json"]))
+MODEL = ContractRiskModel(snapshot_download("__MODEL_REPO__", allow_patterns=["model.txt", "linear.npz", "config.json"]))
 RPCS = {
     "xDEVS Chain Enclave (testnet)": "https://rpc.xdevschain.tech",
     "Ethereum mainnet": "https://ethereum-rpc.publicnode.com",

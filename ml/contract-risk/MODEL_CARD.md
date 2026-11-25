@@ -33,17 +33,17 @@ history. Try it: [demo Space](https://huggingface.co/spaces/{space}).
 
 The test set is 20% of contract *groups* never seen in training (see "Evaluation" for why groups matter).
 
-| Metric | LightGBM (this model) | Logistic regression baseline |
-|---|---|---|
-| ROC-AUC | **{roc}** | {b_roc} |
-| Average precision (PR-AUC) | **{ap}** | {b_ap} |
-| Recall at 1% false-positive rate | **{r1}** | {b_r1} |
-| Recall at 0.1% false-positive rate | {r01} | |
+| Metric | Released model | LightGBM alone | Logistic regression alone |
+|---|---|---|---|
+| ROC-AUC | **{roc}** | {g_roc} | {b_roc} |
+| Average precision (PR-AUC) | **{ap}** | {g_ap} | {b_ap} |
+| Recall at 1% false-positive rate | **{r1}** | {g_r1} | {b_r1} |
+| Recall at 0.1% false-positive rate | {r01} | | |
 
 At the released threshold ({thr}): precision **{prec}**, recall **{rec}**, F1 {f1}, false-positive rate {fpr}.
 Confusion matrix: {tp} malicious caught, {fn} missed, {fp} benign contracts flagged, {tn} benign passed.
 
-5-fold grouped cross-validation on the training part (LightGBM): ROC-AUC {cv_roc}, average precision {cv_ap}, recall at 1% FPR {cv_r1}.
+5-fold grouped cross-validation on the training part (released model): ROC-AUC {cv_roc}, average precision {cv_ap}, recall at 1% FPR {cv_r1}.
 
 ![Evaluation](evaluation.png)
 
@@ -70,7 +70,9 @@ low false-positive rate, not accuracy (a model that flags nothing would be >99% 
    function selectors pushed by the code (hashed to 2^16), and ~120 scalar features: code size, counts and shares of
    fund-moving and control opcodes (`CALL`, `DELEGATECALL`, `SELFDESTRUCT`, `CREATE2`, `ORIGIN`, hard-coded addresses via
    `PUSH20`, ...) and well-known selectors (ERC-20 approve/transferFrom, flash loans, swaps, multicall, ownership).
-3. **Model**: LightGBM gradient-boosted trees, class-weighted for the imbalance, rounds chosen by early stopping in CV.
+3. **Model**: LightGBM gradient-boosted trees (class-weighted for the imbalance, rounds chosen by early stopping in CV)
+   blended in logit space with an L2 logistic regression on log-compressed features. The blend weight ({w} on LightGBM)
+   was chosen by out-of-fold average precision among 1.0 / 0.75 / 0.5 / 0.25 / 0.0.
 
 ## Evaluation
 
@@ -79,6 +81,11 @@ low false-positive rate, not accuracy (a model that flags nothing would be >99% 
   model recognises *new* code, not copies it has memorised.
 - **Threshold** chosen on out-of-fold predictions (best F1), then applied unchanged to the test set.
 - **Baseline**: L2-regularised logistic regression on the same features.
+- **Shortcut check.** Most malicious examples come from on-chain runtime code, most benign ones from creation code. To stop
+  the model from learning *where the code came from*, constructor and metadata are stripped from both, and a random
+  sample of benign contracts is scored from their on-chain runtime code. Test results per source:
+
+{bysource}
 
 ## Use
 

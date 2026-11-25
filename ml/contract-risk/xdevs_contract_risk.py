@@ -15,7 +15,7 @@ import numpy as np
 import scipy.sparse as sp
 from sklearn.feature_extraction.text import HashingVectorizer
 
-FEATURE_VERSION = 1
+FEATURE_VERSION = 2
 
 # ---- opcode table (Cancun/Osaka) ----
 OPCODES: dict[int, str] = {
@@ -87,14 +87,18 @@ def runtime_part(code_hex: str) -> str:
     return code_hex
 
 
+_CBOR_MARKERS = ("a264697066735822", "a2646970667358", "a165627a7a72305820", "a265627a7a72315820", "a164736f6c6343")
+
+
 def strip_metadata(code_hex: str) -> str:
-    """Drop the trailing CBOR metadata blob (its length is the last 2 bytes) so compiler hashes aren't features."""
-    if len(code_hex) < 8:
-        return code_hex
-    n = int(code_hex[-4:], 16) * 2 + 4
-    if 0 < n < len(code_hex) // 2 and code_hex[-n:-n + 2] in ("a1", "a2", "a3", "a4"):
-        return code_hex[:-n]
-    return code_hex
+    """Cut the solc CBOR metadata blob and everything after it (constructor arguments in creation code), so that
+    creation-derived and on-chain runtime code look the same and compiler hashes are not features."""
+    cut = -1
+    for m in _CBOR_MARKERS:
+        i = code_hex.rfind(m)
+        if i > cut and i % 2 == 0:
+            cut = i
+    return code_hex[:cut] if cut > 0 else code_hex
 
 
 def disassemble(code_hex: str) -> tuple[list[str], list[str], int]:
@@ -173,10 +177,24 @@ class ContractRiskModel:
         self.config = json.loads((d / "config.json").read_text())
         assert self.config["feature_version"] == FEATURE_VERSION, "feature version mismatch"
         self.threshold = float(self.config["threshold"])
+        self.w = float(self.config.get("blend_weight_lightgbm", 1.0))
+        lin = np.load(d / "linear.npz") if (d / "linear.npz").exists() else None
+        self.coef = None if lin is None else lin["coef"]
+        self.intercept = None if lin is None else float(lin["intercept"])
+
+    def score_matrix(self, X: sp.csr_matrix) -> np.ndarray:
+        """LightGBM and a logistic model on log-compressed features, blended in logit space."""
+        p_lgb = np.clip(self.booster.predict(X), 1e-7, 1 - 1e-7)
+        if self.coef is None or self.w >= 1.0:
+            return p_lgb
+        Xl = X.copy()
+        Xl.data = np.log1p(np.abs(Xl.data))
+        z = self.w * np.log(p_lgb / (1 - p_lgb)) + (1 - self.w) * (Xl @ self.coef + self.intercept)
+        return 1 / (1 + np.exp(-z))
 
     def score(self, codes: list[str]) -> np.ndarray:
         empty = np.array([len(clean_hex(c)) < 4 for c in codes])
-        p = self.booster.predict(featurize(codes))
+        p = self.score_matrix(featurize(codes))
         p[empty] = 0.0  # no code: an EOA or empty account, nothing to score
         return p
 

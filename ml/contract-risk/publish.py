@@ -18,7 +18,7 @@ def fmt(x, pct=False):
 
 
 def card(m: dict, repo: str, space: str) -> str:
-    t, b, cv, d, s = m["test"]["lightgbm"], m["test"]["logistic_regression_baseline"], m["cv_5fold"]["lightgbm"], m["data"], m["split"]
+    t, b, cv, d, s = m["test"]["release"], m["test"]["logistic_regression_baseline"], m["cv_5fold"]["release"], m["data"], m["split"]
     c = t["confusion"]
     return (HERE / "MODEL_CARD.md").read_text(encoding="utf-8").format(
         repo=repo, space=space,
@@ -30,6 +30,11 @@ def card(m: dict, repo: str, space: str) -> str:
         tp=c["tp"], fp=c["fp"], fn=c["fn"], tn=f'{c["tn"]:,}', thr=fmt(t["threshold"]),
         b_roc=fmt(b["roc_auc"]), b_ap=fmt(b["pr_auc"]), b_r1=fmt(b["recall_at_fpr_1pct"], True),
         cv_roc=fmt(cv["roc_auc"]), cv_ap=fmt(cv["pr_auc"]), cv_r1=fmt(cv["recall_at_fpr_1pct"], True),
+        w=m["cv_5fold"]["blend_weight_lightgbm"],
+        g_roc=fmt(m["test"]["lightgbm"]["roc_auc"]), g_ap=fmt(m["test"]["lightgbm"]["pr_auc"]), g_r1=fmt(m["test"]["lightgbm"]["recall_at_fpr_1pct"], True),
+        bysource="\n".join(["| Source | Contracts | Malicious | Recall | False-positive rate |", "|---|---|---|---|---|"] + [
+            f'| {k} | {v["n"]:,} | {v["malicious"]:,} | {"-" if v["recall"] is None else fmt(v["recall"], True)} | '
+            f'{"-" if v["false_positive_rate"] is None else fmt(v["false_positive_rate"], True)} |' for k, v in m["test_by_source"].items()]),
         sources=", ".join(f'{k}: {v["rows"]:,} rows ({v["malicious"]:,} malicious)' for k, v in d["per_source"].items()),
     )
 
@@ -48,7 +53,7 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmp:
         t = Path(tmp)
-        for f in ("model.txt", "config.json", "metrics.json", "evaluation.png"):
+        for f in ("model.txt", "linear.npz", "config.json", "metrics.json", "evaluation.png"):
             shutil.copy(md / f, t / f)
         for f in ("xdevs_contract_risk.py", "requirements-inference.txt", "example.py"):
             shutil.copy(HERE / f, t / f)

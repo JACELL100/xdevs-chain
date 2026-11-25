@@ -49,15 +49,6 @@ def log(*a):
 
 
 # ---------------- data ----------------
-def iter_forta():
-    from huggingface_hub import hf_hub_download
-
-    pf = pq.ParquetFile(hf_hub_download(FORTA[0], FORTA[1], repo_type="dataset"))
-    for batch in pf.iter_batches(batch_size=2000, columns=["creation_bytecode", "malicious"]):
-        d = batch.to_pydict()
-        yield from zip(d["creation_bytecode"], d["malicious"], ["forta"] * len(d["malicious"]))
-
-
 LABELS = "https://raw.githubusercontent.com/forta-network/labelled-datasets/main/labels/1"
 ETH_RPC = os.environ.get("ETH_RPC", "https://ethereum-rpc.publicnode.com")
 
@@ -81,13 +72,17 @@ def iter_forta_labels():
     """Malicious contracts from forta-network/labelled-datasets (MIT): 'malicious_smart_contracts' (with creation tx)
     and the contracts in 'phishing_scams'. Code comes from Ethereum mainnet: the creation input when the creation tx
     deployed it directly (works even after SELFDESTRUCT), otherwise the current runtime code."""
-    import pandas as pd
+    import requests
 
-    mal = pd.read_csv(f"{LABELS}/malicious_smart_contracts.csv")
-    phish = pd.read_csv(f"{LABELS}/phishing_scams.csv")
-    phish = phish[phish["is_contract"].astype(str).str.lower() == "true"]
-    items = [(a.lower(), t, "malicious_smart_contracts") for a, t in zip(mal.contract_address, mal.contract_creation_tx)]
-    items += [(a.lower(), None, "phishing_scams") for a in phish.address if a.lower() not in {i[0] for i in items}]
+    def rows(name):
+        txt = requests.get(f"{LABELS}/{name}", timeout=60).text
+        return list(csv.DictReader(io.StringIO(txt.lstrip("﻿"))))
+
+    mal = rows("malicious_smart_contracts.csv")
+    phish = [r for r in rows("phishing_scams.csv") if str(r.get("is_contract", "")).strip().lower() == "true"]
+    items = [(r["contract_address"].lower(), r["contract_creation_tx"], "malicious_smart_contracts") for r in mal]
+    have = {i[0] for i in items}
+    items += [(r["address"].lower(), None, "phishing_scams") for r in phish if r["address"].lower() not in have]
     log("forta labels:", len(items), "malicious addresses")
     got = {"creation_input": 0, "runtime": 0, "empty": 0}
     for b in range(0, len(items), 40):
@@ -106,6 +101,31 @@ def iter_forta_labels():
             else:
                 got["empty"] += 1
     log("forta labels fetched:", got)
+
+
+def iter_forta(benign_runtime: int = 0):
+    """Forta parquet. For a random sample of `benign_runtime` benign contracts, use their current on-chain runtime
+    code instead of the creation code, so both classes contain both code sources (no source shortcut)."""
+    from huggingface_hub import hf_hub_download
+
+    pf = pq.ParquetFile(hf_hub_download(FORTA[0], FORTA[1], repo_type="dataset"))
+    t = pf.read(columns=["contract_address", "creation_bytecode", "malicious"]).to_pydict()
+    rng = np.random.default_rng(SEED)
+    benign_idx = [i for i, m in enumerate(t["malicious"]) if not m]
+    pick = set(rng.choice(benign_idx, size=min(benign_runtime, len(benign_idx)), replace=False).tolist()) if benign_runtime else set()
+    runtime = {}
+    picked = sorted(pick)
+    for b in range(0, len(picked), 40):
+        ch = picked[b:b + 40]
+        for i, code in zip(ch, _rpc_batch([("eth_getCode", [t["contract_address"][i], "latest"]) for i in ch])):
+            if code and len(code) > 4:
+                runtime[i] = code
+    log("benign runtime fetched:", len(runtime), "of", len(pick))
+    for i, (code, mal) in enumerate(zip(t["creation_bytecode"], t["malicious"])):
+        if i in runtime:
+            yield runtime[i], bool(mal), "forta/benign-runtime"
+        else:
+            yield code, bool(mal), "forta"
 
 
 def iter_flipguard():
@@ -129,12 +149,12 @@ def _feat_chunk(chunk):
     return X, groups, [m for _, m in chunk]
 
 
-def build_dataset(sources: list[str], max_benign: int | None):
+def build_dataset(sources: list[str], max_benign: int | None, benign_runtime: int = 0):
     seen: dict[str, int] = {}
-    chunks, chunk = [], []
+    chunks, chunk, srcs = [], [], []
     stats = {"rows": 0, "exact_duplicates": 0, "label_conflicts": 0, "benign_dropped_cap": 0, "per_source": {}}
     n_benign = 0
-    its = [iter_forta()]
+    its = [iter_forta(benign_runtime)]
     if "forta-labels" in sources:
         its.append(iter_forta_labels())
     if "flipguard" in sources:  # an exact copy of the Forta parquet (checked); kept for completeness
@@ -158,6 +178,7 @@ def build_dataset(sources: list[str], max_benign: int | None):
             seen[h] = int(bool(mal))
             n_benign += int(not mal)
             chunk.append((code, bool(mal)))
+            srcs.append(src)
             if len(chunk) == 500:
                 chunks.append(chunk); chunk = []
     if chunk:
@@ -172,7 +193,7 @@ def build_dataset(sources: list[str], max_benign: int | None):
     groups = np.asarray(G)
     # a group containing any malicious member is labelled consistently for stratification purposes
     stats.update(unique=int(len(y)), malicious=int(y.sum()), groups=int(len(set(G))), nnz=int(X.nnz))
-    return X, y, groups, stats
+    return X, y, groups, np.asarray(srcs), stats
 
 
 # ---------------- evaluation helpers ----------------
@@ -194,6 +215,26 @@ def metrics_at(y, p, thr):
     }
 
 
+def logit(p):
+    p = np.clip(p, 1e-7, 1 - 1e-7)
+    return np.log(p / (1 - p))
+
+
+def blend(p_lgb, p_lr, w):
+    return 1 / (1 + np.exp(-(w * logit(p_lgb) + (1 - w) * logit(p_lr))))
+
+
+def by_source(y, p, thr, src):
+    out = {}
+    for s_ in sorted(set(src)):
+        m = src == s_
+        yy, pp = y[m], p[m]
+        out[s_] = {"n": int(m.sum()), "malicious": int(yy.sum()),
+                   "recall": float(((pp >= thr) & (yy == 1)).sum() / max(1, yy.sum())) if yy.sum() else None,
+                   "false_positive_rate": float(((pp >= thr) & (yy == 0)).sum() / max(1, (yy == 0).sum())) if (yy == 0).any() else None}
+    return out
+
+
 def best_f1_threshold(y, p):
     pr, rc, th = precision_recall_curve(y, p)
     f1 = 2 * pr * rc / np.maximum(pr + rc, 1e-9)
@@ -201,12 +242,12 @@ def best_f1_threshold(y, p):
     return float(th[i])
 
 
-LGB_PARAMS = dict(objective="binary", learning_rate=0.05, num_leaves=63, min_data_in_leaf=10, feature_fraction=0.3,
-                  bagging_fraction=0.8, bagging_freq=1, lambda_l2=1.0, max_bin=63, verbose=-1, seed=SEED,
+LGB_PARAMS = dict(objective="binary", learning_rate=0.03, num_leaves=31, min_data_in_leaf=20, feature_fraction=0.2,
+                  bagging_fraction=0.8, bagging_freq=1, lambda_l2=5.0, max_bin=63, verbose=-1, seed=SEED,
                   num_threads=0)
 
 
-def fit_lgb(Xtr, ytr, Xva=None, yva=None, rounds=2000):
+def fit_lgb(Xtr, ytr, Xva=None, yva=None, rounds=4000):
     pos = max(1, int(ytr.sum()))
     params = dict(LGB_PARAMS, scale_pos_weight=float(np.sqrt((len(ytr) - pos) / pos)))
     dtr = lgb.Dataset(Xtr, ytr, free_raw_data=False)
@@ -214,7 +255,7 @@ def fit_lgb(Xtr, ytr, Xva=None, yva=None, rounds=2000):
         return lgb.train(params, dtr, num_boost_round=rounds)
     dva = lgb.Dataset(Xva, yva, reference=dtr)
     return lgb.train(params, dtr, num_boost_round=rounds, valid_sets=[dva],
-                     callbacks=[lgb.early_stopping(100, verbose=False)])
+                     callbacks=[lgb.early_stopping(200, verbose=False)])
 
 
 def fit_lr(Xtr, ytr):
@@ -265,11 +306,12 @@ def main():
     ap.add_argument("--sources", default="forta,forta-labels")
     ap.add_argument("--max-benign", type=int, default=None, help="cap benign contracts (speed); default keep all")
     ap.add_argument("--folds", type=int, default=5)
+    ap.add_argument("--benign-runtime", type=int, default=8000, help="benign contracts scored from on-chain runtime code")
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
 
-    X, y, groups, stats = build_dataset(a.sources.split(","), a.max_benign)
+    X, y, groups, src, stats = build_dataset(a.sources.split(","), a.max_benign, a.benign_runtime)
     log("data", json.dumps(stats))
 
     # ---- hold-out test set: 20% of groups, stratified ----
@@ -290,36 +332,53 @@ def main():
         oof_lr[j] = fit_lr(Xtr[i], ytr[i]).predict_proba(_lr_x(Xtr[j]))[:, 1]
         log(f"fold {k}: lgb AP={average_precision_score(ytr[j], oof_lgb[j]):.3f} (it {iters[-1]}), "
             f"lr AP={average_precision_score(ytr[j], oof_lr[j]):.3f}")
-    thr = best_f1_threshold(ytr, oof_lgb)
-    cv_res = {"lightgbm": metrics_at(ytr, oof_lgb, thr),
+    # ---- choose the release model on OOF predictions: LightGBM, logistic regression, or a logit blend ----
+    weights = [1.0, 0.75, 0.5, 0.25, 0.0]
+    ap_w = {w: float(average_precision_score(ytr, blend(oof_lgb, oof_lr, w))) for w in weights}
+    w_best = max(ap_w, key=ap_w.get)
+    oof_best = blend(oof_lgb, oof_lr, w_best)
+    thr = best_f1_threshold(ytr, oof_best)
+    cv_res = {"lightgbm": metrics_at(ytr, oof_lgb, best_f1_threshold(ytr, oof_lgb)),
               "logistic_regression": metrics_at(ytr, oof_lr, best_f1_threshold(ytr, oof_lr)),
-              "lightgbm_iterations": iters}
-    log("cv", json.dumps({k: {m: round(v, 4) for m, v in r.items() if isinstance(v, float)} for k, r in cv_res.items() if isinstance(r, dict)}))
+              "release": metrics_at(ytr, oof_best, thr), "blend_weight_lightgbm": w_best,
+              "average_precision_by_weight": ap_w, "lightgbm_iterations": iters}
+    log("cv AP by blend weight", ap_w, "-> w", w_best)
+    log("cv", json.dumps({k: {m: round(v, 4) for m, v in r.items() if isinstance(v, float)} for k, r in cv_res.items() if isinstance(r, dict) and "roc_auc" in r}))
 
-    # ---- final model on all training groups, scored once on the test set ----
+    # ---- final models on all training groups, scored once on the test set ----
     rounds = int(np.median(iters) * 1.1)
     final = fit_lgb(Xtr, ytr, rounds=rounds)
-    p_te = final.predict(Xte)
+    lr_final = fit_lr(Xtr, ytr)
+    p_lgb_te = final.predict(Xte)
+    p_lr_te = lr_final.predict_proba(_lr_x(Xte))[:, 1]
+    p_te = blend(p_lgb_te, p_lr_te, w_best)
     test = metrics_at(yte, p_te, thr)
-    lr_te = fit_lr(Xtr, ytr).predict_proba(_lr_x(Xte))[:, 1]
-    test_lr = metrics_at(yte, lr_te, cv_res["logistic_regression"]["threshold"])
-    log("test lightgbm", json.dumps({k: v for k, v in test.items() if k != "confusion"}), test["confusion"])
-    log("test logistic", json.dumps({k: round(v, 4) for k, v in test_lr.items() if isinstance(v, float)}))
+    test_lgb = metrics_at(yte, p_lgb_te, cv_res["lightgbm"]["threshold"])
+    test_lr = metrics_at(yte, p_lr_te, cv_res["logistic_regression"]["threshold"])
+    diag = by_source(yte, p_te, thr, src[te_idx])
+    log("test release", json.dumps({k: v for k, v in test.items() if k != "confusion"}), test["confusion"])
+    log("test lightgbm-only", json.dumps({k: round(v, 4) for k, v in test_lgb.items() if isinstance(v, float)}))
+    log("test logistic-only", json.dumps({k: round(v, 4) for k, v in test_lr.items() if isinstance(v, float)}))
+    log("test by source", json.dumps(diag))
 
     gain = final.feature_importance("gain")
     nm = feature_names()
     importance = sorted(((nm(i), float(g)) for i, g in enumerate(gain) if g > 0), key=lambda t: -t[1])[:40]
     final.save_model(str(out / "model.txt"))
+    np.savez_compressed(out / "linear.npz", coef=lr_final.coef_.ravel().astype(np.float32), intercept=np.float32(lr_final.intercept_[0]))
     medium = float(np.quantile(p_te[yte == 0], 0.99))  # top 1% of benign test scores
     cfg = {"feature_version": xr.FEATURE_VERSION, "threshold": thr, "medium_threshold": min(medium, thr),
-           "rounds": rounds, "lgb_params": LGB_PARAMS}
+           "blend_weight_lightgbm": w_best, "rounds": rounds, "lgb_params": LGB_PARAMS}
     (out / "config.json").write_text(json.dumps(cfg, indent=2))
     report = {"data": stats, "split": {"train": int(len(ytr)), "train_malicious": int(ytr.sum()),
               "test": int(len(yte)), "test_malicious": int(yte.sum()), "grouping": "opcode skeleton (PUSH args removed)"},
-              "cv_5fold": cv_res, "test": {"lightgbm": test, "logistic_regression_baseline": test_lr},
-              "top_features": importance, "train_seconds": round(time.time() - t0)}
+              "cv_5fold": cv_res, "test": {"release": test, "lightgbm": test_lgb, "logistic_regression_baseline": test_lr},
+              "test_by_source": diag, "top_features": importance, "train_seconds": round(time.time() - t0)}
     (out / "metrics.json").write_text(json.dumps(report, indent=2))
     plots(out, yte, p_te, thr, importance)
+    # self-check: the shipped inference code reproduces the test scores
+    shipped = xr.ContractRiskModel(out)
+    assert np.allclose(shipped.score_matrix(Xte[:200]), p_te[:200], atol=1e-3), "inference mismatch"
     log("done in", round(time.time() - t0), "s")
 
 
