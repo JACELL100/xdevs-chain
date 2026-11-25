@@ -251,7 +251,8 @@ function buildTx(block: number, index: number): Built {
     to,
     contractCreated,
     value: hx(value),
-    status: r() < 0.03 ? 'reverted' : 'success',
+    // the vault showcase never reverts (its VaultActionQueued log is what the demo shows); r() is still drawn so the rest stays identical
+    status: r() < 0.03 && kind !== 'vault-queue' ? 'reverted' : 'success',
     methodId: input.length >= 10 ? input.slice(0, 10) : null,
     fee: hx(total),
     spam: false,
