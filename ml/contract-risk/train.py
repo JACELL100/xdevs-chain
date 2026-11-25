@@ -72,18 +72,18 @@ def iter_forta_labels():
     """Malicious contracts from forta-network/labelled-datasets (MIT): 'malicious_smart_contracts' (with creation tx)
     and the contracts in 'phishing_scams'. Code comes from Ethereum mainnet: the creation input when the creation tx
     deployed it directly (works even after SELFDESTRUCT), otherwise the current runtime code."""
-    import requests
-
     def rows(name):
-        txt = requests.get(f"{LABELS}/{name}", timeout=60).text
-        return list(csv.DictReader(io.StringIO(txt.lstrip("﻿"))))
+        # vendored copies of forta-network/labelled-datasets labels/1 (MIT), see data/
+        with open(Path(__file__).parent / "data" / f"forta_{name}", encoding="utf-8-sig", newline="") as fh:
+            return list(csv.DictReader(fh))
 
     mal = rows("malicious_smart_contracts.csv")
     phish = [r for r in rows("phishing_scams.csv") if str(r.get("is_contract", "")).strip().lower() == "true"]
     items = [(r["contract_address"].lower(), r["contract_creation_tx"], "malicious_smart_contracts") for r in mal]
     have = {i[0] for i in items}
     items += [(r["address"].lower(), None, "phishing_scams") for r in phish if r["address"].lower() not in have]
-    log("forta labels:", len(items), "malicious addresses")
+    log("forta labels:", len(mal), "malicious contracts,", len(phish), "phishing contracts ->", len(items), "addresses")
+    assert len(phish) > 500, "phishing contracts missing"
     got = {"creation_input": 0, "runtime": 0, "empty": 0}
     for b in range(0, len(items), 40):
         chunk = items[b:b + 40]
