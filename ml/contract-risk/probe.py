@@ -1,20 +1,25 @@
-"""Print label balance and basic stats of the candidate training datasets (run in CI)."""
+"""Stream the FlipGuard CSV (10 GB) and count labels, unique bytecodes, and overlap with Forta."""
+import csv, hashlib, sys, io
+import requests
 import pyarrow.parquet as pq
-from huggingface_hub import hf_hub_download, list_repo_files
+from huggingface_hub import hf_hub_download
 
-for repo in ["forta/malicious-smart-contract-dataset", "recare/malicious-smart-contract-dataset", "flipguard/malicious-contracts"]:
-    try:
-        files = [f for f in list_repo_files(repo, repo_type="dataset") if f.endswith((".parquet", ".csv"))]
-        print(f"== {repo}: {files[:6]}")
-        for f in files[:2]:
-            p = hf_hub_download(repo, f, repo_type="dataset")
-            if not f.endswith(".parquet"):
-                print("  (csv)", f); continue
-            pf = pq.ParquetFile(p)
-            print("  rows", pf.metadata.num_rows, "cols", pf.schema_arrow.names)
-            for col in ("malicious", "label", "is_malicious"):
-                if col in pf.schema_arrow.names:
-                    t = pf.read(columns=[col]).column(0).to_pandas()
-                    print("  ", col, t.value_counts(dropna=False).to_dict())
-    except Exception as e:  # keep probing the others
-        print("  error", repr(e)[:200])
+csv.field_size_limit(sys.maxsize)
+forta = pq.read_table(hf_hub_download("forta/malicious-smart-contract-dataset", "malicious_contract_training_dataset_final.parquet", repo_type="dataset"), columns=["creation_bytecode", "malicious"]).to_pandas()
+fh = {hashlib.sha1(b.encode()).hexdigest(): m for b, m in zip(forta.creation_bytecode, forta.malicious)}
+print("forta unique bytecodes", len(fh), "malicious unique", sum(fh.values()))
+url = "https://huggingface.co/datasets/flipguard/malicious-contracts/resolve/main/malicious-contracts.csv"
+r = requests.get(url, stream=True, timeout=60)
+lines = io.TextIOWrapper(r.raw, encoding="utf-8-sig", newline="")
+rd = csv.reader(lines)
+hdr = next(rd); print("header", hdr)
+n = mal = 0; uniq = {}; inforta = 0
+for row in rd:
+    n += 1
+    b, m = row[0], row[-1].strip().lower() in ("true", "1")
+    mal += m
+    h = hashlib.sha1(b.encode()).hexdigest()
+    uniq[h] = uniq.get(h, False) or m
+    inforta += h in fh
+    if n % 20000 == 0: print("rows", n, "malicious", mal, flush=True)
+print("TOTAL rows", n, "malicious", mal, "unique bytecodes", len(uniq), "unique malicious", sum(uniq.values()), "overlap with forta", inforta)
